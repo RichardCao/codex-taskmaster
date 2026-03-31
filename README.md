@@ -79,6 +79,34 @@ bash ./scripts/check.sh
 - Swift 类型检查
 - app 构建
 
+如果你想执行一轮更完整的本地回归检查，可以运行：
+
+```bash
+bash ./scripts/regression_check.sh
+```
+
+默认行为：
+
+- 先执行 `scripts/check.sh`
+- 不自动跑 UI smoke test
+
+如果希望把 UI 启动烟雾测试也一起跑上，可以执行：
+
+```bash
+CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
+```
+
+这个 UI smoke test 会：
+
+- 启动 `Codex Taskmaster.app`
+- 等待主窗口出现
+- 通过 `System Events` 验证应用进程和窗口可见
+
+注意：
+
+- UI smoke test 依赖 macOS 辅助功能权限
+- 它适合本机回归，不适合默认塞进所有无头或受限环境
+
 ## 工作方式
 
 项目主要由两部分组成：
@@ -190,6 +218,8 @@ bash ./scripts/check.sh
 - `build_codex_biancezhe_app.sh`：构建脚本
 - `generate_icon.swift`：图标生成脚本
 - `scripts/check.sh`：项目检查入口
+- `scripts/regression_check.sh`：扩展回归入口，可选带 UI smoke test
+- `scripts/ui_smoke_test.sh`：独立 UI 启动烟雾测试
 - `tests/test_helper_smoke.sh`：helper 冒烟测试
 - `legacy/`：早期 AppleScript / JXA 原型
 
