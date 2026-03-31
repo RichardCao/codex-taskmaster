@@ -28,6 +28,7 @@ LOOP_DAEMON_LOG_FILE="${RUNTIME_DIR}/loop-daemon.log"
 CODEX_STATE_DB_PATH="${CODEX_TASKMASTER_CODEX_STATE_DB_PATH:-${HOME}/.codex/state_5.sqlite}"
 CODEX_SESSION_INDEX_PATH="${CODEX_TASKMASTER_CODEX_SESSION_INDEX_PATH:-${CODEX_TASKMASTER_SESSION_INDEX_PATH:-${HOME}/.codex/session_index.jsonl}}"
 CODEX_LOGS_DB_PATH="${CODEX_TASKMASTER_CODEX_LOGS_DB_PATH:-${HOME}/.codex/logs_1.sqlite}"
+CODEX_BIN_PATH="${CODEX_TASKMASTER_CODEX_BIN_PATH:-codex}"
 
 mkdir -p "$STATE_DIR" "$REQUESTS_DIR" "$PENDING_REQUEST_DIR" "$PROCESSING_REQUEST_DIR" "$RESULT_REQUEST_DIR" "$LOOPS_DIR" "$RUNTIME_DIR" "$LOOP_STATE_DIR" "$LOOP_LOG_DIR"
 
@@ -41,6 +42,8 @@ Usage:
   codex_terminal_sender.sh probe       -t TARGET
   codex_terminal_sender.sh probe-all   [-l LIMIT] [-o OFFSET]
   codex_terminal_sender.sh session-count
+  codex_terminal_sender.sh thread-name-set -t THREAD_ID -n NAME
+  codex_terminal_sender.sh thread-archive  -t THREAD_ID
   codex_terminal_sender.sh wait-idle   -t TARGET [-s SECONDS] [-w SECONDS]
   codex_terminal_sender.sh loop-daemon
 
@@ -53,6 +56,10 @@ Commands:
   probe-all   Inspect known Codex sessions and summarize their statuses
   session-count
               Print the total number of non-archived Codex sessions
+  thread-name-set
+              Set a session name via Codex's native app-server API
+  thread-archive
+              Archive a session via Codex's native app-server API
   wait-idle   Wait until the target appears stably idle
   loop-daemon Internal command: user-owned background loop runner
 EOF
@@ -66,6 +73,11 @@ die() {
 require_cmd() {
   local cmd="$1"
   command -v "$cmd" >/dev/null 2>&1 || die "$cmd command not found"
+}
+
+is_uuid_like() {
+  local value="$1"
+  [[ "$value" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
 }
 
 hash_target() {
@@ -666,6 +678,248 @@ session_count() {
     "select count(*) from threads where archived = 0;"
 }
 
+codex_app_server_thread_mutation() {
+  local action="$1"
+  local thread_id="$2"
+  local name="${3:-}"
+
+  require_cmd node
+  require_cmd "$CODEX_BIN_PATH"
+  is_uuid_like "$thread_id" || die "thread id must be a UUID"
+
+  node - "$CODEX_BIN_PATH" "$action" "$thread_id" "$name" <<'NODE'
+const { spawn } = require("node:child_process");
+const net = require("node:net");
+const process = require("node:process");
+
+const [codexBin, action, threadId, name = ""] = process.argv.slice(2);
+
+async function getFreePort() {
+  return await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : null;
+      server.close((err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        if (!port) {
+          reject(new Error("failed to resolve a local port"));
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
+}
+
+async function waitForReady(url, child, timeoutMs) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (child.exitCode !== null) {
+      throw new Error(`codex app-server exited early with code ${child.exitCode}`);
+    }
+    try {
+      const response = await fetch(url);
+      if (response.ok) {
+        return;
+      }
+    } catch {
+      // Retry until timeout.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`timed out waiting for codex app-server readyz at ${url}`);
+}
+
+async function callRpc(wsUrl, method, params) {
+  return await new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl);
+    const pending = new Map();
+    let nextId = 1;
+    let settled = false;
+
+    const cleanup = () => {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        try {
+          ws.close();
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    const fail = (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    const send = (sendMethod, sendParams) => {
+      const id = nextId++;
+      const payload = { jsonrpc: "2.0", id, method: sendMethod, params: sendParams };
+      ws.send(JSON.stringify(payload));
+      return new Promise((innerResolve, innerReject) => {
+        pending.set(id, { resolve: innerResolve, reject: innerReject });
+        setTimeout(() => {
+          if (!pending.has(id)) {
+            return;
+          }
+          pending.delete(id);
+          innerReject(new Error(`timeout waiting for ${sendMethod}`));
+        }, 10000);
+      });
+    };
+
+    ws.addEventListener("open", async () => {
+      try {
+        await send("initialize", {
+          clientInfo: {
+            name: "codex-terminal-sender",
+            version: "1.0",
+          },
+          capabilities: null,
+        });
+        const result = await send(method, params);
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve(result);
+      } catch (error) {
+        fail(error);
+      }
+    });
+
+    ws.addEventListener("message", (event) => {
+      let parsed;
+      try {
+        parsed = JSON.parse(String(event.data));
+      } catch (error) {
+        fail(new Error(`failed to parse app-server message: ${error.message}`));
+        return;
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(parsed, "id")) {
+        return;
+      }
+
+      const pendingRequest = pending.get(parsed.id);
+      if (!pendingRequest) {
+        return;
+      }
+      pending.delete(parsed.id);
+      if (parsed.error) {
+        pendingRequest.reject(new Error(typeof parsed.error === "object" ? JSON.stringify(parsed.error) : String(parsed.error)));
+      } else {
+        pendingRequest.resolve(parsed.result);
+      }
+    });
+
+    ws.addEventListener("error", () => {
+      fail(new Error("websocket transport error"));
+    });
+
+    ws.addEventListener("close", () => {
+      if (!settled) {
+        fail(new Error("websocket closed before app-server request completed"));
+      }
+    });
+  });
+}
+
+async function main() {
+  const method = action === "archive" ? "thread/archive" : "thread/name/set";
+  const params = action === "archive" ? { threadId } : { threadId, name };
+  const port = await getFreePort();
+  const wsUrl = `ws://127.0.0.1:${port}`;
+  const readyUrl = `http://127.0.0.1:${port}/readyz`;
+  const child = spawn(codexBin, ["app-server", "--listen", wsUrl], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stderrLog = "";
+  child.stdout.resume();
+  child.stderr.on("data", (chunk) => {
+    stderrLog += chunk.toString("utf8");
+  });
+
+  try {
+    await waitForReady(readyUrl, child, 10000);
+    const result = await callRpc(wsUrl, method, params);
+    process.stdout.write(JSON.stringify(result ?? {}));
+  } catch (error) {
+    const cleanedStderr = stderrLog
+      .split(/\r?\n/)
+      .filter((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          return false;
+        }
+        return !(
+          trimmed.startsWith("codex app-server (WebSockets)") ||
+          trimmed.startsWith("listening on:") ||
+          trimmed.startsWith("readyz:") ||
+          trimmed.startsWith("healthz:") ||
+          trimmed.startsWith("note: binds localhost only")
+        );
+      })
+      .join("\n")
+      .trim();
+    const details = [
+      error && error.message ? error.message : String(error),
+      cleanedStderr,
+    ].filter(Boolean);
+    process.stderr.write(details.join("\n"));
+    process.exitCode = 1;
+  } finally {
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+      await new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          if (child.exitCode === null) {
+            child.kill("SIGKILL");
+          }
+          resolve();
+        }, 2000);
+        child.once("exit", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
+  }
+}
+
+main().catch((error) => {
+  process.stderr.write(error && error.message ? error.message : String(error));
+  process.exit(1);
+});
+NODE
+}
+
+thread_name_set() {
+  local thread_id="$1"
+  local name="$2"
+  codex_app_server_thread_mutation "name-set" "$thread_id" "$name" >/dev/null
+  printf 'thread_id: %s\n' "$thread_id"
+  printf 'name: %s\n' "$name"
+}
+
+thread_archive() {
+  local thread_id="$1"
+  codex_app_server_thread_mutation "archive" "$thread_id" >/dev/null
+  printf 'thread_id: %s\n' "$thread_id"
+  printf 'archived: yes\n'
+}
+
 probe_all_sessions() {
   require_cmd sqlite3
   require_cmd python3
@@ -1249,6 +1503,38 @@ parse_session_count_args() {
   [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
 }
 
+parse_thread_name_set_args() {
+  THREAD_ID=""
+  THREAD_NAME=""
+  while getopts ":t:n:h" opt; do
+    case "$opt" in
+      t) THREAD_ID="$OPTARG" ;;
+      n) THREAD_NAME="$OPTARG" ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$THREAD_ID" ]] || die "thread-name-set requires -t THREAD_ID"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
+parse_thread_archive_args() {
+  THREAD_ID=""
+  while getopts ":t:h" opt; do
+    case "$opt" in
+      t) THREAD_ID="$OPTARG" ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$THREAD_ID" ]] || die "thread-archive requires -t THREAD_ID"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
 parse_wait_idle_args() {
   TARGET=""
   STABLE_SECONDS=3
@@ -1311,6 +1597,14 @@ main() {
     session-count)
       parse_session_count_args "$@"
       session_count
+      ;;
+    thread-name-set)
+      parse_thread_name_set_args "$@"
+      thread_name_set "$THREAD_ID" "$THREAD_NAME"
+      ;;
+    thread-archive)
+      parse_thread_archive_args "$@"
+      thread_archive "$THREAD_ID"
       ;;
     wait-idle)
       parse_wait_idle_args "$@"

@@ -43,7 +43,11 @@ resolve_sdk_path() {
 
 SDK_PATH="$(resolve_sdk_path)"
 
-swift -sdk "$SDK_PATH" "$ROOT/generate_icon.swift" "$ICON_PNG"
+swift -sdk "$SDK_PATH" "$ROOT/generate_icon.swift" -- "$ICON_PNG"
+[[ -f "$ICON_PNG" ]] || {
+  echo "failed to generate icon png at: $ICON_PNG" >&2
+  exit 1
+}
 
 rm -rf "$ICONSET_DIR"
 mkdir -p "$ICONSET_DIR"

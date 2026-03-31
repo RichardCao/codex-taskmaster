@@ -1,6 +1,14 @@
 import AppKit
 
-let outputPath = CommandLine.arguments.dropFirst().first ?? "CodexBianCeZhe-1024.png"
+let rawArguments = Array(CommandLine.arguments)
+let scriptArguments: ArraySlice<String>
+if let lastSentinel = rawArguments.lastIndex(of: "--"),
+   rawArguments.index(after: lastSentinel) < rawArguments.endIndex {
+    scriptArguments = rawArguments[rawArguments.index(after: lastSentinel)...]
+} else {
+    scriptArguments = []
+}
+let outputPath = scriptArguments.first ?? "CodexBianCeZhe-1024.png"
 let canvas = NSSize(width: 1024, height: 1024)
 let image = NSImage(size: canvas)
 

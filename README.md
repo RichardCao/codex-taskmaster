@@ -17,6 +17,7 @@ It targets a local Codex CLI workflow on macOS and is built around three ideas:
 - Optional `force send` mode
 - Prompt-history viewer for a selected session
 - Rename support backed by `~/.codex/session_index.jsonl`
+- Session delete support backed by Codex native archive semantics
 - State-aware sending:
   - default mode only sends when the session is considered sendable
   - force mode bypasses session-state gating and still reports success or failure
@@ -96,6 +97,11 @@ There are two main components:
 
 The app queues send requests, probes the target session, and only sends in default mode when the session is in a sendable state. Delivery results are written back to the UI and loop logs.
 
+For session mutations, the app now prefers Codex's native app-server thread APIs instead of directly editing session state:
+
+- non-empty rename uses `thread/name/set`
+- delete uses `thread/archive`
+
 ## Session Name Semantics
 
 This project intentionally does not treat `threads.title` as the authoritative session name.
@@ -109,6 +115,8 @@ Instead:
   - `Target`: the value you can use to resume or target the session
 
 This matches local `codex resume` behavior better than comparing `title` and `first_user_message` alone.
+
+The UI still reads names from local session state for display. Non-empty rename writes are issued through Codex's native app-server API so local state stays in the format Codex itself expects. Clearing a name falls back to removing the local `session_index.jsonl` entry because the native `thread/name/set` API rejects empty names.
 
 ## Sending Modes
 

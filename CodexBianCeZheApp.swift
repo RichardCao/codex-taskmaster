@@ -186,6 +186,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private lazy var stopButton = makeButton(title: "停止当前", action: #selector(stopLoop))
     private lazy var stopAllButton = makeButton(title: "全部停止", action: #selector(stopAllLoops))
     private lazy var saveRenameButton = makeButton(title: "保存名称", action: #selector(saveSessionRename))
+    private lazy var deleteSessionButton = makeButton(title: "删除 Session", action: #selector(deleteSelectedSession))
 
     override func loadView() {
         self.view = NSView()
@@ -317,14 +318,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         renameField.translatesAutoresizingMaskIntoConstraints = false
         renameField.isEnabled = false
         saveRenameButton.isEnabled = false
+        deleteSessionButton.isEnabled = false
+        deleteSessionButton.contentTintColor = .systemRed
 
         let renameLabel = makeFieldLabel("Rename")
-        let renameRow = NSStackView(views: [renameLabel, renameField, saveRenameButton])
+        let renameRow = NSStackView(views: [renameLabel, renameField, saveRenameButton, deleteSessionButton])
         renameRow.orientation = .horizontal
         renameRow.spacing = 8
         renameRow.alignment = .centerY
         renameLabel.setContentHuggingPriority(.required, for: .horizontal)
         saveRenameButton.setContentHuggingPriority(.required, for: .horizontal)
+        deleteSessionButton.setContentHuggingPriority(.required, for: .horizontal)
 
         sessionDetailScrollView.borderType = .bezelBorder
         sessionDetailScrollView.hasVerticalScroller = true
@@ -702,6 +706,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             renameField.stringValue = ""
             renameField.isEnabled = false
             saveRenameButton.isEnabled = false
+            deleteSessionButton.isEnabled = false
             sessionDetailView.string = "选中一条 session 后，这里会显示完整信息和提示词历史。"
             sessionDetailView.scrollToBeginningOfDocument(nil)
             return
@@ -711,6 +716,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         renameField.stringValue = session.name
         renameField.isEnabled = true
         saveRenameButton.isEnabled = true
+        deleteSessionButton.isEnabled = true
         sessionDetailView.string = "\(sessionDetailText(for: session))\n\n提示词历史加载中…"
         sessionDetailView.scrollToBeginningOfDocument(nil)
 
@@ -733,6 +739,18 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func updateSessionName(threadID: String, newName: String) -> (success: Bool, error: String) {
+        if newName.isEmpty {
+            return clearSessionName(threadID: threadID)
+        }
+        let result = runStandardHelper(arguments: ["thread-name-set", "-t", threadID, "-n", newName])
+        if result.status == 0 {
+            return (true, "")
+        }
+        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? "重命名失败"
+        return (false, detail)
+    }
+
+    private func clearSessionName(threadID: String) -> (success: Bool, error: String) {
         let process = Process()
         let stdout = Pipe()
         let stderr = Pipe()
@@ -742,7 +760,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             "-c",
             """
 import json, os, sqlite3, sys, time
-db_path, session_index_path, thread_id, new_name = sys.argv[1:]
+db_path, session_index_path, thread_id = sys.argv[1:]
 
 entries = []
 if os.path.exists(session_index_path):
@@ -759,13 +777,6 @@ if os.path.exists(session_index_path):
                 continue
             entries.append(obj)
 
-if new_name:
-    entries.append({
-        "id": thread_id,
-        "thread_name": new_name,
-        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + f".{int((time.time() % 1) * 1_000_000):06d}Z",
-    })
-
 os.makedirs(os.path.dirname(session_index_path), exist_ok=True)
 tmp_index_path = session_index_path + ".tmp"
 with open(tmp_index_path, "w", encoding="utf-8") as fh:
@@ -777,7 +788,7 @@ conn = sqlite3.connect(db_path)
 cur = conn.cursor()
 cur.execute(
     "update threads set updated_at = ? where id = ?",
-    (int(time.time() * 1000), thread_id),
+    (int(time.time()), thread_id),
 )
 if cur.rowcount != 1:
     raise SystemExit("session not found")
@@ -786,8 +797,7 @@ conn.close()
 """,
             codexStateDatabasePath,
             codexSessionIndexPath,
-            threadID,
-            newName
+            threadID
         ]
         process.standardOutput = stdout
         process.standardError = stderr
@@ -796,16 +806,25 @@ conn.close()
             try process.run()
             process.waitUntilExit()
         } catch {
-            return (false, "启动重命名失败: \(error.localizedDescription)")
+            return (false, "启动清空名称失败: \(error.localizedDescription)")
         }
 
         let errText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if process.terminationStatus != 0 {
-            return (false, errText.isEmpty ? "重命名失败" : errText)
+            return (false, errText.isEmpty ? "清空名称失败" : errText)
         }
 
         return (true, "")
+    }
+
+    private func archiveSession(threadID: String) -> (success: Bool, error: String) {
+        let result = runStandardHelper(arguments: ["thread-archive", "-t", threadID])
+        if result.status == 0 {
+            return (true, "")
+        }
+        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? "删除 session 失败"
+        return (false, detail)
     }
 
     private func selectSessionRow(threadID: String) {
@@ -1925,6 +1944,7 @@ conn.close()
         let session = sessionSnapshots[selectedRow]
         let newName = renameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         saveRenameButton.isEnabled = false
+        deleteSessionButton.isEnabled = false
         renameField.isEnabled = false
         setStatus("保存名称中…", key: "action")
         appendOutput("执行 保存名称: thread_id=\(session.threadID) name=\(newName.isEmpty ? "<empty>" : newName)")
@@ -1935,6 +1955,7 @@ conn.close()
             DispatchQueue.main.async {
                 self.saveRenameButton.isEnabled = true
                 self.renameField.isEnabled = true
+                self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
 
                 if result.success {
                     if let index = self.sessionSnapshots.firstIndex(where: { $0.threadID == session.threadID }) {
@@ -1959,6 +1980,71 @@ conn.close()
                     self.appendOutput(newName.isEmpty ? "已清空名称，恢复为未 rename 状态。" : "已保存名称: \(newName)")
                 } else {
                     self.setStatus("保存名称失败", key: "action")
+                    self.appendOutput("stderr: \(result.error)")
+                    NSSound.beep()
+                }
+            }
+        }
+    }
+
+    @objc
+    private func deleteSelectedSession() {
+        let selectedRow = sessionStatusTableView.selectedRow
+        guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
+            appendOutput("请先选择一条 session，再删除。")
+            setStatus("请选择一个 session")
+            NSSound.beep()
+            return
+        }
+
+        let session = sessionSnapshots[selectedRow]
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "删除这个 Session？"
+        alert.informativeText = """
+        这会调用 Codex 原生的 thread/archive，相当于原生删除语义。
+        删除后该 session 会从当前非归档列表中消失。
+
+        Session ID: \(session.threadID)
+        Target: \(sessionEffectiveTarget(session))
+        """
+        alert.addButton(withTitle: "删除")
+        alert.addButton(withTitle: "取消")
+        alert.buttons.first?.hasDestructiveAction = true
+
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+
+        saveRenameButton.isEnabled = false
+        deleteSessionButton.isEnabled = false
+        renameField.isEnabled = false
+        setStatus("删除 Session 中…", key: "action")
+        appendOutput("执行 删除 Session: thread_id=\(session.threadID)")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = self.archiveSession(threadID: session.threadID)
+
+            DispatchQueue.main.async {
+                if result.success {
+                    self.sessionSnapshots.removeAll { $0.threadID == session.threadID }
+                    if self.sessionScanTotal > 0 {
+                        self.sessionScanTotal = max(0, self.sessionScanTotal - 1)
+                    }
+                    self.sessionStatusTableView.reloadData()
+                    self.updateSessionDetailView()
+                    self.renderSessionSnapshots(
+                        scannedCount: self.sessionSnapshots.count,
+                        totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.sessionSnapshots.count,
+                        isComplete: true
+                    )
+                    self.setStatus("删除 Session 完成", key: "action")
+                    self.appendOutput("已按 Codex 原生 archive 语义删除 session: \(session.threadID)")
+                } else {
+                    self.renameField.isEnabled = self.sessionStatusTableView.selectedRow >= 0
+                    self.saveRenameButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
+                    self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
+                    self.setStatus("删除 Session 失败", key: "action")
                     self.appendOutput("stderr: \(result.error)")
                     NSSound.beep()
                 }
