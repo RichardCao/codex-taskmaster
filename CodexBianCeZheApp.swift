@@ -113,6 +113,11 @@ final class MainWindowController: NSWindowController {
 final class MainViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSSplitViewDelegate, NSTextFieldDelegate {
     private let helperPath = resolvedHelperPath()
 
+    private enum SessionListMode {
+        case active
+        case archived
+    }
+
     private struct LoopSnapshot {
         let target: String
         let loopDaemonRunning: String
@@ -134,6 +139,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let tty: String
         let updatedAtEpoch: String
         let rolloutPath: String
+        let preview: String
+        let isArchived: Bool
     }
 
     private let targetField = NSTextField(string: initialTargetValue())
@@ -148,6 +155,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let activeLoopsScrollView = NSScrollView()
     private let sessionStatusTableView = NSTableView()
     private let sessionStatusScrollView = NSScrollView()
+    private let sessionScopeControl: NSSegmentedControl = {
+        let control = NSSegmentedControl(labels: ["普通", "已归档"], trackingMode: .selectOne, target: nil, action: nil)
+        control.selectedSegment = 0
+        return control
+    }()
     private let renameField = NSTextField(string: "")
     private let sessionDetailView = NSTextView()
     private let sessionDetailScrollView = NSScrollView()
@@ -175,6 +187,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var didApplyInitialTopSplitRatio = false
     private var lastTopSplitWidth: CGFloat = 0
     private var isApplyingTopSplitRatio = false
+    private var contentSplitRatio: CGFloat = 0.62
+    private var didApplyInitialContentSplitRatio = false
+    private var lastContentSplitHeight: CGFloat = 0
+    private var isApplyingContentSplitRatio = false
     private let sessionScanProcessLock = NSLock()
     private var currentSessionScanProcess: Process?
     private var sessionDetailLoadGeneration = 0
@@ -185,8 +201,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private lazy var detectStatusButton = makeButton(title: "检测状态", action: #selector(detectStatuses))
     private lazy var stopButton = makeButton(title: "停止当前", action: #selector(stopLoop))
     private lazy var stopAllButton = makeButton(title: "全部停止", action: #selector(stopAllLoops))
-    private lazy var saveRenameButton = makeButton(title: "保存名称", action: #selector(saveSessionRename))
-    private lazy var deleteSessionButton = makeButton(title: "删除 Session", action: #selector(deleteSelectedSession))
+    private lazy var saveRenameButton = makeButton(title: "保存", action: #selector(saveSessionRename))
+    private lazy var archiveSessionButton = makeButton(title: "归档", action: #selector(archiveSelectedSession))
+    private lazy var restoreSessionButton = makeButton(title: "恢复", action: #selector(restoreSelectedSession))
+    private lazy var deleteSessionButton = makeButton(title: "删除", action: #selector(deleteSelectedSession))
 
     override func loadView() {
         self.view = NSView()
@@ -196,6 +214,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         super.viewDidLoad()
         buildUI()
         normalizeInitialIntervalValue()
+        sessionStatusMetaLabel.stringValue = sessionEmptyStateText()
         updateDetectStatusButtonState()
         stopButton.isEnabled = false
         appendOutput("Codex Taskmaster is ready.")
@@ -209,6 +228,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         super.viewDidLayout()
         applyInitialSplitRatiosIfNeeded()
         preserveTopSplitRatioOnResizeIfNeeded()
+        preserveContentSplitRatioOnResizeIfNeeded()
     }
 
     override func viewDidAppear() {
@@ -218,6 +238,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             self.setTopSplitRatio(0.5)
             self.didApplyInitialTopSplitRatio = true
             self.lastTopSplitWidth = self.topSplitView.bounds.width
+            self.setContentSplitRatio(0.62)
+            self.didApplyInitialContentSplitRatio = true
+            self.lastContentSplitHeight = self.contentSplitView.bounds.height
         }
     }
 
@@ -243,18 +266,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             rootStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
             rootStack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -20)
         ])
-
-        let titleLabel = NSTextField(labelWithString: "Codex Taskmaster")
-        titleLabel.font = .systemFont(ofSize: 26, weight: .bold)
-
-        let subtitleLabel = NSTextField(wrappingLabelWithString: "配置 session、间隔和消息，然后向 Terminal 里的 Codex 发送输入。")
-        subtitleLabel.textColor = .secondaryLabelColor
-
-        let headerStack = NSStackView(views: [titleLabel, subtitleLabel])
-        headerStack.orientation = .vertical
-        headerStack.spacing = 6
-        rootStack.addArrangedSubview(headerStack)
-        headerStack.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
 
         targetField.placeholderString = "例如 test 或具体 session id"
         intervalField.placeholderString = "秒，例如 600"
@@ -314,21 +325,35 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionDetailView.font = .systemFont(ofSize: 12)
         sessionDetailView.string = "选中一条 session 后，这里会显示完整信息和提示词历史。"
 
+        sessionScopeControl.target = self
+        sessionScopeControl.action = #selector(changeSessionScope)
+        sessionScopeControl.translatesAutoresizingMaskIntoConstraints = false
+
         renameField.placeholderString = "输入新名称，留空可恢复为未 rename 状态"
         renameField.translatesAutoresizingMaskIntoConstraints = false
         renameField.isEnabled = false
         saveRenameButton.isEnabled = false
+        archiveSessionButton.isEnabled = false
+        restoreSessionButton.isEnabled = false
         deleteSessionButton.isEnabled = false
+        archiveSessionButton.contentTintColor = .systemOrange
+        restoreSessionButton.contentTintColor = .systemBlue
         deleteSessionButton.contentTintColor = .systemRed
 
-        let renameLabel = makeFieldLabel("Rename")
-        let renameRow = NSStackView(views: [renameLabel, renameField, saveRenameButton, deleteSessionButton])
+        let renameRow = NSStackView(views: [renameField, saveRenameButton, archiveSessionButton, restoreSessionButton, deleteSessionButton])
         renameRow.orientation = .horizontal
         renameRow.spacing = 8
         renameRow.alignment = .centerY
-        renameLabel.setContentHuggingPriority(.required, for: .horizontal)
         saveRenameButton.setContentHuggingPriority(.required, for: .horizontal)
+        archiveSessionButton.setContentHuggingPriority(.required, for: .horizontal)
+        restoreSessionButton.setContentHuggingPriority(.required, for: .horizontal)
         deleteSessionButton.setContentHuggingPriority(.required, for: .horizontal)
+
+        let sessionScopeRow = NSStackView(views: [sessionScopeControl])
+        sessionScopeRow.orientation = .horizontal
+        sessionScopeRow.spacing = 8
+        sessionScopeRow.alignment = .centerY
+        sessionScopeControl.setContentHuggingPriority(.required, for: .horizontal)
 
         sessionDetailScrollView.borderType = .bezelBorder
         sessionDetailScrollView.hasVerticalScroller = true
@@ -353,11 +378,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         outputScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
 
         let activeLoopsPanel = makePanel(title: "Active Loops", metaLabel: activeLoopsMetaLabel, contentView: activeLoopsScrollView)
-        let sessionStatusContentStack = NSStackView(views: [sessionStatusScrollView, renameRow, sessionDetailScrollView])
+        let sessionStatusContentStack = NSStackView(views: [sessionScopeRow, sessionStatusScrollView, renameRow, sessionDetailScrollView])
         sessionStatusContentStack.orientation = .vertical
         sessionStatusContentStack.spacing = 8
         sessionStatusContentStack.alignment = .leading
         sessionStatusContentStack.translatesAutoresizingMaskIntoConstraints = false
+        sessionScopeRow.widthAnchor.constraint(equalTo: sessionStatusContentStack.widthAnchor).isActive = true
         sessionStatusScrollView.widthAnchor.constraint(equalTo: sessionStatusContentStack.widthAnchor).isActive = true
         renameRow.widthAnchor.constraint(equalTo: sessionStatusContentStack.widthAnchor).isActive = true
         sessionDetailScrollView.widthAnchor.constraint(equalTo: sessionStatusContentStack.widthAnchor).isActive = true
@@ -376,6 +402,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         contentSplitView.isVertical = false
         contentSplitView.dividerStyle = .thin
         contentSplitView.translatesAutoresizingMaskIntoConstraints = false
+        contentSplitView.delegate = self
         contentSplitView.addArrangedSubview(topSplitView)
         contentSplitView.addArrangedSubview(logPanel)
         contentSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
@@ -489,11 +516,28 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func preferredTargetValue(for session: SessionSnapshot) -> String {
-        let candidate = session.target.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !candidate.isEmpty {
-            return candidate
+        let actualName = sessionActualName(session)
+        if !actualName.isEmpty {
+            return actualName
         }
         return session.threadID
+    }
+
+    private func currentSessionListMode() -> SessionListMode {
+        sessionScopeControl.selectedSegment == 1 ? .archived : .active
+    }
+
+    private func sessionScopeText() -> String {
+        currentSessionListMode() == .archived ? "已归档" : "普通"
+    }
+
+    private func sessionEmptyStateText() -> String {
+        switch currentSessionListMode() {
+        case .active:
+            return "视图: 普通 | 未加载 session 状态。点击“检测状态”开始扫描。"
+        case .archived:
+            return "视图: 已归档 | 未加载归档 session。点击“检测状态”读取列表。"
+        }
     }
 
     private func sessionActualName(_ session: SessionSnapshot) -> String {
@@ -503,6 +547,19 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func sessionEffectiveTarget(_ session: SessionSnapshot) -> String {
         let target = session.target.trimmingCharacters(in: .whitespacesAndNewlines)
         return target.isEmpty ? session.threadID : target
+    }
+
+    private func parseThreadRuntimeStatus(_ raw: Any?) -> String {
+        guard let object = raw as? [String: Any],
+              let type = object["type"] as? String else {
+            return "unknown"
+        }
+        if type == "active",
+           let flags = object["activeFlags"] as? [String],
+           !flags.isEmpty {
+            return "active(\(flags.joined(separator: ",")))"
+        }
+        return type
     }
 
     private func normalizeInitialIntervalValue() {
@@ -648,16 +705,22 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func sessionDetailText(for session: SessionSnapshot) -> String {
         let name = sessionActualName(session)
-        return [
+        var lines = [
             "Target: \(sessionEffectiveTarget(session))",
             "Name: \(name.isEmpty ? "-" : name)",
             "Session ID: \(session.threadID)",
+            "Archived: \(session.isArchived ? "yes" : "no")",
             "Status: \(session.status)",
             "Terminal: \(session.terminalState)",
             "TTY: \(session.tty.isEmpty ? "-" : session.tty)",
             "Updated: \(formatEpoch(session.updatedAtEpoch))",
             "原因: \(localizedSessionReason(session.reason))"
-        ].joined(separator: "\n")
+        ]
+        let preview = session.preview.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !preview.isEmpty {
+            lines.append("Preview: \(preview)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func loadPromptHistoryText(for session: SessionSnapshot) -> String {
@@ -706,6 +769,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             renameField.stringValue = ""
             renameField.isEnabled = false
             saveRenameButton.isEnabled = false
+            archiveSessionButton.isEnabled = false
+            restoreSessionButton.isEnabled = false
             deleteSessionButton.isEnabled = false
             sessionDetailView.string = "选中一条 session 后，这里会显示完整信息和提示词历史。"
             sessionDetailView.scrollToBeginningOfDocument(nil)
@@ -714,8 +779,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         let session = sessionSnapshots[selectedRow]
         renameField.stringValue = session.name
-        renameField.isEnabled = true
-        saveRenameButton.isEnabled = true
+        renameField.isEnabled = !session.isArchived
+        saveRenameButton.isEnabled = !session.isArchived
+        archiveSessionButton.isEnabled = !session.isArchived
+        restoreSessionButton.isEnabled = session.isArchived
         deleteSessionButton.isEnabled = true
         sessionDetailView.string = "\(sessionDetailText(for: session))\n\n提示词历史加载中…"
         sessionDetailView.scrollToBeginningOfDocument(nil)
@@ -823,7 +890,25 @@ conn.close()
         if result.status == 0 {
             return (true, "")
         }
-        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? "删除 session 失败"
+        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? "归档 session 失败"
+        return (false, detail)
+    }
+
+    private func unarchiveSession(threadID: String) -> (success: Bool, error: String) {
+        let result = runStandardHelper(arguments: ["thread-unarchive", "-t", threadID])
+        if result.status == 0 {
+            return (true, "")
+        }
+        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? "恢复归档失败"
+        return (false, detail)
+    }
+
+    private func deleteSessionPermanently(threadID: String) -> (success: Bool, detail: String) {
+        let result = runStandardHelper(arguments: ["thread-delete", "-t", threadID])
+        if result.status == 0 {
+            return (true, result.stdout)
+        }
+        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? "彻底删除失败"
         return (false, detail)
     }
 
@@ -834,12 +919,21 @@ conn.close()
     }
 
     private func applyInitialSplitRatiosIfNeeded() {
-        guard !didApplyInitialTopSplitRatio else { return }
-        guard topSplitView.subviews.count == 2 else { return }
-        guard topSplitView.bounds.width > topSplitView.dividerThickness else { return }
-        setTopSplitRatio(0.5)
-        didApplyInitialTopSplitRatio = true
-        lastTopSplitWidth = topSplitView.bounds.width
+        if !didApplyInitialTopSplitRatio,
+           topSplitView.subviews.count == 2,
+           topSplitView.bounds.width > topSplitView.dividerThickness {
+            setTopSplitRatio(0.5)
+            didApplyInitialTopSplitRatio = true
+            lastTopSplitWidth = topSplitView.bounds.width
+        }
+
+        if !didApplyInitialContentSplitRatio,
+           contentSplitView.subviews.count == 2,
+           contentSplitView.bounds.height > contentSplitView.dividerThickness {
+            setContentSplitRatio(0.62)
+            didApplyInitialContentSplitRatio = true
+            lastContentSplitHeight = contentSplitView.bounds.height
+        }
     }
 
     private func preserveTopSplitRatioOnResizeIfNeeded() {
@@ -854,6 +948,18 @@ conn.close()
         setTopSplitRatio(topSplitRatio)
     }
 
+    private func preserveContentSplitRatioOnResizeIfNeeded() {
+        guard contentSplitView.subviews.count == 2 else { return }
+        let currentHeight = contentSplitView.bounds.height
+        guard currentHeight > contentSplitView.dividerThickness else { return }
+
+        defer { lastContentSplitHeight = currentHeight }
+
+        guard didApplyInitialContentSplitRatio else { return }
+        guard abs(currentHeight - lastContentSplitHeight) > 0.5 else { return }
+        setContentSplitRatio(contentSplitRatio)
+    }
+
     private func setTopSplitRatio(_ ratio: CGFloat) {
         guard topSplitView.subviews.count == 2 else { return }
         let availableWidth = topSplitView.bounds.width - topSplitView.dividerThickness
@@ -866,6 +972,18 @@ conn.close()
         isApplyingTopSplitRatio = false
     }
 
+    private func setContentSplitRatio(_ ratio: CGFloat) {
+        guard contentSplitView.subviews.count == 2 else { return }
+        let availableHeight = contentSplitView.bounds.height - contentSplitView.dividerThickness
+        guard availableHeight > 0 else { return }
+
+        let clampedRatio = min(max(ratio, 0.25), 0.82)
+        isApplyingContentSplitRatio = true
+        contentSplitView.setPosition(availableHeight * clampedRatio, ofDividerAt: 0)
+        contentSplitRatio = clampedRatio
+        isApplyingContentSplitRatio = false
+    }
+
     private func updateTopSplitRatioFromCurrentLayout() {
         guard !isApplyingTopSplitRatio else { return }
         guard didApplyInitialTopSplitRatio else { return }
@@ -876,11 +994,22 @@ conn.close()
         topSplitRatio = min(max(currentLeadingWidth / availableWidth, 0.2), 0.8)
     }
 
+    private func updateContentSplitRatioFromCurrentLayout() {
+        guard !isApplyingContentSplitRatio else { return }
+        guard didApplyInitialContentSplitRatio else { return }
+        guard contentSplitView.subviews.count == 2 else { return }
+        let availableHeight = contentSplitView.bounds.height - contentSplitView.dividerThickness
+        guard availableHeight > 0 else { return }
+        let currentTopHeight = contentSplitView.subviews[0].frame.height
+        contentSplitRatio = min(max(currentTopHeight / availableHeight, 0.25), 0.82)
+    }
+
     private func localizedSessionReason(_ reason: String) -> String {
         let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
 
         let exactMappings: [String: String] = [
+            "session is archived and can be restored": "该 session 已归档，可在当前列表中恢复",
             "insufficient local events": "本地事件不足，暂时无法可靠判断状态",
             "last completed turn is newer than the last started turn": "最近一次完成回合晚于最近一次开始回合，当前看起来已空闲",
             "a started turn has no later task_complete": "检测到已开始的回合，但后面没有看到 task_complete，当前可能仍在执行",
@@ -1152,7 +1281,9 @@ conn.close()
                     terminalState: current["terminal_state"] ?? "unavailable",
                     tty: current["tty"] ?? "",
                     updatedAtEpoch: current["updated_at_epoch"] ?? "0",
-                    rolloutPath: current["rollout_path"] ?? ""
+                    rolloutPath: current["rollout_path"] ?? "",
+                    preview: "",
+                    isArchived: false
                 )
             )
             current.removeAll()
@@ -1176,6 +1307,46 @@ conn.close()
 
         flushCurrent()
         return sessions
+    }
+
+    private func parseThreadListOutput(_ output: String, archived: Bool) -> [SessionSnapshot] {
+        guard let data = output.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = object["data"] as? [[String: Any]] else {
+            return []
+        }
+
+        return items.compactMap { item in
+            guard let threadID = item["id"] as? String else {
+                return nil
+            }
+
+            let updatedAtValue = item["updatedAt"]
+            let updatedAtEpoch: String
+            if let intValue = updatedAtValue as? Int {
+                updatedAtEpoch = String(intValue)
+            } else if let doubleValue = updatedAtValue as? Double {
+                updatedAtEpoch = String(Int(doubleValue))
+            } else if let stringValue = updatedAtValue as? String {
+                updatedAtEpoch = stringValue
+            } else {
+                updatedAtEpoch = "0"
+            }
+
+            return SessionSnapshot(
+                name: item["name"] as? String ?? "",
+                target: threadID,
+                threadID: threadID,
+                status: archived ? "archived" : parseThreadRuntimeStatus(item["status"]),
+                reason: archived ? "session is archived and can be restored" : "",
+                terminalState: archived ? "archived" : "unavailable",
+                tty: "",
+                updatedAtEpoch: updatedAtEpoch,
+                rolloutPath: item["path"] as? String ?? "",
+                preview: item["preview"] as? String ?? "",
+                isArchived: archived
+            )
+        }
     }
 
     private func parseSessionCountOutput(_ output: String) -> Int? {
@@ -1211,9 +1382,9 @@ conn.close()
     private func renderSessionSnapshots(scannedCount: Int? = nil, totalCount: Int? = nil, isComplete: Bool = true) {
         if sessionSnapshots.isEmpty {
             if isSessionScanRunning, let scannedCount, let totalCount {
-                sessionStatusMetaLabel.stringValue = "正在扫描 \(scannedCount)/\(totalCount)…"
+                sessionStatusMetaLabel.stringValue = "视图: \(sessionScopeText()) | 正在扫描 \(scannedCount)/\(totalCount)…"
             } else {
-                sessionStatusMetaLabel.stringValue = "未加载 session 状态。点击“检测状态”开始扫描。"
+                sessionStatusMetaLabel.stringValue = sessionEmptyStateText()
             }
             sessionStatusTableView.reloadData()
             updateSessionDetailView()
@@ -1223,9 +1394,9 @@ conn.close()
         let refreshedAt = Self.timestampFormatter.string(from: Date())
         if let scannedCount, let totalCount {
             let progressText = isComplete ? "已扫描: \(scannedCount)/\(totalCount)" : "扫描中: \(scannedCount)/\(totalCount)"
-            sessionStatusMetaLabel.stringValue = "已加载: \(sessionSnapshots.count) | \(progressText) | 总数: \(totalCount) | 刷新: \(refreshedAt)"
+            sessionStatusMetaLabel.stringValue = "视图: \(sessionScopeText()) | 已加载: \(sessionSnapshots.count) | \(progressText) | 总数: \(totalCount) | 刷新: \(refreshedAt)"
         } else {
-            sessionStatusMetaLabel.stringValue = "已加载: \(sessionSnapshots.count) | 刷新: \(refreshedAt)"
+            sessionStatusMetaLabel.stringValue = "视图: \(sessionScopeText()) | 已加载: \(sessionSnapshots.count) | 刷新: \(refreshedAt)"
         }
         applySessionSorting()
         sessionStatusTableView.reloadData()
@@ -1663,7 +1834,7 @@ conn.close()
             renderSessionSnapshots(scannedCount: sessionSnapshots.count, totalCount: sessionScanTotal, isComplete: false)
             sessionStatusMetaLabel.stringValue += " | 已停止"
         } else {
-            sessionStatusMetaLabel.stringValue = "检测已停止。"
+            sessionStatusMetaLabel.stringValue = "视图: \(sessionScopeText()) | 检测已停止。"
             sessionStatusTableView.reloadData()
         }
     }
@@ -1729,6 +1900,11 @@ conn.close()
             return
         }
 
+        if currentSessionListMode() == .archived {
+            refreshArchivedSessions()
+            return
+        }
+
         isSessionScanRunning = true
         sessionScanShouldStop = false
         sessionScanGeneration += 1
@@ -1738,7 +1914,7 @@ conn.close()
         setStatus("检测状态执行中…", key: "scan")
         appendOutput("执行 检测状态: session-count + probe-all batches")
         sessionSnapshots = []
-        sessionStatusMetaLabel.stringValue = "正在准备扫描…"
+        sessionStatusMetaLabel.stringValue = "视图: 普通 | 正在准备扫描…"
         sessionStatusTableView.reloadData()
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -1754,7 +1930,7 @@ conn.close()
                     self.isSessionScanRunning = false
                     self.updateDetectStatusButtonState()
                     self.sessionSnapshots = []
-                    self.sessionStatusMetaLabel.stringValue = "检测状态失败: \(countResult.stderr.isEmpty ? countResult.stdout : countResult.stderr)"
+                    self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 检测状态失败: \(countResult.stderr.isEmpty ? countResult.stdout : countResult.stderr)"
                     self.sessionStatusTableView.reloadData()
                     self.setStatus("检测状态失败", key: "scan")
                     if !countResult.stderr.isEmpty {
@@ -1770,11 +1946,11 @@ conn.close()
                 if totalCount == 0 {
                     self.isSessionScanRunning = false
                     self.updateDetectStatusButtonState()
-                    self.sessionStatusMetaLabel.stringValue = "没有可扫描的 session。"
+                    self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 没有可扫描的 session。"
                     self.sessionStatusTableView.reloadData()
                     self.setStatus("检测状态完成", key: "scan")
                 } else {
-                    self.sessionStatusMetaLabel.stringValue = "正在扫描 0/\(totalCount)…"
+                    self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 正在扫描 0/\(totalCount)…"
                     self.sessionStatusTableView.reloadData()
                 }
             }
@@ -1840,6 +2016,53 @@ conn.close()
         }
     }
 
+    private func refreshArchivedSessions() {
+        isSessionScanRunning = true
+        sessionScanShouldStop = false
+        sessionScanGeneration += 1
+        let generation = sessionScanGeneration
+        sessionScanTotal = 0
+        updateDetectStatusButtonState()
+        setStatus("读取已归档 session 中…", key: "scan")
+        appendOutput("执行 检测状态: thread-list --archived")
+        sessionSnapshots = []
+        sessionStatusMetaLabel.stringValue = "视图: 已归档 | 正在读取列表…"
+        sessionStatusTableView.reloadData()
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = self.runInterruptibleSessionHelper(arguments: ["thread-list", "--archived"])
+
+            if self.sessionScanShouldStop || self.sessionScanGeneration != generation {
+                return
+            }
+
+            DispatchQueue.main.async {
+                guard self.sessionScanGeneration == generation else { return }
+                self.isSessionScanRunning = false
+                self.updateDetectStatusButtonState()
+
+                if result.status != 0 {
+                    self.sessionSnapshots = []
+                    self.sessionStatusMetaLabel.stringValue = "视图: 已归档 | 读取失败: \(result.stderr.isEmpty ? result.stdout : result.stderr)"
+                    self.sessionStatusTableView.reloadData()
+                    self.updateSessionDetailView()
+                    self.setStatus("读取已归档 session 失败", key: "scan")
+                    if !result.stderr.isEmpty {
+                        self.appendOutput("stderr: \(result.stderr)")
+                    }
+                    return
+                }
+
+                let snapshots = self.parseThreadListOutput(result.stdout, archived: true)
+                self.sessionSnapshots = snapshots
+                self.sessionScanTotal = snapshots.count
+                self.renderSessionSnapshots(scannedCount: snapshots.count, totalCount: snapshots.count, isComplete: true)
+                self.setStatus("已加载已归档 session", key: "scan")
+                self.appendOutput("检测到 \(snapshots.count) 个已归档 session。")
+            }
+        }
+    }
+
     @objc
     private func sendOnce() {
         guard let target = validateTarget(), !currentMessage().isEmpty else {
@@ -1898,6 +2121,20 @@ conn.close()
     }
 
     @objc
+    private func changeSessionScope() {
+        if isSessionScanRunning {
+            stopSessionStatusScan()
+        }
+        sessionSnapshots = []
+        sessionScanTotal = 0
+        sessionStatusTableView.deselectAll(nil)
+        sessionStatusTableView.reloadData()
+        sessionStatusMetaLabel.stringValue = sessionEmptyStateText()
+        updateSessionDetailView()
+        setStatus("当前视图切换为\(sessionScopeText())", key: "scan")
+    }
+
+    @objc
     private func stopLoop() {
         let selectedRow = activeLoopsTableView.selectedRow
         guard selectedRow >= 0, selectedRow < loopSnapshots.count else {
@@ -1924,7 +2161,7 @@ conn.close()
         let value = preferredTargetValue(for: session)
         targetField.stringValue = value
         setStatus("已从 Session Status 填入 \(value)")
-        if session.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if sessionActualName(session).isEmpty {
             appendOutput("Session Status 双击填入 ID: \(value)")
         } else {
             appendOutput("Session Status 双击填入 Name: \(value)")
@@ -1942,8 +2179,16 @@ conn.close()
         }
 
         let session = sessionSnapshots[selectedRow]
+        guard !session.isArchived else {
+            appendOutput("已归档 session 不能直接改名，请先恢复归档。")
+            setStatus("请先恢复归档", key: "action")
+            NSSound.beep()
+            return
+        }
         let newName = renameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         saveRenameButton.isEnabled = false
+        archiveSessionButton.isEnabled = false
+        restoreSessionButton.isEnabled = false
         deleteSessionButton.isEnabled = false
         renameField.isEnabled = false
         setStatus("保存名称中…", key: "action")
@@ -1955,6 +2200,8 @@ conn.close()
             DispatchQueue.main.async {
                 self.saveRenameButton.isEnabled = true
                 self.renameField.isEnabled = true
+                self.archiveSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
+                self.restoreSessionButton.isEnabled = false
                 self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
 
                 if result.success {
@@ -1969,7 +2216,9 @@ conn.close()
                             terminalState: previous.terminalState,
                             tty: previous.tty,
                             updatedAtEpoch: previous.updatedAtEpoch,
-                            rolloutPath: previous.rolloutPath
+                            rolloutPath: previous.rolloutPath,
+                            preview: previous.preview,
+                            isArchived: previous.isArchived
                         )
                     }
                     self.applySessionSorting()
@@ -1980,6 +2229,156 @@ conn.close()
                     self.appendOutput(newName.isEmpty ? "已清空名称，恢复为未 rename 状态。" : "已保存名称: \(newName)")
                 } else {
                     self.setStatus("保存名称失败", key: "action")
+                    self.appendOutput("stderr: \(result.error)")
+                    NSSound.beep()
+                }
+            }
+        }
+    }
+
+    @objc
+    private func archiveSelectedSession() {
+        let selectedRow = sessionStatusTableView.selectedRow
+        guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
+            appendOutput("请先选择一条 session，再归档。")
+            setStatus("请选择一个 session")
+            NSSound.beep()
+            return
+        }
+
+        let session = sessionSnapshots[selectedRow]
+        guard !session.isArchived else {
+            appendOutput("这条 session 已经归档。")
+            setStatus("该 session 已归档", key: "action")
+            NSSound.beep()
+            return
+        }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "归档这个 Session？"
+        alert.informativeText = """
+        这会调用 Codex 原生的 thread/archive。
+        归档后该 session 会从当前非归档列表中消失，但后续仍可恢复。
+
+        Session ID: \(session.threadID)
+        Target: \(sessionEffectiveTarget(session))
+        """
+        alert.addButton(withTitle: "归档")
+        alert.addButton(withTitle: "取消")
+        alert.buttons.first?.hasDestructiveAction = true
+
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+
+        saveRenameButton.isEnabled = false
+        archiveSessionButton.isEnabled = false
+        restoreSessionButton.isEnabled = false
+        deleteSessionButton.isEnabled = false
+        renameField.isEnabled = false
+        setStatus("归档 Session 中…", key: "action")
+        appendOutput("执行 归档 Session: thread_id=\(session.threadID)")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = self.archiveSession(threadID: session.threadID)
+
+            DispatchQueue.main.async {
+                if result.success {
+                    self.sessionSnapshots.removeAll { $0.threadID == session.threadID }
+                    if self.sessionScanTotal > 0 {
+                        self.sessionScanTotal = max(0, self.sessionScanTotal - 1)
+                    }
+                    self.sessionStatusTableView.reloadData()
+                    self.updateSessionDetailView()
+                    self.renderSessionSnapshots(
+                        scannedCount: self.sessionSnapshots.count,
+                        totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.sessionSnapshots.count,
+                        isComplete: true
+                    )
+                    self.setStatus("归档 Session 完成", key: "action")
+                    self.appendOutput("已归档 session: \(session.threadID)")
+                } else {
+                    self.renameField.isEnabled = self.sessionStatusTableView.selectedRow >= 0
+                    self.saveRenameButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
+                    self.archiveSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
+                    self.restoreSessionButton.isEnabled = false
+                    self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
+                    self.setStatus("归档 Session 失败", key: "action")
+                    self.appendOutput("stderr: \(result.error)")
+                    NSSound.beep()
+                }
+            }
+        }
+    }
+
+    @objc
+    private func restoreSelectedSession() {
+        let selectedRow = sessionStatusTableView.selectedRow
+        guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
+            appendOutput("请先选择一条已归档 session，再恢复。")
+            setStatus("请选择一个 session")
+            NSSound.beep()
+            return
+        }
+
+        let session = sessionSnapshots[selectedRow]
+        guard session.isArchived else {
+            appendOutput("当前选择的 session 不在已归档列表中。")
+            setStatus("请选择已归档 session", key: "action")
+            NSSound.beep()
+            return
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "恢复这个已归档 Session？"
+        alert.informativeText = """
+        这会调用 Codex 原生的 thread/unarchive。
+        恢复后该 session 会重新回到普通 session 列表中。
+
+        Session ID: \(session.threadID)
+        Name: \(sessionActualName(session).isEmpty ? "-" : sessionActualName(session))
+        """
+        alert.addButton(withTitle: "恢复")
+        alert.addButton(withTitle: "取消")
+
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+
+        saveRenameButton.isEnabled = false
+        archiveSessionButton.isEnabled = false
+        restoreSessionButton.isEnabled = false
+        deleteSessionButton.isEnabled = false
+        renameField.isEnabled = false
+        setStatus("恢复归档中…", key: "action")
+        appendOutput("执行 恢复归档: thread_id=\(session.threadID)")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = self.unarchiveSession(threadID: session.threadID)
+
+            DispatchQueue.main.async {
+                if result.success {
+                    self.sessionSnapshots.removeAll { $0.threadID == session.threadID }
+                    if self.sessionScanTotal > 0 {
+                        self.sessionScanTotal = max(0, self.sessionScanTotal - 1)
+                    }
+                    self.sessionStatusTableView.reloadData()
+                    self.updateSessionDetailView()
+                    self.renderSessionSnapshots(
+                        scannedCount: self.sessionSnapshots.count,
+                        totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.sessionSnapshots.count,
+                        isComplete: true
+                    )
+                    self.setStatus("恢复归档完成", key: "action")
+                    self.appendOutput("已恢复归档 session: \(session.threadID)")
+                } else {
+                    self.renameField.isEnabled = false
+                    self.saveRenameButton.isEnabled = false
+                    self.archiveSessionButton.isEnabled = false
+                    self.restoreSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
+                    self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
+                    self.setStatus("恢复归档失败", key: "action")
                     self.appendOutput("stderr: \(result.error)")
                     NSSound.beep()
                 }
@@ -2000,13 +2399,23 @@ conn.close()
         let session = sessionSnapshots[selectedRow]
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "删除这个 Session？"
+        alert.messageText = "彻底删除这个 Session？"
         alert.informativeText = """
-        这会调用 Codex 原生的 thread/archive，相当于原生删除语义。
-        删除后该 session 会从当前非归档列表中消失。
+        这是本地不可恢复删除，不是 Codex 当前公开的原生 archive/unarchive 语义。
+        删除后会尝试同时移除：
+        - state_5.sqlite 中的 thread 记录
+        - 相关的本地扩展状态和结构化 thread 日志
+        - session_index.jsonl 中对应的 rename/name 记录
+        - 当前 rollout 文件（无论在 sessions 还是 archived_sessions）
+
+        已知风险：
+        - 目前没有公开的 Codex 原生永久删除 API，这是一种本地硬删除
+        - 删除后通常无法恢复
+        - 如果未来 Codex 增加了新的本地索引格式，这里可能删不全
 
         Session ID: \(session.threadID)
-        Target: \(sessionEffectiveTarget(session))
+        Name: \(sessionActualName(session).isEmpty ? "-" : sessionActualName(session))
+        当前路径: \(session.rolloutPath.isEmpty ? "-" : session.rolloutPath)
         """
         alert.addButton(withTitle: "删除")
         alert.addButton(withTitle: "取消")
@@ -2017,13 +2426,15 @@ conn.close()
         }
 
         saveRenameButton.isEnabled = false
+        archiveSessionButton.isEnabled = false
+        restoreSessionButton.isEnabled = false
         deleteSessionButton.isEnabled = false
         renameField.isEnabled = false
-        setStatus("删除 Session 中…", key: "action")
-        appendOutput("执行 删除 Session: thread_id=\(session.threadID)")
+        setStatus("彻底删除中…", key: "action")
+        appendOutput("执行 彻底删除: thread_id=\(session.threadID)")
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = self.archiveSession(threadID: session.threadID)
+            let result = self.deleteSessionPermanently(threadID: session.threadID)
 
             DispatchQueue.main.async {
                 if result.success {
@@ -2038,14 +2449,12 @@ conn.close()
                         totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.sessionSnapshots.count,
                         isComplete: true
                     )
-                    self.setStatus("删除 Session 完成", key: "action")
-                    self.appendOutput("已按 Codex 原生 archive 语义删除 session: \(session.threadID)")
+                    self.setStatus("彻底删除完成", key: "action")
+                    self.appendOutput(result.detail.isEmpty ? "已彻底删除 session: \(session.threadID)" : result.detail)
                 } else {
-                    self.renameField.isEnabled = self.sessionStatusTableView.selectedRow >= 0
-                    self.saveRenameButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
-                    self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
-                    self.setStatus("删除 Session 失败", key: "action")
-                    self.appendOutput("stderr: \(result.error)")
+                    self.updateSessionDetailView()
+                    self.setStatus("彻底删除失败", key: "action")
+                    self.appendOutput("stderr: \(result.detail)")
                     NSSound.beep()
                 }
             }
@@ -2182,8 +2591,12 @@ conn.close()
     }
 
     func splitViewDidResizeSubviews(_ notification: Notification) {
-        guard let splitView = notification.object as? NSSplitView, splitView == topSplitView else { return }
-        updateTopSplitRatioFromCurrentLayout()
+        guard let splitView = notification.object as? NSSplitView else { return }
+        if splitView == topSplitView {
+            updateTopSplitRatioFromCurrentLayout()
+        } else if splitView == contentSplitView {
+            updateContentSplitRatioFromCurrentLayout()
+        }
     }
 
     private static let timestampFormatter: DateFormatter = {

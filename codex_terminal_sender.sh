@@ -44,6 +44,9 @@ Usage:
   codex_terminal_sender.sh session-count
   codex_terminal_sender.sh thread-name-set -t THREAD_ID -n NAME
   codex_terminal_sender.sh thread-archive  -t THREAD_ID
+  codex_terminal_sender.sh thread-unarchive -t THREAD_ID
+  codex_terminal_sender.sh thread-delete -t THREAD_ID
+  codex_terminal_sender.sh thread-list [--archived]
   codex_terminal_sender.sh wait-idle   -t TARGET [-s SECONDS] [-w SECONDS]
   codex_terminal_sender.sh loop-daemon
 
@@ -60,6 +63,12 @@ Commands:
               Set a session name via Codex's native app-server API
   thread-archive
               Archive a session via Codex's native app-server API
+  thread-unarchive
+              Restore an archived session via Codex's native app-server API
+  thread-delete
+              Permanently delete a session from local Codex state and remove its rollout file
+  thread-list
+              List Codex sessions via the native app-server API
   wait-idle   Wait until the target appears stably idle
   loop-daemon Internal command: user-owned background loop runner
 EOF
@@ -678,21 +687,24 @@ session_count() {
     "select count(*) from threads where archived = 0;"
 }
 
-codex_app_server_thread_mutation() {
+codex_app_server_thread_rpc() {
   local action="$1"
-  local thread_id="$2"
+  local thread_id="${2:-}"
   local name="${3:-}"
+  local archived="${4:-0}"
 
   require_cmd node
   require_cmd "$CODEX_BIN_PATH"
-  is_uuid_like "$thread_id" || die "thread id must be a UUID"
+  if [[ "$action" != "list" ]]; then
+    is_uuid_like "$thread_id" || die "thread id must be a UUID"
+  fi
 
-  node - "$CODEX_BIN_PATH" "$action" "$thread_id" "$name" <<'NODE'
+  node - "$CODEX_BIN_PATH" "$action" "$thread_id" "$name" "$archived" <<'NODE'
 const { spawn } = require("node:child_process");
 const net = require("node:net");
 const process = require("node:process");
 
-const [codexBin, action, threadId, name = ""] = process.argv.slice(2);
+const [codexBin, action, threadId = "", name = "", archivedFlag = "0"] = process.argv.slice(2);
 
 async function getFreePort() {
   return await new Promise((resolve, reject) => {
@@ -836,8 +848,34 @@ async function callRpc(wsUrl, method, params) {
 }
 
 async function main() {
-  const method = action === "archive" ? "thread/archive" : "thread/name/set";
-  const params = action === "archive" ? { threadId } : { threadId, name };
+  let method;
+  let params;
+
+  switch (action) {
+    case "archive":
+      method = "thread/archive";
+      params = { threadId };
+      break;
+    case "unarchive":
+      method = "thread/unarchive";
+      params = { threadId };
+      break;
+    case "name-set":
+      method = "thread/name/set";
+      params = { threadId, name };
+      break;
+    case "list":
+      method = "thread/list";
+      params = {
+        archived: archivedFlag === "1",
+        limit: 100,
+        sortKey: "updated_at",
+      };
+      break;
+    default:
+      throw new Error(`unsupported thread rpc action: ${action}`);
+  }
+
   const port = await getFreePort();
   const wsUrl = `ws://127.0.0.1:${port}`;
   const readyUrl = `http://127.0.0.1:${port}/readyz`;
@@ -853,8 +891,24 @@ async function main() {
 
   try {
     await waitForReady(readyUrl, child, 10000);
-    const result = await callRpc(wsUrl, method, params);
-    process.stdout.write(JSON.stringify(result ?? {}));
+    if (action === "list") {
+      const data = [];
+      let cursor = null;
+      do {
+        const result = await callRpc(wsUrl, method, {
+          ...params,
+          cursor,
+        });
+        if (Array.isArray(result?.data)) {
+          data.push(...result.data);
+        }
+        cursor = result?.nextCursor ?? null;
+      } while (cursor);
+      process.stdout.write(JSON.stringify({ data }));
+    } else {
+      const result = await callRpc(wsUrl, method, params);
+      process.stdout.write(JSON.stringify(result ?? {}));
+    }
   } catch (error) {
     const cleanedStderr = stderrLog
       .split(/\r?\n/)
@@ -908,16 +962,130 @@ NODE
 thread_name_set() {
   local thread_id="$1"
   local name="$2"
-  codex_app_server_thread_mutation "name-set" "$thread_id" "$name" >/dev/null
+  codex_app_server_thread_rpc "name-set" "$thread_id" "$name" >/dev/null
   printf 'thread_id: %s\n' "$thread_id"
   printf 'name: %s\n' "$name"
 }
 
 thread_archive() {
   local thread_id="$1"
-  codex_app_server_thread_mutation "archive" "$thread_id" >/dev/null
+  codex_app_server_thread_rpc "archive" "$thread_id" >/dev/null
   printf 'thread_id: %s\n' "$thread_id"
   printf 'archived: yes\n'
+}
+
+thread_unarchive() {
+  local thread_id="$1"
+  codex_app_server_thread_rpc "unarchive" "$thread_id" >/dev/null
+  printf 'thread_id: %s\n' "$thread_id"
+  printf 'unarchived: yes\n'
+}
+
+thread_delete() {
+  local thread_id="$1"
+  require_cmd python3
+  is_uuid_like "$thread_id" || die "thread id must be a UUID"
+
+  python3 - "$CODEX_STATE_DB_PATH" "$CODEX_LOGS_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "$thread_id" <<'PY'
+import json
+import os
+import shutil
+import sqlite3
+import sys
+
+state_db_path, logs_db_path, session_index_path, thread_id = sys.argv[1:]
+
+def remove_session_index_entry(path, target_thread_id):
+    if not os.path.exists(path):
+        return 0
+
+    removed = 0
+    entries = []
+    with open(path, "r", encoding="utf-8") as fh:
+        for raw_line in fh:
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            try:
+                obj = json.loads(stripped)
+            except json.JSONDecodeError:
+                entries.append(raw_line.rstrip("\n"))
+                continue
+            if obj.get("id") == target_thread_id:
+                removed += 1
+                continue
+            entries.append(json.dumps(obj, ensure_ascii=False))
+
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as fh:
+        for entry in entries:
+            fh.write(entry + "\n")
+    os.replace(tmp_path, path)
+    return removed
+
+def prune_empty_parent_dirs(path, stop_at):
+    current = os.path.dirname(path)
+    stop_at = os.path.abspath(stop_at)
+    while current.startswith(stop_at) and current != stop_at:
+        try:
+            os.rmdir(current)
+        except OSError:
+            break
+        current = os.path.dirname(current)
+
+rollout_path = None
+archived = 0
+
+state_conn = sqlite3.connect(state_db_path)
+state_cur = state_conn.cursor()
+state_cur.execute(
+    "select rollout_path, archived from threads where id = ?",
+    (thread_id,),
+)
+row = state_cur.fetchone()
+if row is None:
+    raise SystemExit(f"thread not found: {thread_id}")
+rollout_path, archived = row
+
+state_cur.execute("PRAGMA foreign_keys = ON")
+state_cur.execute("delete from thread_dynamic_tools where thread_id = ?", (thread_id,))
+state_cur.execute("delete from stage1_outputs where thread_id = ?", (thread_id,))
+state_cur.execute("delete from logs where thread_id = ?", (thread_id,))
+state_cur.execute("delete from threads where id = ?", (thread_id,))
+if state_cur.rowcount != 1:
+    raise SystemExit(f"failed to delete thread row: {thread_id}")
+state_conn.commit()
+state_conn.close()
+
+if os.path.exists(logs_db_path):
+    logs_conn = sqlite3.connect(logs_db_path)
+    logs_cur = logs_conn.cursor()
+    logs_cur.execute("delete from logs where thread_id = ?", (thread_id,))
+    logs_conn.commit()
+    logs_conn.close()
+
+session_index_removed = remove_session_index_entry(session_index_path, thread_id)
+
+rollout_removed = False
+if rollout_path and os.path.exists(rollout_path):
+    os.remove(rollout_path)
+    rollout_removed = True
+    if archived:
+        prune_empty_parent_dirs(rollout_path, os.path.expanduser("~/.codex/archived_sessions"))
+    else:
+        prune_empty_parent_dirs(rollout_path, os.path.expanduser("~/.codex/sessions"))
+
+print(f"thread_id: {thread_id}")
+print("deleted: yes")
+print(f"rollout_path: {rollout_path}")
+print(f"rollout_removed: {'yes' if rollout_removed else 'no'}")
+print(f"session_index_removed: {session_index_removed}")
+PY
+}
+
+thread_list() {
+  local archived="${1:-0}"
+  codex_app_server_thread_rpc "list" "" "" "$archived"
 }
 
 probe_all_sessions() {
@@ -1535,6 +1703,55 @@ parse_thread_archive_args() {
   [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
 }
 
+parse_thread_unarchive_args() {
+  THREAD_ID=""
+  while getopts ":t:h" opt; do
+    case "$opt" in
+      t) THREAD_ID="$OPTARG" ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$THREAD_ID" ]] || die "thread-unarchive requires -t THREAD_ID"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
+parse_thread_delete_args() {
+  THREAD_ID=""
+  while getopts ":t:h" opt; do
+    case "$opt" in
+      t) THREAD_ID="$OPTARG" ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$THREAD_ID" ]] || die "thread-delete requires -t THREAD_ID"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
+parse_thread_list_args() {
+  THREAD_LIST_ARCHIVED=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --archived)
+        THREAD_LIST_ARCHIVED=1
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "unknown option: $1"
+        ;;
+    esac
+  done
+}
+
 parse_wait_idle_args() {
   TARGET=""
   STABLE_SECONDS=3
@@ -1605,6 +1822,18 @@ main() {
     thread-archive)
       parse_thread_archive_args "$@"
       thread_archive "$THREAD_ID"
+      ;;
+    thread-unarchive)
+      parse_thread_unarchive_args "$@"
+      thread_unarchive "$THREAD_ID"
+      ;;
+    thread-delete)
+      parse_thread_delete_args "$@"
+      thread_delete "$THREAD_ID"
+      ;;
+    thread-list)
+      parse_thread_list_args "$@"
+      thread_list "$THREAD_LIST_ARCHIVED"
       ;;
     wait-idle)
       parse_wait_idle_args "$@"

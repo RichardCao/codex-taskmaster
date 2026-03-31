@@ -1,191 +1,209 @@
 # Codex Taskmaster
 
-`Codex Taskmaster` is a native macOS utility for sending messages into Terminal-hosted Codex sessions, either once or on a loop, while tracking session state, loop state, and delivery outcomes.
+`Codex Taskmaster` 是一个原生 macOS 工具，用来向 Terminal 里运行的 Codex session 发送消息。它支持单次发送、循环发送、session 状态扫描、提示词历史查看，以及 session 的改名、归档、恢复和本地彻底删除。
 
-It targets a local Codex CLI workflow on macOS and is built around three ideas:
+这个项目面向本地 Codex CLI 工作流，核心目标有三点：
 
-- detect which session is actually sendable before typing into Terminal
-- support controlled loop sending with logs and stop controls
-- make session name handling match local `codex resume` behavior by using `~/.codex/session_index.jsonl`
+- 发送前尽量确认目标 session 处于可发送状态
+- 支持可控的循环发送、停止和日志追踪
+- 让 session 名称行为尽量贴近本机 `codex resume` 的实际表现
 
-## Features
+## 主要功能
 
-- Native single-window AppKit UI
-- `Session Status` scan with sortable columns
-- `Active Loops` tracking with per-loop logs
-- Send-once and repeating loop modes
-- Optional `force send` mode
-- Prompt-history viewer for a selected session
-- Rename support backed by `~/.codex/session_index.jsonl`
-- Session delete support backed by Codex native archive semantics
-- State-aware sending:
-  - default mode only sends when the session is considered sendable
-  - force mode bypasses session-state gating and still reports success or failure
+- 原生 AppKit 单窗口界面
+- `Session Status` 状态扫描与排序
+- `Active Loops` 循环任务列表与日志
+- 单次发送与循环发送
+- 可选 `强制发送` 模式
+- 选中 session 后查看提示词历史
+- session 改名
+- session 归档与恢复
+- 带风险提示的本地彻底删除
+- 按 session 状态决定是否允许发送
 
-## Requirements
+## 运行要求
 
-- macOS 13 or newer
+- macOS 13 或更高版本
 - Xcode Command Line Tools
 - Terminal.app
-- A local Codex CLI installation that writes state under `~/.codex`
-- Accessibility permission for the app if you want it to post keystrokes
+- 本地已安装 Codex CLI，并且默认状态目录位于 `~/.codex`
+- 如果要让应用代发按键，需要授予辅助功能权限
 
-## Build
+## 构建
 
-From the project root:
+在项目根目录执行：
 
 ```bash
 ./build_codex_biancezhe_app.sh
 ```
 
-The script will:
+这个脚本会完成：
 
-- generate the app icon from `generate_icon.swift`
-- build `Codex Taskmaster.app`
-- bundle `codex_terminal_sender.sh` into the app resources
+- 用 `generate_icon.swift` 生成图标
+- 构建 `Codex Taskmaster.app`
+- 把 `codex_terminal_sender.sh` 打包进应用资源
 
-SDK selection:
+SDK 选择策略：
 
-- by default the build script prefers locally installed macOS 15.x or 14.x Command Line Tools SDKs when available
-- if you need to force a specific SDK, set `MACOS_SDK_PATH`
+- 默认优先使用本机已有的 macOS 15.x 或 14.x Command Line Tools SDK
+- 如果需要强制指定 SDK，可设置 `MACOS_SDK_PATH`
 
-Example:
+例如：
 
 ```bash
 MACOS_SDK_PATH=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk ./build_codex_biancezhe_app.sh
 ```
 
-## Run
+## 启动
 
-Open the app:
+构建完成后可直接打开：
 
 ```bash
 open -na "./Codex Taskmaster.app"
 ```
 
-Or launch it from Finder after building.
+也可以在 Finder 里双击打开。
 
-## Checks
+## 检查
 
-Run the local project checks:
+执行项目自检：
 
 ```bash
 bash ./scripts/check.sh
 ```
 
-This runs:
+当前检查内容包括：
 
-- shell syntax validation
-- helper smoke tests
-- Swift typecheck with warnings treated as errors
-- app build
+- shell 语法检查
+- helper 冒烟测试
+- Swift 类型检查
+- app 构建
 
-## How It Works
+## 工作方式
 
-There are two main components:
+项目主要由两部分组成：
 
 - `CodexBianCeZheApp.swift`
-  - the AppKit desktop UI
-  - scans sessions
-  - manages queued send requests
-  - posts keystrokes into Terminal
+  - 桌面界面
+  - session 状态扫描
+  - 发送请求排队与结果回收
+  - 通过辅助功能把内容发到 Terminal
 - `codex_terminal_sender.sh`
-  - helper CLI used by the app
-  - session probing
-  - loop persistence
-  - loop daemon lifecycle
+  - helper CLI
+  - session 探测
+  - 循环状态持久化
+  - 循环守护进程
+  - session 归档、恢复、删除等辅助能力
 
-The app queues send requests, probes the target session, and only sends in default mode when the session is in a sendable state. Delivery results are written back to the UI and loop logs.
+应用会先排队发送请求，再探测目标 session 状态。默认模式下，只有目标看起来可发送时才会真正输入；强制模式会跳过这层 session 状态限制，但仍会返回发送成功或失败原因。
 
-For session mutations, the app now prefers Codex's native app-server thread APIs instead of directly editing session state:
+## Session 名称语义
 
-- non-empty rename uses `thread/name/set`
-- delete uses `thread/archive`
+这个项目不会把 `threads.title` 直接当成真正的 session 名称。
 
-## Session Name Semantics
+这里采用的判断逻辑是：
 
-This project intentionally does not treat `threads.title` as the authoritative session name.
+- 真正 rename 过的 session，以 `~/.codex/session_index.jsonl` 为准
+- 如果那里没有对应记录，就视为“未 rename”
+- 界面中：
+  - `Name` 表示真正的 rename 名称
+  - `Target` 表示可以用于 resume 或发送的目标值
 
-Instead:
+这和本机 `codex resume` 的行为更接近。
 
-- a real renamed session is identified by `~/.codex/session_index.jsonl`
-- if no entry exists there, the session is treated as unnamed
-- the UI distinguishes:
-  - `Name`: actual renamed name only
-  - `Target`: the value you can use to resume or target the session
+非空 rename 会优先通过 Codex 原生 app-server API 的 `thread/name/set` 写回。清空名称时，由于原生 API 不接受空名称，所以仍然会回退到移除本地 `session_index.jsonl` 记录。
 
-This matches local `codex resume` behavior better than comparing `title` and `first_user_message` alone.
+## 发送模式
 
-The UI still reads names from local session state for display. Non-empty rename writes are issued through Codex's native app-server API so local state stays in the format Codex itself expects. Clearing a name falls back to removing the local `session_index.jsonl` entry because the native `thread/name/set` API rejects empty names.
+默认模式：
 
-## Sending Modes
-
-Default mode:
-
-- allows send only when the target is in a sendable state
-- currently accepts:
+- 只有当 session 看起来处于可发送状态时才发送
+- 当前接受的状态包括：
   - `idle_stable`
   - `interrupted_idle`
-- still requires Terminal to be at a clean `prompt_ready` state
+- 同时还要求 Terminal 处于干净的 `prompt_ready` 状态
 
-Force mode:
+强制模式：
 
-- ignores session-state gating
-- still requires a resolvable Terminal TTY
-- still verifies whether the user message actually advanced
+- 忽略 session 状态判断
+- 但仍然要求能定位到唯一 Terminal TTY
+- 发送后仍会检查用户消息是否真的推进
 
-Both modes report:
+两种模式都会尽量返回：
 
-- success or failure
-- reason
-- target
-- force flag
-- probe status
-- terminal state
-- detail
+- 成功或失败
+- 失败原因
+- 目标 session
+- 是否强制发送
+- probe 状态
+- terminal 状态
+- 具体细节
 
-## Logs
+## Session 操作语义
 
-`Activity Log` in the UI records:
+改名、归档和恢复归档优先走 Codex 原生 app-server API：
 
-- command execution
-- send success
-- send failure
-- send refusal due to state
-- verification failure
+- 非空 rename：`thread/name/set`
+- 归档：`thread/archive`
+- 恢复：`thread/unarchive`
 
-Per-loop logs are stored under:
+彻底删除不同于上面这三类操作：
+
+- 目前 Codex 没有公开的原生永久删除 thread API
+- 因此本项目里的“删除”是本地硬删除，不是公开原生语义
+- 删除时会尝试移除：
+  - `state_5.sqlite` 中的 thread 记录
+  - 已知依赖的本地扩展状态
+  - 结构化 thread 日志
+  - `session_index.jsonl` 中对应的 rename/name 记录
+  - rollout 文件本身
+- 因为这不是公开原生 API，所以界面会弹出明显的风险提示
+
+## 日志
+
+界面中的 `Activity Log` 会记录：
+
+- 执行了什么命令
+- 发送成功
+- 发送失败
+- 因状态不满足而拒发
+- 发送后验证失败
+- session 操作结果
+
+每个循环任务的日志保存在：
 
 ```text
 ~/.codex-terminal-sender/runtime/loop-logs/
 ```
 
-Each loop log records:
+循环日志会记录：
 
-- loop start
-- loop stop
-- sent results
-- deferred results
+- 循环开始
+- 循环停止
+- 实际发送结果
+- 因忙碌或未就绪而延期的结果
 
-## Repository Layout
+## 仓库结构
 
-- `CodexBianCeZheApp.swift`: main macOS app
-- `codex_terminal_sender.sh`: helper CLI and loop engine
-- `build_codex_biancezhe_app.sh`: build script
-- `generate_icon.swift`: app icon generator
-- `scripts/check.sh`: local validation entrypoint
-- `tests/test_helper_smoke.sh`: helper smoke tests
-- `legacy/`: early AppleScript/JXA prototypes
+- `CodexBianCeZheApp.swift`：主应用
+- `codex_terminal_sender.sh`：helper CLI 与循环引擎
+- `build_codex_biancezhe_app.sh`：构建脚本
+- `generate_icon.swift`：图标生成脚本
+- `scripts/check.sh`：项目检查入口
+- `tests/test_helper_smoke.sh`：helper 冒烟测试
+- `legacy/`：早期 AppleScript / JXA 原型
 
-Generated artifacts such as `.app` bundles and icon outputs are ignored by git.
+`.app` 包、图标输出等生成产物默认不纳入 Git。
 
-## Notes
+## 说明
 
-- This project is macOS-specific.
-- It currently targets Terminal.app, not iTerm2 or other terminal emulators.
-- It expects Codex local state files under the current user's home directory, unless overridden via environment variables supported by the helper script.
-- For `session_index.jsonl`, the helper accepts both `CODEX_TASKMASTER_CODEX_SESSION_INDEX_PATH` and the older `CODEX_TASKMASTER_SESSION_INDEX_PATH` override.
+- 这是一个 macOS 专用项目
+- 目前只针对 Terminal.app，不支持 iTerm2 等其他终端
+- 默认使用当前用户 `~/.codex` 下的本地状态目录
+- `session_index.jsonl` 的路径支持：
+  - `CODEX_TASKMASTER_CODEX_SESSION_INDEX_PATH`
+  - 兼容旧变量 `CODEX_TASKMASTER_SESSION_INDEX_PATH`
 
-## License
+## 许可证
 
-MIT. See [LICENSE](LICENSE).
+项目采用 MIT 许可证，见 [LICENSE](LICENSE)。
