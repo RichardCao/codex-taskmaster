@@ -989,7 +989,6 @@ thread_delete() {
   python3 - "$CODEX_STATE_DB_PATH" "$CODEX_LOGS_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "$thread_id" <<'PY'
 import json
 import os
-import shutil
 import sqlite3
 import sys
 

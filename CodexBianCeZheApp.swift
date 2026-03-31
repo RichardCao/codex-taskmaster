@@ -339,6 +339,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         archiveSessionButton.contentTintColor = .systemOrange
         restoreSessionButton.contentTintColor = .systemBlue
         deleteSessionButton.contentTintColor = .systemRed
+        saveRenameButton.toolTip = "保存当前 session 的名称"
+        archiveSessionButton.toolTip = "按 Codex 原生语义归档当前 session"
+        restoreSessionButton.toolTip = "恢复当前已归档 session"
+        deleteSessionButton.toolTip = "从本地状态中彻底删除当前 session"
 
         let renameRow = NSStackView(views: [renameField, saveRenameButton, archiveSessionButton, restoreSessionButton, deleteSessionButton])
         renameRow.orientation = .horizontal
@@ -547,6 +551,30 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func sessionEffectiveTarget(_ session: SessionSnapshot) -> String {
         let target = session.target.trimmingCharacters(in: .whitespacesAndNewlines)
         return target.isEmpty ? session.threadID : target
+    }
+
+    private func sessionPossibleTargets(_ session: SessionSnapshot) -> [String] {
+        var ordered: [String] = []
+
+        func append(_ value: String) {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !ordered.contains(trimmed) else { return }
+            ordered.append(trimmed)
+        }
+
+        append(session.threadID)
+        append(sessionActualName(session))
+        append(sessionEffectiveTarget(session))
+        append(session.preview)
+        return ordered
+    }
+
+    private func loopTargetsAffectingSession(_ session: SessionSnapshot) -> [String] {
+        let candidates = Set(sessionPossibleTargets(session))
+        guard !candidates.isEmpty else { return [] }
+        return loopSnapshots
+            .map(\.target)
+            .filter { candidates.contains($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
 
     private func parseThreadRuntimeStatus(_ raw: Any?) -> String {
@@ -784,6 +812,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         archiveSessionButton.isEnabled = !session.isArchived
         restoreSessionButton.isEnabled = session.isArchived
         deleteSessionButton.isEnabled = true
+        renameField.placeholderString = session.isArchived
+            ? "已归档 session 需先恢复后再改名"
+            : "输入新名称，留空可恢复为未 rename 状态"
         sessionDetailView.string = "\(sessionDetailText(for: session))\n\n提示词历史加载中…"
         sessionDetailView.scrollToBeginningOfDocument(nil)
 
@@ -2253,16 +2284,27 @@ conn.close()
             NSSound.beep()
             return
         }
+        let matchingLoopTargets = loopTargetsAffectingSession(session)
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "归档这个 Session？"
-        alert.informativeText = """
+        var informativeText = """
         这会调用 Codex 原生的 thread/archive。
         归档后该 session 会从当前非归档列表中消失，但后续仍可恢复。
 
         Session ID: \(session.threadID)
         Target: \(sessionEffectiveTarget(session))
         """
+        if !matchingLoopTargets.isEmpty {
+            informativeText += """
+
+            
+            警告：当前有循环任务仍可能指向这个 session：
+            \(matchingLoopTargets.joined(separator: ", "))
+            归档后这些循环不会自动停止。
+            """
+        }
+        alert.informativeText = informativeText
         alert.addButton(withTitle: "归档")
         alert.addButton(withTitle: "取消")
         alert.buttons.first?.hasDestructiveAction = true
@@ -2297,6 +2339,7 @@ conn.close()
                     )
                     self.setStatus("归档 Session 完成", key: "action")
                     self.appendOutput("已归档 session: \(session.threadID)")
+                    self.refreshLoopsSnapshot()
                 } else {
                     self.renameField.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.saveRenameButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
@@ -2372,6 +2415,7 @@ conn.close()
                     )
                     self.setStatus("恢复归档完成", key: "action")
                     self.appendOutput("已恢复归档 session: \(session.threadID)")
+                    self.refreshLoopsSnapshot()
                 } else {
                     self.renameField.isEnabled = false
                     self.saveRenameButton.isEnabled = false
@@ -2397,10 +2441,11 @@ conn.close()
         }
 
         let session = sessionSnapshots[selectedRow]
+        let matchingLoopTargets = loopTargetsAffectingSession(session)
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "彻底删除这个 Session？"
-        alert.informativeText = """
+        var informativeText = """
         这是本地不可恢复删除，不是 Codex 当前公开的原生 archive/unarchive 语义。
         删除后会尝试同时移除：
         - state_5.sqlite 中的 thread 记录
@@ -2417,6 +2462,16 @@ conn.close()
         Name: \(sessionActualName(session).isEmpty ? "-" : sessionActualName(session))
         当前路径: \(session.rolloutPath.isEmpty ? "-" : session.rolloutPath)
         """
+        if !matchingLoopTargets.isEmpty {
+            informativeText += """
+
+            
+            警告：当前有循环任务仍可能指向这个 session：
+            \(matchingLoopTargets.joined(separator: ", "))
+            删除后这些循环不会自动停止，后续只会继续失败或延期。
+            """
+        }
+        alert.informativeText = informativeText
         alert.addButton(withTitle: "删除")
         alert.addButton(withTitle: "取消")
         alert.buttons.first?.hasDestructiveAction = true
@@ -2451,6 +2506,7 @@ conn.close()
                     )
                     self.setStatus("彻底删除完成", key: "action")
                     self.appendOutput(result.detail.isEmpty ? "已彻底删除 session: \(session.threadID)" : result.detail)
+                    self.refreshLoopsSnapshot()
                 } else {
                     self.updateSessionDetailView()
                     self.setStatus("彻底删除失败", key: "action")
