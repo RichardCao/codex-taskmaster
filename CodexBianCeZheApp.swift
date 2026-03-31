@@ -44,8 +44,39 @@ private func initialTargetValue() -> String {
     return saved
 }
 
+final class AdjustableSplitView: NSSplitView {
+    override var dividerThickness: CGFloat { 10 }
+
+    override func drawDivider(in rect: NSRect) {
+        NSColor.windowBackgroundColor.setFill()
+        rect.fill()
+
+        let lineThickness: CGFloat = 1
+        let lineRect: NSRect
+        if isVertical {
+            lineRect = NSRect(
+                x: rect.midX - (lineThickness / 2),
+                y: rect.minY + 2,
+                width: lineThickness,
+                height: max(0, rect.height - 4)
+            )
+        } else {
+            lineRect = NSRect(
+                x: rect.minX + 2,
+                y: rect.midY - (lineThickness / 2),
+                width: max(0, rect.width - 4),
+                height: lineThickness
+            )
+        }
+
+        NSColor.separatorColor.withAlphaComponent(0.7).setFill()
+        lineRect.fill()
+    }
+}
+
 final class CodexBianCeZheApp: NSObject, NSApplicationDelegate {
     private var windowController: MainWindowController?
+    private var didRunTerminationCleanup = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -60,6 +91,30 @@ final class CodexBianCeZheApp: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        performTerminationCleanupIfNeeded()
+    }
+
+    private func performTerminationCleanupIfNeeded() {
+        guard !didRunTerminationCleanup else { return }
+        didRunTerminationCleanup = true
+
+        let process = Process()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.executableURL = URL(fileURLWithPath: resolvedHelperPath())
+        process.arguments = ["stop", "--all"]
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return
+        }
     }
 
     private func buildMainMenu() -> NSMenu {
@@ -99,6 +154,8 @@ final class MainWindowController: NSWindowController {
         )
         window.title = "Codex Taskmaster"
         window.minSize = NSSize(width: 760, height: 520)
+        window.contentMinSize = NSSize(width: 760, height: 520)
+        window.contentMaxSize = NSSize(width: 10_000, height: 10_000)
         window.contentViewController = contentViewController
         super.init(window: window)
         shouldCascadeWindows = true
@@ -163,8 +220,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let renameField = NSTextField(string: "")
     private let sessionDetailView = NSTextView()
     private let sessionDetailScrollView = NSScrollView()
-    private let topSplitView = NSSplitView()
-    private let contentSplitView = NSSplitView()
+    private let topSplitView = AdjustableSplitView()
+    private let contentSplitView = AdjustableSplitView()
     private let outputView = NSTextView()
     private let statusLabel = NSTextField(labelWithString: "Ready")
     private let activeLoopsMetaLabel = NSTextField(labelWithString: "No active loops.")
@@ -394,12 +451,16 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         renameField.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
         let sessionStatusPanel = makePanel(title: "Session Status", metaLabel: sessionStatusMetaLabel, contentView: sessionStatusContentStack)
         let logPanel = makePanel(title: "Activity Log", metaLabel: nil, contentView: outputScrollView)
+        let activeLoopsPane = makeSplitPane(contentView: activeLoopsPanel, minWidth: 260, minHeight: 220)
+        let sessionStatusPane = makeSplitPane(contentView: sessionStatusPanel, minWidth: 300, minHeight: 220)
+        let topContentPane = makeSplitPane(contentView: topSplitView, minHeight: 260)
+        let logPane = makeSplitPane(contentView: logPanel, minHeight: 180)
         topSplitView.isVertical = true
         topSplitView.dividerStyle = .thin
         topSplitView.translatesAutoresizingMaskIntoConstraints = false
         topSplitView.delegate = self
-        topSplitView.addArrangedSubview(activeLoopsPanel)
-        topSplitView.addArrangedSubview(sessionStatusPanel)
+        topSplitView.addArrangedSubview(activeLoopsPane)
+        topSplitView.addArrangedSubview(sessionStatusPane)
         topSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         topSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
 
@@ -407,8 +468,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         contentSplitView.dividerStyle = .thin
         contentSplitView.translatesAutoresizingMaskIntoConstraints = false
         contentSplitView.delegate = self
-        contentSplitView.addArrangedSubview(topSplitView)
-        contentSplitView.addArrangedSubview(logPanel)
+        contentSplitView.addArrangedSubview(topContentPane)
+        contentSplitView.addArrangedSubview(logPane)
         contentSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         contentSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
 
@@ -481,7 +542,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func configureSessionStatusTable() {
         let columns: [(identifier: String, title: String, width: CGFloat)] = [
             ("name", "Name", 180),
-            ("target", "Target", 180),
             ("threadID", "Session ID", 210),
             ("status", "Status", 150),
             ("terminalState", "Terminal", 110),
@@ -683,8 +743,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             switch key {
             case "name":
                 orderedAscending = sessionActualName(lhs).localizedStandardCompare(sessionActualName(rhs)) == .orderedAscending
-            case "target":
-                orderedAscending = sessionEffectiveTarget(lhs).localizedStandardCompare(sessionEffectiveTarget(rhs)) == .orderedAscending
             case "threadID":
                 orderedAscending = lhs.threadID.localizedStandardCompare(rhs.threadID) == .orderedAscending
             case "status":
@@ -712,8 +770,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         switch key {
         case "name":
             return sessionActualName(lhs) == sessionActualName(rhs)
-        case "target":
-            return sessionEffectiveTarget(lhs) == sessionEffectiveTarget(rhs)
         case "threadID":
             return lhs.threadID == rhs.threadID
         case "status":
@@ -734,7 +790,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func sessionDetailText(for session: SessionSnapshot) -> String {
         let name = sessionActualName(session)
         var lines = [
-            "Target: \(sessionEffectiveTarget(session))",
             "Name: \(name.isEmpty ? "-" : name)",
             "Session ID: \(session.threadID)",
             "Archived: \(session.isArchived ? "yes" : "no")",
@@ -1099,6 +1154,33 @@ conn.close()
         contentView.widthAnchor.constraint(equalTo: panelStack.widthAnchor).isActive = true
 
         return panelStack
+    }
+
+    private func makeSplitPane(contentView: NSView, minWidth: CGFloat? = nil, minHeight: CGFloat? = nil) -> NSView {
+        let pane = NSView()
+        pane.translatesAutoresizingMaskIntoConstraints = true
+        pane.addSubview(contentView)
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            contentView.topAnchor.constraint(equalTo: pane.topAnchor),
+            contentView.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+            contentView.bottomAnchor.constraint(equalTo: pane.bottomAnchor)
+        ])
+
+        if let minWidth {
+            pane.widthAnchor.constraint(greaterThanOrEqualToConstant: minWidth).isActive = true
+        }
+        if let minHeight {
+            pane.heightAnchor.constraint(greaterThanOrEqualToConstant: minHeight).isActive = true
+        }
+
+        pane.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        pane.setContentHuggingPriority(.defaultLow, for: .vertical)
+        pane.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        pane.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        return pane
     }
 
     private func makeFieldLabel(_ text: String) -> NSTextField {
@@ -1516,6 +1598,20 @@ conn.close()
         }.joined(separator: " | ")
     }
 
+    private func shouldAutoClearResidualInput(probeStatus: String, terminalState: String) -> Bool {
+        probeStatus == "idle_with_residual_input" && terminalState == "prompt_with_input"
+    }
+
+    private func isSendableProbeState(probeStatus: String, terminalState: String) -> Bool {
+        if terminalState == "prompt_ready" && (probeStatus == "idle_stable" || probeStatus == "interrupted_idle") {
+            return true
+        }
+        if shouldAutoClearResidualInput(probeStatus: probeStatus, terminalState: terminalState) {
+            return true
+        }
+        return false
+    }
+
     private func verifyUserMessageAdvanced(target: String, previousTimestamp: String, timeoutSeconds: TimeInterval) -> (success: Bool, probe: (status: Int32, values: [String: String], stdout: String, stderr: String)) {
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         var latestProbe = probeResult(for: target)
@@ -1595,11 +1691,25 @@ conn.close()
 
         let probeStatus = initialProbe.values["status"] ?? "unknown"
         let terminalState = initialProbe.values["terminal_state"] ?? "unknown"
-        let tty = initialProbe.values["tty"] ?? ""
+        let rawTTY = initialProbe.values["tty"] ?? ""
+        let tty = rawTTY == "-" ? "" : rawTTY
         let previousUserTimestamp = initialProbe.values["last_user_message_at"] ?? ""
-
-        let sendableByState = terminalState == "prompt_ready" && (probeStatus == "idle_stable" || probeStatus == "interrupted_idle")
-        guard !tty.isEmpty && (forceSend || sendableByState) else {
+        let clearResidualInputBeforeSend = !forceSend && shouldAutoClearResidualInput(probeStatus: probeStatus, terminalState: terminalState)
+        let sendableByState = isSendableProbeState(probeStatus: probeStatus, terminalState: terminalState)
+        guard !tty.isEmpty else {
+            logActivity("发送请求失败: status=failed reason=tty_unavailable target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(compactProbeSummary(initialProbe))")
+            finish(with: [
+                "status": "failed",
+                "reason": "tty_unavailable",
+                "target": target,
+                "force_send": forceSend,
+                "detail": compactProbeSummary(initialProbe),
+                "probe_status": probeStatus,
+                "terminal_state": terminalState
+            ])
+            return
+        }
+        guard forceSend || sendableByState else {
             logActivity("发送请求失败: status=failed reason=not_sendable target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(compactProbeSummary(initialProbe))")
             finish(with: [
                 "status": "failed",
@@ -1617,7 +1727,11 @@ conn.close()
 
         do {
             try DispatchQueue.main.sync {
-                try self.sendViaAppKeystrokes(ttyPath: ttyPath, message: message)
+                try self.sendViaAppKeystrokes(
+                    ttyPath: ttyPath,
+                    message: message,
+                    clearExistingInput: clearResidualInputBeforeSend
+                )
             }
         } catch {
             logActivity("发送请求失败: status=failed reason=send_interrupted target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(error.localizedDescription)")
@@ -1641,7 +1755,7 @@ conn.close()
 
         if verification.success {
             let reason = forceSend ? "forced_sent" : "sent"
-            let detail = "sent message via app sender to target=\(target) tty=\(tty)"
+            let detail = "sent message via app sender to target=\(target) tty=\(tty) clear_existing_input=\(clearResidualInputBeforeSend ? "yes" : "no")"
             logActivity("发送请求完成: status=success reason=\(reason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
             finish(with: [
                 "status": "success",
@@ -1703,17 +1817,44 @@ conn.close()
         let script = """
         on run argv
           set targetTTY to item 1 of argv
-          tell application "Terminal"
-            activate
-            repeat with w in windows
+          repeat with attempt from 1 to 6
+            tell application "Terminal" to activate
+            delay 0.05
+
+            tell application "Terminal"
+              repeat with w in windows
+                try
+                  repeat with t in tabs of w
+                    if (tty of t) is equal to targetTTY then
+                      set selected tab of w to t
+                      set index of w to 1
+                      exit repeat
+                    end if
+                  end repeat
+                end try
+              end repeat
+            end tell
+
+            delay 0.10
+
+            tell application "System Events"
               try
-                if (tty of selected tab of w) is equal to targetTTY then
-                  set index of w to 1
-                  return "ok"
-                end if
+                set frontAppName to name of first application process whose frontmost is true
+              on error
+                set frontAppName to ""
               end try
-            end repeat
-          end tell
+            end tell
+
+            if frontAppName is equal to "Terminal" then
+              tell application "Terminal"
+                try
+                  if (tty of selected tab of front window) is equal to targetTTY then
+                    return "ok"
+                  end if
+                end try
+              end tell
+            end if
+          end repeat
           error "could not focus Terminal window for " & targetTTY
         end run
         """
@@ -1736,24 +1877,35 @@ conn.close()
             let errText = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "聚焦 Terminal 失败"
             throw NSError(domain: "CodexTaskmaster", code: 4, userInfo: [NSLocalizedDescriptionKey: errText])
         }
-        usleep(250_000)
+        usleep(120_000)
     }
 
-    private func sendViaAppKeystrokes(ttyPath: String, message: String) throws {
+    private func clearPromptInputIfNeeded() throws {
+        try postKey(53)
+        usleep(100_000)
+        try postKey(32, flags: .maskControl)
+        usleep(220_000)
+    }
+
+    private func sendViaAppKeystrokes(ttyPath: String, message: String, clearExistingInput: Bool) throws {
         guard ensureAccessibilityTrust(prompt: true) else {
             throw NSError(domain: "CodexTaskmaster", code: 5, userInfo: [NSLocalizedDescriptionKey: "Codex Taskmaster 没有辅助功能权限，无法发送按键"])
         }
 
         try focusTerminalWindow(for: ttyPath)
 
+        if clearExistingInput {
+            try clearPromptInputIfNeeded()
+        }
+
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(message, forType: .string)
 
-        usleep(300_000)
+        usleep(250_000)
         try postKey(9, flags: .maskCommand)
-        usleep(700_000)
+        usleep(350_000)
         try postKey(36)
-        usleep(500_000)
+        usleep(250_000)
     }
 
     private func runHelper(arguments: [String], actionName: String) {
@@ -2590,8 +2742,6 @@ conn.close()
         switch tableColumn.identifier.rawValue {
         case "name":
             textField.stringValue = sessionActualName(session)
-        case "target":
-            textField.stringValue = sessionEffectiveTarget(session)
         case "threadID":
             textField.stringValue = session.threadID
         case "status":
@@ -2653,6 +2803,37 @@ conn.close()
         } else if splitView == contentSplitView {
             updateContentSplitRatioFromCurrentLayout()
         }
+    }
+
+    func splitView(_ splitView: NSSplitView, effectiveRect proposedEffectiveRect: NSRect, forDrawnRect drawnRect: NSRect, ofDividerAt dividerIndex: Int) -> NSRect {
+        guard splitView == topSplitView || splitView == contentSplitView else {
+            return proposedEffectiveRect
+        }
+
+        if splitView.isVertical {
+            return drawnRect.insetBy(dx: -5, dy: 0)
+        }
+        return drawnRect.insetBy(dx: 0, dy: -6)
+    }
+
+    func splitView(_ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        if splitView == topSplitView {
+            let availableWidth = splitView.bounds.width - splitView.dividerThickness
+            guard availableWidth > 0 else { return proposedPosition }
+            let minLeading: CGFloat = 260
+            let minTrailing: CGFloat = 300
+            return min(max(proposedPosition, minLeading), availableWidth - minTrailing)
+        }
+
+        if splitView == contentSplitView {
+            let availableHeight = splitView.bounds.height - splitView.dividerThickness
+            guard availableHeight > 0 else { return proposedPosition }
+            let minTop: CGFloat = 260
+            let minBottom: CGFloat = 180
+            return min(max(proposedPosition, minTop), availableHeight - minBottom)
+        }
+
+        return proposedPosition
     }
 
     private static let timestampFormatter: DateFormatter = {

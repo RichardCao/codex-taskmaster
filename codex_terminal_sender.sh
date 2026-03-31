@@ -422,6 +422,9 @@ PY
   if [[ -z "$tty_name" && -n "${session_name:-}" && "$session_name" != "$target" ]]; then
     tty_name="$(find_unique_tty "$session_name" 2>/dev/null || true)"
   fi
+  if [[ -z "$tty_name" && -n "${thread_id:-}" && "$thread_id" != "$target" ]]; then
+    tty_name="$(find_unique_tty "$thread_id" 2>/dev/null || true)"
+  fi
   if [[ -z "$tty_name" && -n "${thread_title:-}" && "$thread_title" != "$target" && "${thread_title:-}" != "${first_user_message:-}" ]]; then
     tty_name="$(find_unique_tty "$thread_title" 2>/dev/null || true)"
   fi
@@ -1428,9 +1431,13 @@ start_loop() {
   local force_send="${4:-0}"
   local key
   local source_tag
+  local thread_id
 
   ensure_loop_daemon
-  find_unique_tty "$target" >/dev/null
+  thread_id="$(resolve_thread_id "$target")"
+  if ! find_unique_tty "$target" >/dev/null 2>&1; then
+    find_unique_tty "$thread_id" >/dev/null
+  fi
   key="$(hash_target "$target")"
   paths_for_target "$key"
   write_kv_file "$LOOP_FILE" \
