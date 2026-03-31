@@ -1,0 +1,1326 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_NAME="codex-terminal-sender"
+DEFAULT_INTERVAL=600
+DEFAULT_MESSAGE="继续"
+PASTE_DELAY_SECONDS="${CODEX_TASKMASTER_PASTE_DELAY_SECONDS:-0.35}"
+SUBMIT_DELAY_SECONDS="${CODEX_TASKMASTER_SUBMIT_DELAY_SECONDS:-0.90}"
+RESTORE_CLIPBOARD_DELAY_SECONDS="${CODEX_TASKMASTER_RESTORE_CLIPBOARD_DELAY_SECONDS:-1.20}"
+LOOP_POST_SEND_COOLDOWN_SECONDS="${CODEX_TASKMASTER_LOOP_POST_SEND_COOLDOWN_SECONDS:-1.50}"
+PROBE_RECENT_LOG_WINDOW_SECONDS="${CODEX_TASKMASTER_PROBE_RECENT_LOG_WINDOW_SECONDS:-45}"
+SEND_STABLE_IDLE_SECONDS="${CODEX_TASKMASTER_SEND_STABLE_IDLE_SECONDS:-2}"
+SEND_IDLE_TIMEOUT_SECONDS="${CODEX_TASKMASTER_SEND_IDLE_TIMEOUT_SECONDS:-20}"
+LOOP_IDLE_TIMEOUT_SECONDS="${CODEX_TASKMASTER_LOOP_IDLE_TIMEOUT_SECONDS:-12}"
+LOOP_BUSY_RETRY_SECONDS="${CODEX_TASKMASTER_LOOP_BUSY_RETRY_SECONDS:-5}"
+
+STATE_DIR="${CODEX_TASKMASTER_STATE_DIR:-${HOME}/.codex-terminal-sender}"
+REQUESTS_DIR="${STATE_DIR}/requests"
+PENDING_REQUEST_DIR="${REQUESTS_DIR}/pending"
+PROCESSING_REQUEST_DIR="${REQUESTS_DIR}/processing"
+RESULT_REQUEST_DIR="${REQUESTS_DIR}/results"
+LOOPS_DIR="${STATE_DIR}/loops"
+RUNTIME_DIR="${STATE_DIR}/runtime"
+LOOP_STATE_DIR="${RUNTIME_DIR}/user-loop-state"
+LOOP_LOG_DIR="${RUNTIME_DIR}/loop-logs"
+LOOP_DAEMON_PID_FILE="${RUNTIME_DIR}/loop-daemon.pid"
+LOOP_DAEMON_LOG_FILE="${RUNTIME_DIR}/loop-daemon.log"
+CODEX_STATE_DB_PATH="${CODEX_TASKMASTER_CODEX_STATE_DB_PATH:-${HOME}/.codex/state_5.sqlite}"
+CODEX_SESSION_INDEX_PATH="${CODEX_TASKMASTER_SESSION_INDEX_PATH:-${HOME}/.codex/session_index.jsonl}"
+CODEX_LOGS_DB_PATH="${CODEX_TASKMASTER_CODEX_LOGS_DB_PATH:-${HOME}/.codex/logs_1.sqlite}"
+
+mkdir -p "$STATE_DIR" "$REQUESTS_DIR" "$PENDING_REQUEST_DIR" "$PROCESSING_REQUEST_DIR" "$RESULT_REQUEST_DIR" "$LOOPS_DIR" "$RUNTIME_DIR" "$LOOP_STATE_DIR" "$LOOP_LOG_DIR"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  codex_terminal_sender.sh send        -t TARGET [-m MESSAGE] [-f]
+  codex_terminal_sender.sh start       -t TARGET [-m MESSAGE] [-i SECONDS] [-f]
+  codex_terminal_sender.sh stop        [-t TARGET | --all]
+  codex_terminal_sender.sh status      [-t TARGET]
+  codex_terminal_sender.sh probe       -t TARGET
+  codex_terminal_sender.sh probe-all   [-l LIMIT] [-o OFFSET]
+  codex_terminal_sender.sh session-count
+  codex_terminal_sender.sh wait-idle   -t TARGET [-s SECONDS] [-w SECONDS]
+  codex_terminal_sender.sh loop-daemon
+
+Commands:
+  send        Send one message to the matching Terminal tab via GUI paste + Return
+  start       Create or update a repeating loop
+  stop        Stop one loop by target, or all loops with --all
+  status      Show one loop status by target, or all loop statuses
+  probe       Inspect the local Codex rollout/log state for one target
+  probe-all   Inspect known Codex sessions and summarize their statuses
+  session-count
+              Print the total number of non-archived Codex sessions
+  wait-idle   Wait until the target appears stably idle
+  loop-daemon Internal command: user-owned background loop runner
+EOF
+}
+
+die() {
+  echo "$*" >&2
+  exit 1
+}
+
+require_cmd() {
+  local cmd="$1"
+  command -v "$cmd" >/dev/null 2>&1 || die "$cmd command not found"
+}
+
+hash_target() {
+  local target="$1"
+  printf '%s' "$target" | shasum -a 256 | awk '{print $1}'
+}
+
+paths_for_target() {
+  local key="$1"
+  LOOP_FILE="${LOOPS_DIR}/${key}.loop"
+  LOOP_STATUS_FILE="${LOOP_STATE_DIR}/${key}.state"
+  LOOP_LOG_FILE="${LOOP_LOG_DIR}/${key}.log"
+}
+
+load_kv_file() {
+  local file="$1"
+  # shellcheck disable=SC1090
+  source "$file"
+}
+
+write_kv_file() {
+  local file="$1"
+  shift
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/${APP_NAME}.kv.XXXXXX")"
+  {
+    while [[ $# -gt 0 ]]; do
+      local key="$1"
+      local value="$2"
+      printf '%s=%q\n' "$key" "$value"
+      shift 2
+    done
+  } >"$tmp"
+  mv "$tmp" "$file"
+}
+
+is_pid_running() {
+  local pid="$1"
+  [[ -n "$pid" ]] && ps -p "$pid" -o pid= >/dev/null 2>&1
+}
+
+loop_daemon_pid() {
+  [[ -f "$LOOP_DAEMON_PID_FILE" ]] || return 1
+  cat "$LOOP_DAEMON_PID_FILE"
+}
+
+loop_daemon_running() {
+  local pid
+  pid="$(loop_daemon_pid 2>/dev/null || true)"
+  [[ -n "$pid" ]] && is_pid_running "$pid"
+}
+
+sender_daemon_records() {
+  ps -axo user=,pid=,command= | awk -v script="$0" '
+    index($0, script " loop-daemon") > 0 || index($0, script " daemon") > 0 {
+      user = $1
+      pid = $2
+      command = $0
+      sub(/^[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+/, "", command)
+      mode = "unknown"
+      if (index(command, script " loop-daemon") > 0) {
+        mode = "loop-daemon"
+      } else if (index(command, script " daemon") > 0) {
+        mode = "legacy-daemon"
+      }
+      print user "|" pid "|" mode "|" command
+    }
+  '
+}
+
+legacy_sender_warning_lines() {
+  local line
+  local warning_found=1
+
+  while IFS='|' read -r daemon_user daemon_pid daemon_mode daemon_command; do
+    [[ -n "${daemon_pid:-}" ]] || continue
+    warning_found=0
+    if [[ "$daemon_user" != "$(id -un)" ]]; then
+      printf 'warning: detected %s owned by %s pid=%s; it may keep sending until manually stopped\n' "$daemon_mode" "$daemon_user" "$daemon_pid"
+    fi
+  done < <(sender_daemon_records)
+
+  return "$warning_found"
+}
+
+stop_user_owned_sender_daemons() {
+  local current_user
+  local stop_failed=0
+  current_user="$(id -un)"
+
+  while IFS='|' read -r daemon_user daemon_pid daemon_mode daemon_command; do
+    [[ -n "${daemon_pid:-}" ]] || continue
+    [[ "$daemon_user" == "$current_user" ]] || continue
+    kill "$daemon_pid" 2>/dev/null || stop_failed=1
+  done < <(sender_daemon_records)
+
+  rm -f "$LOOP_DAEMON_PID_FILE" 2>/dev/null || true
+
+  return "$stop_failed"
+}
+
+append_loop_log_line() {
+  local file="$1"
+  shift
+  touch "$file" 2>/dev/null || true
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$file" 2>/dev/null || true
+}
+
+last_nonempty_log_line() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  awk 'NF { line = $0 } END { if (line != "") print line }' "$file"
+}
+
+extract_probe_field() {
+  local probe_text="$1"
+  local field_name="$2"
+  printf '%s\n' "$probe_text" | awk -F': ' -v name="$field_name" '$1==name { print $2; exit }'
+}
+
+make_request_id() {
+  python3 - <<'PY'
+import os
+import time
+print(f"{int(time.time()*1000)}-{os.getpid()}-{os.urandom(4).hex()}")
+PY
+}
+
+request_paths_for_id() {
+  local request_id="$1"
+  REQUEST_FILE="${PENDING_REQUEST_DIR}/${request_id}.request.json"
+  PROCESSING_FILE="${PROCESSING_REQUEST_DIR}/${request_id}.request.json"
+  RESULT_FILE="${RESULT_REQUEST_DIR}/${request_id}.result.json"
+}
+
+queue_send_request() {
+  local target="$1"
+  local message="$2"
+  local source_tag="$3"
+  local timeout_seconds="$4"
+  local force_send="${5:-0}"
+  local request_id
+
+  request_id="$(make_request_id)"
+  request_paths_for_id "$request_id"
+  python3 - "$REQUEST_FILE" "$request_id" "$target" "$message" "$source_tag" "$timeout_seconds" "$force_send" <<'PY'
+import json
+import sys
+import time
+
+path, request_id, target, message, source_tag, timeout_seconds, force_send = sys.argv[1:]
+payload = {
+    "request_id": request_id,
+    "target": target,
+    "message": message,
+    "source_tag": source_tag,
+    "timeout_seconds": int(timeout_seconds),
+    "force_send": force_send == "1",
+    "created_at": int(time.time()),
+}
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(payload, fh, ensure_ascii=False)
+PY
+  printf '%s\n' "$request_id"
+}
+
+await_send_result() {
+  local request_id="$1"
+  local timeout_seconds="$2"
+  local started_at
+  started_at="$(date +%s)"
+  request_paths_for_id "$request_id"
+
+  while true; do
+    if [[ -f "$RESULT_FILE" ]]; then
+      local result_json
+      local result_status
+      local result_text
+      result_json="$(cat "$RESULT_FILE")"
+      rm -f "$RESULT_FILE" 2>/dev/null || true
+      result_status="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' <<<"$result_json")"
+      result_text="$(python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+keys = [
+    "status",
+    "reason",
+    "target",
+    "force_send",
+    "probe_status",
+    "terminal_state",
+    "detail",
+]
+for key in keys:
+    if key not in data:
+        continue
+    value = data.get(key)
+    if value in (None, ""):
+        continue
+    if isinstance(value, bool):
+        value = "yes" if value else "no"
+    print(f"{key}: {value}")
+' <<<"$result_json")"
+
+      if [[ "$result_status" == "success" ]]; then
+        printf '%s\n' "$result_text"
+        return 0
+      fi
+
+      [[ -n "$result_text" ]] && printf '%s\n' "$result_text" >&2
+      return 1
+    fi
+
+    if (( $(date +%s) - started_at >= timeout_seconds )); then
+      die "send request timed out after ${timeout_seconds}s waiting for app response"
+    fi
+
+    sleep 1
+  done
+}
+
+resolve_thread_id() {
+  local target="$1"
+  local thread_id=""
+
+  if [[ "$target" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+    thread_id="$target"
+  else
+    thread_id="$(
+      python3 - "$CODEX_STATE_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "$target" <<'PY'
+import json
+import os
+import sqlite3
+import sys
+
+db_path, session_index_path, target = sys.argv[1:]
+target = target.strip()
+
+latest_names = {}
+if os.path.exists(session_index_path):
+    with open(session_index_path, "r", encoding="utf-8") as fh:
+        for raw_line in fh:
+            raw_line = raw_line.strip()
+            if not raw_line:
+                continue
+            try:
+                obj = json.loads(raw_line)
+            except json.JSONDecodeError:
+                continue
+            thread_id = obj.get("id")
+            thread_name = (obj.get("thread_name") or "").strip()
+            if thread_id and thread_name:
+                latest_names[thread_id] = thread_name
+
+matching_ids = [thread_id for thread_id, thread_name in latest_names.items() if thread_name == target]
+if len(matching_ids) == 1:
+    print(matching_ids[0], end="")
+    raise SystemExit(0)
+
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+row = cur.execute(
+    "select id from threads where title = ? order by updated_at desc limit 1",
+    (target,),
+).fetchone()
+conn.close()
+if row and row[0]:
+    print(row[0], end="")
+PY
+    )"
+  fi
+
+  [[ -n "$thread_id" ]] || die "could not resolve Codex thread id for target '$target'"
+  printf '%s\n' "$thread_id"
+}
+
+probe_session_status() {
+  local target="$1"
+  local thread_id
+  local rollout_path
+  local thread_title
+  local first_user_message
+  local session_name
+  local tty_name=""
+
+  require_cmd python3
+  require_cmd sqlite3
+
+  thread_id="$(resolve_thread_id "$target")"
+  IFS='|' read -r rollout_path thread_title first_user_message session_name <<<"$(python3 - "$CODEX_STATE_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "$thread_id" <<'PY'
+import json
+import os
+import sqlite3
+import sys
+
+db_path, session_index_path, thread_id = sys.argv[1:]
+
+session_name = ""
+if os.path.exists(session_index_path):
+    with open(session_index_path, "r", encoding="utf-8") as fh:
+        for raw_line in fh:
+            raw_line = raw_line.strip()
+            if not raw_line:
+                continue
+            try:
+                obj = json.loads(raw_line)
+            except json.JSONDecodeError:
+                continue
+            if obj.get("id") != thread_id:
+                continue
+            candidate = (obj.get("thread_name") or "").replace("\n", " ").strip()
+            if candidate:
+                session_name = candidate
+
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+row = cur.execute(
+    "select rollout_path, title, first_user_message from threads where id = ? limit 1",
+    (thread_id,),
+).fetchone()
+conn.close()
+if row:
+    values = [(value or "").replace("\n", " ") for value in row]
+    values.append(session_name)
+    print("|".join(values))
+PY
+ 2>/dev/null)"
+
+  [[ -n "${rollout_path:-}" && -f "${rollout_path:-}" ]] || die "could not find rollout path for target '$target'"
+  tty_name="$(find_unique_tty "$target" 2>/dev/null || true)"
+  if [[ -z "$tty_name" && -n "${session_name:-}" && "$session_name" != "$target" ]]; then
+    tty_name="$(find_unique_tty "$session_name" 2>/dev/null || true)"
+  fi
+  if [[ -z "$tty_name" && -n "${thread_title:-}" && "$thread_title" != "$target" && "${thread_title:-}" != "${first_user_message:-}" ]]; then
+    tty_name="$(find_unique_tty "$thread_title" 2>/dev/null || true)"
+  fi
+
+  python3 - "$thread_id" "$thread_title" "$session_name" "$rollout_path" "$tty_name" "$CODEX_LOGS_DB_PATH" "$PROBE_RECENT_LOG_WINDOW_SECONDS" <<'PY'
+import json
+import sqlite3
+import sys
+import time
+import subprocess
+from pathlib import Path
+
+thread_id, thread_title, session_name, rollout_path, tty_name, logs_db, recent_log_window = sys.argv[1:]
+recent_log_window = int(recent_log_window)
+
+
+def read_terminal_snapshot(tty_value: str):
+    if not tty_value:
+        return {
+            "state": "unavailable",
+            "reason": "tty not found",
+            "window_id": "",
+            "busy": None,
+            "processes": "",
+            "tail": [],
+        }
+
+    target_tty = tty_value if tty_value.startswith("/dev/") else f"/dev/{tty_value}"
+    applescript = f'''
+tell application "Terminal"
+  repeat with w in windows
+    try
+      if (tty of selected tab of w) is equal to "{target_tty}" then
+        return (id of w as text) & linefeed & (busy of selected tab of w as text) & linefeed & ((processes of selected tab of w as text)) & linefeed & (contents of selected tab of w)
+      end if
+    end try
+  end repeat
+end tell
+return ""
+'''
+    try:
+        proc = subprocess.run(
+            ["osascript", "-"],
+            input=applescript,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        raw = proc.stdout
+    except Exception as exc:
+        return {
+            "state": "unavailable",
+            "reason": f"osascript failed: {exc}",
+            "window_id": "",
+            "busy": None,
+            "processes": "",
+            "tail": [],
+        }
+
+    lines = raw.splitlines()
+    window_id = lines[0].strip() if len(lines) >= 1 else ""
+    busy_text = lines[1].strip().lower() if len(lines) >= 2 else ""
+    processes = lines[2].strip() if len(lines) >= 3 else ""
+    contents = "\n".join(lines[3:]) if len(lines) >= 4 else ""
+    nonempty_tail = [line.rstrip() for line in contents.splitlines() if line.strip()][-14:]
+
+    prompt_line = ""
+    for line in reversed(nonempty_tail):
+        if line.startswith("› "):
+            prompt_line = line
+            break
+
+    footer_visible = any(("· ~" in line or "· /" in line) and "left" in line for line in nonempty_tail)
+    placeholder_visible = any("› Improve documentation in @filename" in line for line in nonempty_tail)
+    queued_messages_visible = any(
+        line.lstrip().startswith("↳ ") or "Messages to be submitted after next tool call" in line
+        for line in nonempty_tail
+    )
+
+    state = "no_visible_prompt"
+    reason = "prompt/footer not visible in terminal tail"
+    if queued_messages_visible:
+        state = "queued_messages_pending"
+        reason = "queued messages are visible in the terminal tail"
+    elif placeholder_visible and footer_visible:
+        state = "prompt_ready"
+        reason = "placeholder prompt and model footer are visible"
+    elif prompt_line and footer_visible:
+        state = "prompt_with_input"
+        reason = "prompt line and model footer are visible with non-placeholder input"
+    elif footer_visible:
+        state = "footer_visible_only"
+        reason = "model footer is visible without a clear prompt line"
+
+    return {
+        "state": state,
+        "reason": reason,
+        "window_id": window_id,
+        "busy": (busy_text == "true"),
+        "processes": processes,
+        "tail": nonempty_tail,
+    }
+
+
+events = []
+for raw in Path(rollout_path).read_text().splitlines():
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        continue
+    payload = obj.get("payload", {})
+    typ = obj.get("type")
+    ptype = payload.get("type")
+    if typ == "event_msg" and ptype in {"task_started", "task_complete", "turn_aborted", "user_message", "agent_message", "token_count"}:
+        events.append(
+            {
+                "timestamp": obj.get("timestamp"),
+                "kind": ptype,
+                "turn_id": payload.get("turn_id"),
+                "phase": payload.get("phase"),
+                "message": payload.get("message"),
+            }
+        )
+    elif typ == "response_item" and payload.get("type") == "message":
+        role = payload.get("role")
+        text = ""
+        for item in payload.get("content", []):
+            if item.get("type") in {"input_text", "output_text"}:
+                text = item.get("text") or ""
+                break
+        events.append(
+            {
+                "timestamp": obj.get("timestamp"),
+                "kind": f"response_{role}",
+                "turn_id": payload.get("turn_id"),
+                "phase": payload.get("phase"),
+                "message": text,
+            }
+        )
+
+last_started = None
+last_complete = None
+last_final = None
+last_aborted = None
+last_user = None
+for event in events:
+    kind = event["kind"]
+    if kind == "task_started":
+        last_started = event
+    elif kind == "task_complete":
+        last_complete = event
+    elif kind == "turn_aborted":
+        last_aborted = event
+    elif kind == "agent_message" and event.get("phase") == "final_answer":
+        last_final = event
+    elif kind == "user_message":
+        last_user = event
+
+recent_logs = []
+try:
+    conn = sqlite3.connect(logs_db)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        select ts, level, target, message
+        from logs
+        where thread_id = ?
+        order by ts desc, ts_nanos desc, id desc
+        limit 20
+        """,
+        (thread_id,),
+    )
+    recent_logs = cur.fetchall()
+    conn.close()
+except Exception:
+    recent_logs = []
+
+now_ts = time.time()
+recent_time_window_logs = [row for row in recent_logs if (now_ts - row[0]) <= recent_log_window]
+latest_log_message = recent_logs[0][3] if recent_logs else ""
+latest_log_age_seconds = int(now_ts - recent_logs[0][0]) if recent_logs else None
+has_recent_interrupt = any((row[3] or "").find("interrupt received") >= 0 for row in recent_time_window_logs)
+has_recent_disconnect = any((row[3] or "").find("stream disconnected") >= 0 for row in recent_time_window_logs)
+terminal = read_terminal_snapshot(tty_name)
+
+status = "unknown"
+reason = "insufficient local events"
+if last_complete and (not last_started or last_complete["timestamp"] >= last_started["timestamp"]):
+    status = "idle_stable"
+    reason = "last completed turn is newer than the last started turn"
+if last_started and (not last_complete or last_started["timestamp"] > last_complete["timestamp"]):
+    status = "busy_turn_open"
+    reason = "a started turn has no later task_complete"
+if last_final and last_started and (not last_complete or last_complete["timestamp"] < last_final["timestamp"]):
+    status = "post_finalizing"
+    reason = "final answer emitted but task_complete not seen yet"
+if has_recent_interrupt and status == "busy_turn_open":
+    status = "interrupted_or_aborting"
+    reason = "open turn with a recent interrupt log"
+if has_recent_disconnect and status in {"busy_turn_open", "post_finalizing"}:
+    status = "busy_with_stream_issue"
+    reason = "open turn with recent stream disconnect warnings"
+if last_aborted and (not last_complete or last_aborted["timestamp"] > last_complete["timestamp"]):
+    if terminal["state"] == "prompt_ready":
+        status = "interrupted_idle"
+        reason = "a newer turn_aborted event is present and terminal is ready again"
+    else:
+        status = "interrupted_or_aborting"
+        reason = "a newer turn_aborted event is present"
+if status == "idle_stable" and terminal["state"] == "prompt_with_input":
+    status = "idle_with_residual_input"
+    reason = "turn is complete, but terminal still shows unsent input"
+if status == "idle_stable" and terminal["state"] == "queued_messages_pending":
+    status = "idle_with_queued_messages"
+    reason = "turn is complete, but queued messages are still visible in Terminal"
+if status in {"busy_turn_open", "post_finalizing"} and terminal["state"] == "prompt_ready":
+    status = "idle_prompt_visible_rollout_stale"
+    reason = "terminal is back at a ready prompt while rollout still looks open"
+if status == "idle_stable" and has_recent_interrupt and terminal["state"] == "prompt_ready":
+    status = "interrupted_idle"
+    reason = "terminal is ready and a fresh interrupt log was recorded"
+
+effective_target = session_name or thread_id
+print(f"target: {effective_target}")
+print(f"thread_id: {thread_id}")
+print(f"name: {session_name}")
+print(f"tty: {tty_name or '-'}")
+print(f"status: {status}")
+print(f"reason: {reason}")
+print(f"terminal_state: {terminal['state']}")
+print(f"terminal_reason: {terminal['reason']}")
+print(f"terminal_window_id: {terminal['window_id'] or '-'}")
+print(f"terminal_busy: {terminal['busy'] if terminal['busy'] is not None else '-'}")
+print(f"terminal_processes: {terminal['processes'] or '-'}")
+print(f"rollout_path: {rollout_path}")
+if last_started:
+    print(f"last_task_started_at: {last_started['timestamp']}")
+if last_final:
+    print(f"last_final_answer_at: {last_final['timestamp']}")
+if last_complete:
+    print(f"last_task_complete_at: {last_complete['timestamp']}")
+if last_aborted:
+    print(f"last_turn_aborted_at: {last_aborted['timestamp']}")
+if last_user:
+    print(f"last_user_message_at: {last_user['timestamp']}")
+    snippet = (last_user.get("message") or "").replace("\n", "\\n")
+    print(f"last_user_message: {snippet[:160]}")
+if latest_log_message:
+    print(f"latest_log: {latest_log_message[:220]}")
+if latest_log_age_seconds is not None:
+    print(f"latest_log_age_seconds: {latest_log_age_seconds}")
+if recent_time_window_logs:
+    print(f"recent_log_count_within_window: {len(recent_time_window_logs)}")
+if terminal["tail"]:
+    tail_text = " | ".join(line.replace("\n", "\\n") for line in terminal["tail"])
+    print(f"terminal_tail: {tail_text[:400]}")
+PY
+}
+
+session_count() {
+  require_cmd sqlite3
+  sqlite3 "$CODEX_STATE_DB_PATH" \
+    "select count(*) from threads where archived = 0;"
+}
+
+probe_all_sessions() {
+  require_cmd sqlite3
+  require_cmd python3
+
+  local thread_id
+  local updated_at
+  local display_name
+  local probe_output
+  local encoded_name
+
+  while IFS=$'\t' read -r thread_id updated_at encoded_name; do
+    [[ -n "${thread_id:-}" ]] || continue
+    display_name="$(printf '%s' "${encoded_name:-}" | python3 -c 'import base64,sys; data=sys.stdin.read().strip(); print(base64.b64decode(data).decode("utf-8") if data else "", end="")')"
+    echo "---"
+    if probe_output="$(probe_session_status "$thread_id" 2>&1)"; then
+      printf '%s\n' "$probe_output"
+    else
+      printf 'target: %s\n' "$thread_id"
+      printf 'thread_id: %s\n' "$thread_id"
+      printf 'name: %s\n' "$display_name"
+      printf 'status: probe_failed\n'
+      printf 'reason: %s\n' "$(printf '%s' "$probe_output" | tail -n 1)"
+      printf 'tty: -\n'
+      printf 'terminal_state: unavailable\n'
+    fi
+    printf 'updated_at_epoch: %s\n' "${updated_at:-0}"
+  done < <(
+    python3 - "$CODEX_STATE_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "${PROBE_LIMIT:-}" "${PROBE_OFFSET:-0}" <<'PY'
+import base64
+import json
+import os
+import sqlite3
+import sys
+
+db_path, session_index_path, limit_text, offset_text = sys.argv[1:]
+limit = int(limit_text) if limit_text else None
+offset = int(offset_text or "0")
+
+latest_names = {}
+if os.path.exists(session_index_path):
+    with open(session_index_path, "r", encoding="utf-8") as fh:
+        for raw_line in fh:
+            raw_line = raw_line.strip()
+            if not raw_line:
+                continue
+            try:
+                obj = json.loads(raw_line)
+            except json.JSONDecodeError:
+                continue
+            thread_id = obj.get("id")
+            thread_name = (obj.get("thread_name") or "").strip()
+            if thread_id and thread_name:
+                latest_names[thread_id] = thread_name
+
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+query = """
+select
+  id,
+  updated_at
+from threads
+where archived = 0
+order by updated_at desc
+"""
+params = []
+if limit is not None:
+    query += " limit ? offset ?"
+    params.extend([limit, offset])
+
+for thread_id, updated_at in cur.execute(query, params):
+    display_name = latest_names.get(thread_id, "")
+    encoded_name = base64.b64encode((display_name or "").encode("utf-8")).decode("ascii")
+    print(f"{thread_id}\t{updated_at}\t{encoded_name}")
+conn.close()
+PY
+  )
+}
+
+wait_until_idle() {
+  local target="$1"
+  local stable_seconds="$2"
+  local timeout_seconds="$3"
+  local started_at
+  local stable_started=""
+
+  started_at="$(date +%s)"
+  while true; do
+    local probe
+    probe="$(probe_session_status "$target")"
+    local status
+    local terminal_state
+    status="$(printf '%s\n' "$probe" | awk -F': ' '$1=="status"{print $2}')"
+    terminal_state="$(printf '%s\n' "$probe" | awk -F': ' '$1=="terminal_state"{print $2}')"
+
+    if [[ ( "$status" == "idle_stable" || "$status" == "interrupted_idle" ) && "$terminal_state" == "prompt_ready" ]]; then
+      if [[ -z "$stable_started" ]]; then
+        stable_started="$(date +%s)"
+      fi
+      if (( $(date +%s) - stable_started >= stable_seconds )); then
+        printf '%s\n' "$probe"
+        return 0
+      fi
+    else
+      stable_started=""
+    fi
+
+    if (( $(date +%s) - started_at >= timeout_seconds )); then
+      printf '%s\n' "$probe"
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+send_message_when_ready() {
+  local target="$1"
+  local message="$2"
+  local stable_seconds="${3:-$SEND_STABLE_IDLE_SECONDS}"
+  local timeout_seconds="${4:-$SEND_IDLE_TIMEOUT_SECONDS}"
+  local force_send="${5:-0}"
+  local request_id
+  request_id="$(queue_send_request "$target" "$message" "helper-send" "$timeout_seconds" "$force_send")"
+  await_send_result "$request_id" "$(( timeout_seconds + 10 ))"
+}
+
+find_unique_tty() {
+  local target="$1"
+  local tty_list
+
+  tty_list="$(
+    ps -axo tty=,command= | awk -v target="$target" '
+      {
+        needle = "codex resume " target
+        pos = index($0, needle)
+        if (pos > 0) {
+          after = substr($0, pos + length(needle), 1)
+          if (after == "" || after ~ /[[:space:]]/) {
+            if (!seen[$1]++) {
+              print $1
+            }
+          }
+        }
+      }
+    '
+  )"
+
+  local count
+  count="$(printf '%s\n' "$tty_list" | sed '/^$/d' | wc -l | tr -d ' ')"
+
+  case "$count" in
+    0) die "could not find a running 'codex resume ${target}' process" ;;
+    1) printf '%s\n' "$tty_list" | sed '/^$/d' ;;
+    *) die "found multiple matching Terminal ttys for target '${target}': $(printf '%s' "$tty_list" | tr '\n' ' ')" ;;
+  esac
+}
+
+send_once_via_terminal_gui() {
+  local target="$1"
+  local message="$2"
+  local tty_name
+  local tty_path
+
+  require_cmd osascript
+  tty_name="$(find_unique_tty "$target")"
+  tty_path="$tty_name"
+  [[ "$tty_path" == /dev/* ]] || tty_path="/dev/${tty_path}"
+
+  osascript - "$tty_path" "$message" "$PASTE_DELAY_SECONDS" "$SUBMIT_DELAY_SECONDS" "$RESTORE_CLIPBOARD_DELAY_SECONDS" <<'APPLESCRIPT'
+on run argv
+  set targetTTY to item 1 of argv
+  set payload to item 2 of argv
+  set pasteDelay to (item 3 of argv) as real
+  set submitDelay to (item 4 of argv) as real
+  set restoreDelay to (item 5 of argv) as real
+  set oldClipboard to the clipboard
+  set foundWindow to false
+
+  tell application "Terminal"
+    activate
+    repeat with w in windows
+      try
+        if (tty of selected tab of w) is equal to targetTTY then
+          set index of w to 1
+          set foundWindow to true
+          exit repeat
+        end if
+      end try
+    end repeat
+  end tell
+
+  if foundWindow is false then
+    error "could not focus Terminal window for " & targetTTY
+  end if
+
+  set the clipboard to payload
+  delay pasteDelay
+
+  tell application "System Events"
+    tell process "Terminal"
+      keystroke "v" using command down
+      delay submitDelay
+      key code 36
+    end tell
+  end tell
+
+  delay restoreDelay
+  set the clipboard to oldClipboard
+end run
+APPLESCRIPT
+
+  printf 'sent message via Terminal GUI to target=%s tty=%s\n' "$target" "$tty_name"
+}
+
+process_loops_once() {
+  local loop_file
+  local now
+  now="$(date +%s)"
+
+  shopt -s nullglob
+  for loop_file in "$LOOPS_DIR"/*.loop; do
+    TARGET=""
+    INTERVAL=""
+    MESSAGE=""
+    FORCE_SEND="0"
+    load_kv_file "$loop_file"
+
+    local target="$TARGET"
+    local interval="$INTERVAL"
+    local message="$MESSAGE"
+    local force_send="${FORCE_SEND:-0}"
+    local key
+    local source_tag
+    local next_run=0
+    key="$(basename "${loop_file%.loop}")"
+    paths_for_target "$key"
+    source_tag="$(stat -f '%m:%z' "$loop_file" 2>/dev/null || echo missing)"
+
+    if [[ -f "$LOOP_STATUS_FILE" ]]; then
+      STATE_TAG=""
+      NEXT_RUN=""
+      load_kv_file "$LOOP_STATUS_FILE"
+      if [[ "${STATE_TAG:-}" == "$source_tag" && "${NEXT_RUN:-}" =~ ^[0-9]+$ ]]; then
+        next_run="$NEXT_RUN"
+      fi
+    fi
+
+    if [[ "$next_run" =~ ^[0-9]+$ ]] && (( now < next_run )); then
+      continue
+    fi
+
+    local send_output
+    if send_output="$(send_message_when_ready "$target" "$message" "$SEND_STABLE_IDLE_SECONDS" "$LOOP_IDLE_TIMEOUT_SECONDS" "$force_send" 2>&1)"; then
+      append_loop_log_line "$LOOP_LOG_FILE" "sent: ${send_output//$'\n'/ | }"
+      sleep "$LOOP_POST_SEND_COOLDOWN_SECONDS"
+      now="$(date +%s)"
+      write_kv_file "$LOOP_STATUS_FILE" \
+        STATE_TAG "$source_tag" \
+        NEXT_RUN "$(( now + interval ))"
+    else
+      append_loop_log_line "$LOOP_LOG_FILE" "deferred: ${send_output//$'\n'/ | }"
+      now="$(date +%s)"
+      write_kv_file "$LOOP_STATUS_FILE" \
+        STATE_TAG "$source_tag" \
+        NEXT_RUN "$(( now + LOOP_BUSY_RETRY_SECONDS ))"
+    fi
+  done
+  shopt -u nullglob
+}
+
+loop_daemon_loop() {
+  mkdir -p "$LOOPS_DIR" "$RUNTIME_DIR" "$LOOP_STATE_DIR" "$LOOP_LOG_DIR"
+  printf '%s\n' "$$" >"$LOOP_DAEMON_PID_FILE"
+  trap 'rm -f "$LOOP_DAEMON_PID_FILE"' EXIT
+
+  while true; do
+    process_loops_once
+    sleep 1
+  done
+}
+
+ensure_loop_daemon() {
+  require_cmd python3
+  require_cmd osascript
+
+  stop_user_owned_sender_daemons || true
+
+  if loop_daemon_running; then
+    return 0
+  fi
+
+  python3 - "$0" "$STATE_DIR" "$LOOP_DAEMON_LOG_FILE" <<'PY'
+import os
+import sys
+
+script = sys.argv[1]
+state_dir = sys.argv[2]
+log_file = sys.argv[3]
+
+pid = os.fork()
+if pid > 0:
+    os.waitpid(pid, 0)
+    sys.exit(0)
+
+os.setsid()
+
+pid = os.fork()
+if pid > 0:
+    sys.exit(0)
+
+fd0 = os.open("/dev/null", os.O_RDONLY)
+fd1 = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+fd2 = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+os.dup2(fd0, 0)
+os.dup2(fd1, 1)
+os.dup2(fd2, 2)
+for fd in (fd0, fd1, fd2):
+    if fd > 2:
+        os.close(fd)
+
+env = os.environ.copy()
+env["CODEX_TASKMASTER_STATE_DIR"] = state_dir
+os.execve(script, [script, "loop-daemon"], env)
+PY
+
+  sleep 1
+  loop_daemon_running || die "failed to start loop daemon"
+}
+
+start_loop() {
+  local target="$1"
+  local interval="$2"
+  local message="$3"
+  local force_send="${4:-0}"
+  local key
+  local source_tag
+
+  ensure_loop_daemon
+  find_unique_tty "$target" >/dev/null
+  key="$(hash_target "$target")"
+  paths_for_target "$key"
+  write_kv_file "$LOOP_FILE" \
+    TARGET "$target" \
+    INTERVAL "$interval" \
+    MESSAGE "$message" \
+    FORCE_SEND "$force_send"
+  touch "$LOOP_LOG_FILE" 2>/dev/null || true
+  source_tag="$(stat -f '%m:%z' "$LOOP_FILE" 2>/dev/null || echo missing)"
+  write_kv_file "$LOOP_STATUS_FILE" \
+    STATE_TAG "$source_tag" \
+    NEXT_RUN "$(date +%s)"
+  append_loop_log_line "$LOOP_LOG_FILE" "loop started target=${target} interval=${interval}s force_send=$([[ "$force_send" == "1" ]] && echo yes || echo no) message=${message}"
+
+  printf 'started loop\n'
+  printf 'target: %s\n' "$target"
+  printf 'interval_seconds: %s\n' "$interval"
+  printf 'force_send: %s\n' "$([[ "$force_send" == "1" ]] && echo yes || echo no)"
+  printf 'log: %s\n' "$LOOP_LOG_FILE"
+}
+
+stop_one() {
+  local target="$1"
+  local key
+  key="$(hash_target "$target")"
+  paths_for_target "$key"
+  [[ -f "$LOOP_FILE" ]] || die "no running loop found for target '${target}'"
+  append_loop_log_line "$LOOP_LOG_FILE" "loop stopped target=${target}"
+  rm -f "$LOOP_FILE"
+  rm -f "$LOOP_STATUS_FILE" 2>/dev/null || true
+  if ! compgen -G "$LOOPS_DIR/*.loop" >/dev/null; then
+    stop_user_owned_sender_daemons || true
+  fi
+  printf 'stopped loop for target=%s\n' "$target"
+}
+
+stop_all() {
+  local found=0
+  local loop_file
+  local target
+
+  shopt -s nullglob
+  for loop_file in "$LOOPS_DIR"/*.loop; do
+    found=1
+    TARGET=""
+    load_kv_file "$loop_file"
+    target="${TARGET:-unknown}"
+    key="$(basename "${loop_file%.loop}")"
+    paths_for_target "$key"
+    append_loop_log_line "$LOOP_LOG_FILE" "loop stopped target=${target}"
+    rm -f "$loop_file"
+    rm -f "$LOOP_STATUS_FILE" 2>/dev/null || true
+    printf 'stopped loop for target=%s\n' "$target"
+  done
+  shopt -u nullglob
+
+  stop_user_owned_sender_daemons || true
+
+  if [[ "$found" -eq 0 ]]; then
+    echo "no active loops"
+  fi
+}
+
+status_one() {
+  local target="$1"
+  local key
+  key="$(hash_target "$target")"
+  paths_for_target "$key"
+  [[ -f "$LOOP_FILE" ]] || die "no loop status found for target '${target}'"
+
+  TARGET=""
+  INTERVAL=""
+  MESSAGE=""
+  FORCE_SEND="0"
+  load_kv_file "$LOOP_FILE"
+
+  local next_run="unknown"
+  local last_log_line=""
+  if [[ -f "$LOOP_STATUS_FILE" ]]; then
+    STATE_TAG=""
+    NEXT_RUN=""
+    load_kv_file "$LOOP_STATUS_FILE"
+    next_run="${NEXT_RUN:-unknown}"
+  fi
+  last_log_line="$(last_nonempty_log_line "$LOOP_LOG_FILE")"
+
+  printf 'target: %s\n' "${TARGET:-$target}"
+  printf 'loop_daemon_running: %s\n' "$(loop_daemon_running && echo yes || echo no)"
+  printf 'interval_seconds: %s\n' "${INTERVAL:-unknown}"
+  printf 'force_send: %s\n' "$([[ "${FORCE_SEND:-0}" == "1" ]] && echo yes || echo no)"
+  printf 'message: %s\n' "${MESSAGE:-unknown}"
+  printf 'next_run_epoch: %s\n' "$next_run"
+  printf 'log: %s\n' "$LOOP_LOG_FILE"
+  if [[ -n "$last_log_line" ]]; then
+    printf 'last_log_line: %s\n' "$last_log_line"
+  fi
+}
+
+status_all() {
+  local loop_file
+  local found=0
+
+  shopt -s nullglob
+  for loop_file in "$LOOPS_DIR"/*.loop; do
+    found=1
+    TARGET=""
+    load_kv_file "$loop_file"
+    echo "---"
+    status_one "$TARGET"
+  done
+  shopt -u nullglob
+
+  if [[ "$found" -eq 0 ]]; then
+    echo "no active loops"
+  fi
+
+  legacy_sender_warning_lines || true
+}
+
+parse_send_args() {
+  TARGET=""
+  MESSAGE="$DEFAULT_MESSAGE"
+  FORCE_SEND=0
+  while getopts ":t:m:fh" opt; do
+    case "$opt" in
+      t) TARGET="$OPTARG" ;;
+      m) MESSAGE="$OPTARG" ;;
+      f) FORCE_SEND=1 ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$TARGET" ]] || die "send requires -t TARGET"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
+parse_loop_args() {
+  TARGET=""
+  MESSAGE="$DEFAULT_MESSAGE"
+  INTERVAL="$DEFAULT_INTERVAL"
+  FORCE_SEND=0
+  while getopts ":t:m:i:fh" opt; do
+    case "$opt" in
+      t) TARGET="$OPTARG" ;;
+      m) MESSAGE="$OPTARG" ;;
+      i) INTERVAL="$OPTARG" ;;
+      f) FORCE_SEND=1 ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$TARGET" ]] || die "command requires -t TARGET"
+  [[ "$INTERVAL" =~ ^[1-9][0-9]*$ ]] || die "interval must be a positive integer in seconds"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
+parse_stop_args() {
+  TARGET=""
+  STOP_ALL=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -t)
+        [[ $# -ge 2 ]] || die "option -t requires an argument"
+        TARGET="$2"
+        shift 2
+        ;;
+      --all)
+        STOP_ALL=1
+        shift
+        ;;
+      -h)
+        usage
+        exit 0
+        ;;
+      *)
+        die "unknown option: $1"
+        ;;
+    esac
+  done
+  if [[ "$STOP_ALL" -eq 0 && -z "$TARGET" ]]; then
+    die "stop requires -t TARGET or --all"
+  fi
+}
+
+parse_status_args() {
+  TARGET=""
+  while getopts ":t:h" opt; do
+    case "$opt" in
+      t) TARGET="$OPTARG" ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
+parse_probe_args() {
+  TARGET=""
+  while getopts ":t:h" opt; do
+    case "$opt" in
+      t) TARGET="$OPTARG" ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$TARGET" ]] || die "probe requires -t TARGET"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
+parse_probe_all_args() {
+  PROBE_LIMIT=""
+  PROBE_OFFSET=0
+  while getopts ":l:o:h" opt; do
+    case "$opt" in
+      l) PROBE_LIMIT="$OPTARG" ;;
+      o) PROBE_OFFSET="$OPTARG" ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -z "$PROBE_LIMIT" || "$PROBE_LIMIT" =~ ^[1-9][0-9]*$ ]] || die "limit must be a positive integer"
+  [[ "$PROBE_OFFSET" =~ ^[0-9]+$ ]] || die "offset must be a non-negative integer"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
+parse_session_count_args() {
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
+parse_wait_idle_args() {
+  TARGET=""
+  STABLE_SECONDS=3
+  TIMEOUT_SECONDS=30
+  while getopts ":t:s:w:h" opt; do
+    case "$opt" in
+      t) TARGET="$OPTARG" ;;
+      s) STABLE_SECONDS="$OPTARG" ;;
+      w) TIMEOUT_SECONDS="$OPTARG" ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$TARGET" ]] || die "wait-idle requires -t TARGET"
+  [[ "$STABLE_SECONDS" =~ ^[0-9]+$ ]] || die "stable seconds must be a non-negative integer"
+  [[ "$TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "timeout seconds must be a positive integer"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
+main() {
+  local cmd="${1:-}"
+  [[ -n "$cmd" ]] || { usage; exit 2; }
+  shift
+
+  case "$cmd" in
+    send)
+      parse_send_args "$@"
+      send_message_when_ready "$TARGET" "$MESSAGE" "$SEND_STABLE_IDLE_SECONDS" "$SEND_IDLE_TIMEOUT_SECONDS" "$FORCE_SEND"
+      ;;
+    start)
+      parse_loop_args "$@"
+      start_loop "$TARGET" "$INTERVAL" "$MESSAGE" "$FORCE_SEND"
+      ;;
+    stop)
+      parse_stop_args "$@"
+      if [[ "${STOP_ALL:-0}" -eq 1 ]]; then
+        stop_all
+      else
+        stop_one "$TARGET"
+      fi
+      ;;
+    status)
+      parse_status_args "$@"
+      if [[ -n "$TARGET" ]]; then
+        status_one "$TARGET"
+      else
+        status_all
+      fi
+      ;;
+    probe)
+      parse_probe_args "$@"
+      probe_session_status "$TARGET"
+      ;;
+    probe-all)
+      parse_probe_all_args "$@"
+      probe_all_sessions
+      ;;
+    session-count)
+      parse_session_count_args "$@"
+      session_count
+      ;;
+    wait-idle)
+      parse_wait_idle_args "$@"
+      wait_until_idle "$TARGET" "$STABLE_SECONDS" "$TIMEOUT_SECONDS"
+      ;;
+    loop-daemon)
+      [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+      loop_daemon_loop
+      ;;
+    -h|--help|help)
+      usage
+      ;;
+    *)
+      die "unknown command: ${cmd}"
+      ;;
+  esac
+}
+
+main "$@"
