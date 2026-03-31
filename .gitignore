@@ -1,5 +1,14 @@
+# macOS metadata
 .DS_Store
+
+# Generated app bundles
 *.app/
--frontend
+
+# Generated icon assets
 CodexBianCeZhe-1024.png
 CodexBianCeZhe.iconset/
+
+# Common editor temp files
+*.swp
+*.swo
+*~
