@@ -38,7 +38,7 @@ private enum DefaultsKey {
 
 private func initialTargetValue() -> String {
     let saved = UserDefaults.standard.string(forKey: DefaultsKey.target)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    if saved.isEmpty || saved == "game" {
+    if saved.isEmpty {
         return "test"
     }
     return saved

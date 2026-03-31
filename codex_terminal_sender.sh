@@ -26,7 +26,7 @@ LOOP_LOG_DIR="${RUNTIME_DIR}/loop-logs"
 LOOP_DAEMON_PID_FILE="${RUNTIME_DIR}/loop-daemon.pid"
 LOOP_DAEMON_LOG_FILE="${RUNTIME_DIR}/loop-daemon.log"
 CODEX_STATE_DB_PATH="${CODEX_TASKMASTER_CODEX_STATE_DB_PATH:-${HOME}/.codex/state_5.sqlite}"
-CODEX_SESSION_INDEX_PATH="${CODEX_TASKMASTER_SESSION_INDEX_PATH:-${HOME}/.codex/session_index.jsonl}"
+CODEX_SESSION_INDEX_PATH="${CODEX_TASKMASTER_CODEX_SESSION_INDEX_PATH:-${CODEX_TASKMASTER_SESSION_INDEX_PATH:-${HOME}/.codex/session_index.jsonl}}"
 CODEX_LOGS_DB_PATH="${CODEX_TASKMASTER_CODEX_LOGS_DB_PATH:-${HOME}/.codex/logs_1.sqlite}"
 
 mkdir -p "$STATE_DIR" "$REQUESTS_DIR" "$PENDING_REQUEST_DIR" "$PROCESSING_REQUEST_DIR" "$RESULT_REQUEST_DIR" "$LOOPS_DIR" "$RUNTIME_DIR" "$LOOP_STATE_DIR" "$LOOP_LOG_DIR"
@@ -816,9 +816,15 @@ find_unique_tty() {
   count="$(printf '%s\n' "$tty_list" | sed '/^$/d' | wc -l | tr -d ' ')"
 
   case "$count" in
-    0) die "could not find a running 'codex resume ${target}' process" ;;
+    0)
+      printf "could not find a running 'codex resume %s' process\n" "$target" >&2
+      return 1
+      ;;
     1) printf '%s\n' "$tty_list" | sed '/^$/d' ;;
-    *) die "found multiple matching Terminal ttys for target '${target}': $(printf '%s' "$tty_list" | tr '\n' ' ')" ;;
+    *)
+      printf "found multiple matching Terminal ttys for target '%s': %s\n" "$target" "$(printf '%s' "$tty_list" | tr '\n' ' ')" >&2
+      return 1
+      ;;
   esac
 }
 

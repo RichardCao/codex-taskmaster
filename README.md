@@ -64,6 +64,21 @@ open -na "./Codex Taskmaster.app"
 
 Or launch it from Finder after building.
 
+## Checks
+
+Run the local project checks:
+
+```bash
+bash ./scripts/check.sh
+```
+
+This runs:
+
+- shell syntax validation
+- helper smoke tests
+- Swift typecheck with warnings treated as errors
+- app build
+
 ## How It Works
 
 There are two main components:
@@ -150,8 +165,9 @@ Each loop log records:
 - `codex_terminal_sender.sh`: helper CLI and loop engine
 - `build_codex_biancezhe_app.sh`: build script
 - `generate_icon.swift`: app icon generator
-- `Codex Terminal Sender.applescript`: early AppleScript prototype
-- `Codex Terminal Sender.js`: early JXA prototype
+- `scripts/check.sh`: local validation entrypoint
+- `tests/test_helper_smoke.sh`: helper smoke tests
+- `legacy/`: early AppleScript/JXA prototypes
 
 Generated artifacts such as `.app` bundles and icon outputs are ignored by git.
 
@@ -160,6 +176,7 @@ Generated artifacts such as `.app` bundles and icon outputs are ignored by git.
 - This project is macOS-specific.
 - It currently targets Terminal.app, not iTerm2 or other terminal emulators.
 - It expects Codex local state files under the current user's home directory, unless overridden via environment variables supported by the helper script.
+- For `session_index.jsonl`, the helper accepts both `CODEX_TASKMASTER_CODEX_SESSION_INDEX_PATH` and the older `CODEX_TASKMASTER_SESSION_INDEX_PATH` override.
 
 ## License
 

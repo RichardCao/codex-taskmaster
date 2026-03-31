@@ -46,7 +46,7 @@ function startLoop() {
   const target = promptValue(
     "Session Name Or ID",
     "Enter the exact thread name or session id passed to `codex resume`.",
-    "game",
+    "test",
   );
   if (target === null) return;
 
@@ -74,7 +74,7 @@ function sendOnce() {
   const target = promptValue(
     "Session Name Or ID",
     "Enter the exact thread name or session id passed to `codex resume`.",
-    "game",
+    "test",
   );
   if (target === null) return;
 
@@ -109,7 +109,7 @@ function stopLoop() {
   const target = promptValue(
     "Session Name Or ID",
     "Enter the loop target to stop.",
-    "game",
+    "test",
   );
   if (target === null) return;
 

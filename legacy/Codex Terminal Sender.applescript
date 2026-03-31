@@ -21,7 +21,7 @@ on run
 end run
 
 on startLoop(helperPath)
-  set targetValue to my promptValue("Session Name Or ID", "Enter the exact thread name or session id passed to `codex resume`.", "game")
+  set targetValue to my promptValue("Session Name Or ID", "Enter the exact thread name or session id passed to `codex resume`.", "test")
   if targetValue is missing value then return
 
   set intervalValue to my promptValue("Interval Seconds", "Enter the loop interval in seconds.", "600")
@@ -36,7 +36,7 @@ on startLoop(helperPath)
 end startLoop
 
 on sendOnce(helperPath)
-  set targetValue to my promptValue("Session Name Or ID", "Enter the exact thread name or session id passed to `codex resume`.", "game")
+  set targetValue to my promptValue("Session Name Or ID", "Enter the exact thread name or session id passed to `codex resume`.", "test")
   if targetValue is missing value then return
 
   set messageValue to my promptValue("Message", "Enter the text to send once.", "继续")
@@ -62,7 +62,7 @@ on showStatus(helperPath)
 end showStatus
 
 on stopLoop(helperPath)
-  set targetValue to my promptValue("Session Name Or ID", "Enter the loop target to stop.", "game")
+  set targetValue to my promptValue("Session Name Or ID", "Enter the loop target to stop.", "test")
   if targetValue is missing value then return
 
   set shellCommand to quoted form of helperPath & " stop -t " & quoted form of targetValue
