@@ -13,6 +13,17 @@ private let processingRequestDirectoryPath = "\(stateDirectoryPath)/requests/pro
 private let resultRequestDirectoryPath = "\(stateDirectoryPath)/requests/results"
 private let sessionProbeInitialBatchSize = 4
 private let sessionProbeBatchSize = 12
+private let sessionPromptSearchEntryLimit = 12
+
+private func chevronDownImage(pointSize: CGFloat = 11, weight: NSFont.Weight = .medium) -> NSImage? {
+    let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
+    return NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?.withSymbolConfiguration(config)
+}
+
+private func chevronUpImage(pointSize: CGFloat = 11, weight: NSFont.Weight = .medium) -> NSImage? {
+    let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
+    return NSImage(systemSymbolName: "chevron.up", accessibilityDescription: nil)?.withSymbolConfiguration(config)
+}
 
 private func resolvedHelperPath() -> String {
     if let override = ProcessInfo.processInfo.environment["CODEX_TASKMASTER_HELPER_PATH"],
@@ -74,6 +85,83 @@ final class AdjustableSplitView: NSSplitView {
 
         NSColor.tertiaryLabelColor.withAlphaComponent(0.22).setFill()
         lineRect.fill()
+    }
+}
+
+protocol SessionStatusHeaderFilterDelegate: AnyObject {
+    func sessionHeaderSupportsFilter(for columnIdentifier: String) -> Bool
+    func sessionHeaderFilterIsActive(for columnIdentifier: String) -> Bool
+    func sessionHeaderFilterIsShown(for columnIdentifier: String) -> Bool
+    func toggleSessionHeaderFilter(for columnIdentifier: String, columnRect: NSRect, in headerView: NSTableHeaderView)
+}
+
+final class SessionStatusHeaderView: NSTableHeaderView {
+    weak var filterDelegate: SessionStatusHeaderFilterDelegate?
+
+    private func filterIndicatorRect(for columnRect: NSRect) -> NSRect {
+        let width: CGFloat = 16
+        let height: CGFloat = 14
+        let x = max(columnRect.minX + 18, columnRect.maxX - 46)
+        return NSRect(x: x, y: columnRect.midY - (height / 2), width: width, height: height)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let columnIndex = column(at: point)
+        if columnIndex >= 0,
+           let tableView,
+           columnIndex < tableView.tableColumns.count {
+            let column = tableView.tableColumns[columnIndex]
+            let identifier = column.identifier.rawValue
+            if filterDelegate?.sessionHeaderSupportsFilter(for: identifier) == true {
+                let rect = headerRect(ofColumn: columnIndex)
+                let indicatorRect = filterIndicatorRect(for: rect)
+                let hotzoneRect = indicatorRect.insetBy(dx: -3, dy: -2)
+                if hotzoneRect.contains(point) {
+                    filterDelegate?.toggleSessionHeaderFilter(for: identifier, columnRect: rect, in: self)
+                    return
+                }
+            }
+        }
+
+        super.mouseDown(with: event)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        guard let tableView else { return }
+        for (index, column) in tableView.tableColumns.enumerated() {
+            let identifier = column.identifier.rawValue
+            guard filterDelegate?.sessionHeaderSupportsFilter(for: identifier) == true else { continue }
+
+            let rect = headerRect(ofColumn: index)
+            guard rect.intersects(dirtyRect) else { continue }
+
+            let indicatorRect = filterIndicatorRect(for: rect)
+            let isActive = filterDelegate?.sessionHeaderFilterIsActive(for: identifier) == true
+            let indicatorPath = NSBezierPath(roundedRect: indicatorRect, xRadius: 4, yRadius: 4)
+            NSColor.quaternaryLabelColor.withAlphaComponent(0.08).setFill()
+            indicatorPath.fill()
+            NSColor.quaternaryLabelColor.withAlphaComponent(0.16).setStroke()
+            indicatorPath.lineWidth = 1
+            indicatorPath.stroke()
+
+            let chevronRect = NSRect(x: indicatorRect.midX - 4, y: indicatorRect.midY - 3, width: 8, height: 8)
+            let image = filterDelegate?.sessionHeaderFilterIsShown(for: identifier) == true
+                ? chevronUpImage(pointSize: 10, weight: .medium)
+                : chevronDownImage(pointSize: 10, weight: .medium)
+            if let image {
+                image.draw(in: chevronRect)
+            }
+
+            if isActive {
+                let dotRect = NSRect(x: indicatorRect.minX + 3, y: indicatorRect.midY - 2, width: 4, height: 4)
+                let dotPath = NSBezierPath(ovalIn: dotRect)
+                NSColor.controlAccentColor.setFill()
+                dotPath.fill()
+            }
+        }
     }
 }
 
@@ -310,7 +398,7 @@ final class MainWindowController: NSWindowController {
     }
 }
 
-final class MainViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSSplitViewDelegate, NSTextFieldDelegate {
+final class MainViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSSplitViewDelegate, NSTextFieldDelegate, NSSearchFieldDelegate, SessionStatusHeaderFilterDelegate {
     private enum LayoutMetrics {
         static let headerHeight: CGFloat = 188
         static let headerOuterMargin: CGFloat = 20
@@ -339,6 +427,23 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private enum SessionListMode {
         case active
         case archived
+    }
+
+    private enum SessionFilterKind: String {
+        case status
+        case terminal
+        case tty
+
+        var title: String {
+            switch self {
+            case .status:
+                return "Status"
+            case .terminal:
+                return "Terminal"
+            case .tty:
+                return "TTY"
+            }
+        }
     }
 
     private struct LoopSnapshot {
@@ -388,6 +493,18 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let activeLoopsScrollView = NSScrollView()
     private let sessionStatusTableView = NSTableView()
     private let sessionStatusScrollView = NSScrollView()
+    private let sessionSearchField: NSSearchField = {
+        let field = NSSearchField()
+        field.placeholderString = "搜索 Name / Session ID / 近提示词"
+        field.sendsWholeSearchString = false
+        field.sendsSearchStringImmediately = true
+        return field
+    }()
+    private let sessionPromptSearchCheckbox: NSButton = {
+        let checkbox = NSButton(checkboxWithTitle: "含近提示词", target: nil, action: nil)
+        checkbox.toolTip = "勾选后会额外检索每个 session 最近几条用户提示词，速度会更慢。"
+        return checkbox
+    }()
     private let sessionScopeControl: NSSegmentedControl = {
         let control = NSSegmentedControl(labels: ["普通", "已归档"], trackingMode: .selectOne, target: nil, action: nil)
         control.selectedSegment = 0
@@ -396,6 +513,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let renameField = NSTextField(string: "")
     private let sessionDetailView = NSTextView()
     private let sessionDetailScrollView = NSScrollView()
+    private let sessionStatusSplitView = AdjustableSplitView()
     private let topSplitView = AdjustableSplitView()
     private let contentSplitView = AdjustableSplitView()
     private let outputView = NSTextView()
@@ -407,6 +525,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var isProcessingSendRequest = false
     private var loopSnapshots: [LoopSnapshot] = []
     private var sessionSnapshots: [SessionSnapshot] = []
+    private var allSessionSnapshots: [SessionSnapshot] = []
     private var loopWarnings: [String] = []
     private var targetHistory: [String] = []
     private var messageHistory: [String] = []
@@ -422,6 +541,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var didApplyInitialTopSplitRatio = false
     private var lastTopSplitWidth: CGFloat = 0
     private var isApplyingTopSplitRatio = false
+    private var sessionStatusSplitRatio: CGFloat = 0.62
+    private var didApplyInitialSessionStatusSplitRatio = false
+    private var lastSessionStatusSplitHeight: CGFloat = 0
+    private var isApplyingSessionStatusSplitRatio = false
     private var contentSplitRatio: CGFloat = 0.62
     private var didApplyInitialContentSplitRatio = false
     private var lastContentSplitHeight: CGFloat = 0
@@ -429,6 +552,29 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let sessionScanProcessLock = NSLock()
     private var currentSessionScanProcess: Process?
     private var sessionDetailLoadGeneration = 0
+    private var sessionSearchDebounceTimer: Timer?
+    private var sessionSearchRevision = 0
+    private var isSessionPromptSearchRunning = false
+    private var sessionPromptSearchCompletedRevision: Int?
+    private var sessionPromptSearchMatchedThreadIDs = Set<String>()
+    private var sessionPromptSearchProgressCompleted = 0
+    private var sessionPromptSearchProgressTotal = 0
+    private var sessionPromptSearchCache: [String: String] = [:]
+    private let sessionPromptSearchCacheLock = NSLock()
+    private var lastSessionRenderScannedCount: Int?
+    private var lastSessionRenderTotalCount: Int?
+    private var lastSessionRenderIsComplete = true
+    private var selectedSessionStatusFilters = Set<String>()
+    private var selectedSessionTerminalFilters = Set<String>()
+    private var selectedSessionTTYFilters = Set<String>()
+    private let sessionFilterContainerView = NSView()
+    private let sessionFilterStackView = NSStackView()
+    private var sessionFilterPanel: NSPanel?
+    private var sessionFilterPanelKind: SessionFilterKind?
+    private var sessionFilterPanelColumnIdentifier: String?
+    private var sessionFilterPanelHeaderView: NSTableHeaderView?
+    private var sessionFilterOutsideLocalMonitor: Any?
+    private var sessionFilterOutsideGlobalMonitor: Any?
     private let historyListView = HistoryDropdownListView()
     private var historyPopoverKind: HistoryKind?
     private var historyRowViews: [HistoryDropdownRowView] = []
@@ -461,6 +607,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         buildUI()
         loadHistoryState()
         normalizeInitialIntervalValue()
+        configureSessionFilterPopover()
+        updateSessionFilterHeaderIndicators()
         sessionStatusMetaLabel.stringValue = sessionEmptyStateText()
         updateDetectStatusButtonState()
         stopButton.isEnabled = false
@@ -475,6 +623,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         super.viewDidLayout()
         applyInitialSplitRatiosIfNeeded()
         preserveTopSplitRatioOnResizeIfNeeded()
+        preserveSessionStatusSplitRatioOnResizeIfNeeded()
         preserveContentSplitRatioOnResizeIfNeeded()
     }
 
@@ -483,6 +632,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         requestTimer?.invalidate()
         removeHistoryKeyMonitor()
         removeHistoryOutsideMonitors()
+        closeSessionFilterPanel()
     }
 
     private func buildUI() {
@@ -589,6 +739,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionScopeControl.target = self
         sessionScopeControl.action = #selector(changeSessionScope)
         sessionScopeControl.translatesAutoresizingMaskIntoConstraints = false
+        sessionSearchField.delegate = self
+        sessionSearchField.translatesAutoresizingMaskIntoConstraints = false
+        sessionSearchField.recentsAutosaveName = nil
+        sessionSearchField.maximumRecents = 0
+        sessionSearchField.searchMenuTemplate = nil
+        sessionPromptSearchCheckbox.target = self
+        sessionPromptSearchCheckbox.action = #selector(toggleSessionPromptSearch)
+        sessionPromptSearchCheckbox.translatesAutoresizingMaskIntoConstraints = false
 
         renameField.placeholderString = "输入新名称，留空可恢复为未 rename 状态"
         renameField.translatesAutoresizingMaskIntoConstraints = false
@@ -614,11 +772,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         restoreSessionButton.setContentHuggingPriority(.required, for: .horizontal)
         deleteSessionButton.setContentHuggingPriority(.required, for: .horizontal)
 
-        let sessionScopeRow = NSStackView(views: [sessionScopeControl])
+        let sessionScopeRow = NSStackView(views: [sessionScopeControl, sessionSearchField, sessionPromptSearchCheckbox])
         sessionScopeRow.orientation = .horizontal
         sessionScopeRow.spacing = 8
         sessionScopeRow.alignment = .centerY
         sessionScopeControl.setContentHuggingPriority(.required, for: .horizontal)
+        sessionScopeControl.setContentCompressionResistancePriority(.required, for: .horizontal)
+        sessionPromptSearchCheckbox.setContentHuggingPriority(.required, for: .horizontal)
+        sessionPromptSearchCheckbox.setContentCompressionResistancePriority(.required, for: .horizontal)
+        sessionSearchField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        sessionSearchField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        sessionSearchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 210).isActive = true
 
         sessionDetailScrollView.borderType = .bezelBorder
         sessionDetailScrollView.hasVerticalScroller = true
@@ -643,16 +807,24 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         outputScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 100).isActive = true
 
         let activeLoopsPanel = makePanel(title: "Active Loops", metaLabel: activeLoopsMetaLabel, contentView: activeLoopsScrollView)
-        let sessionStatusContentStack = NSStackView(views: [sessionScopeRow, sessionStatusScrollView, renameRow, sessionDetailScrollView])
-        sessionStatusContentStack.orientation = .vertical
-        sessionStatusContentStack.spacing = 8
-        sessionStatusContentStack.alignment = .leading
-        sessionStatusContentStack.distribution = .fill
-        sessionStatusContentStack.translatesAutoresizingMaskIntoConstraints = false
-        sessionScopeRow.widthAnchor.constraint(equalTo: sessionStatusContentStack.widthAnchor).isActive = true
-        sessionStatusScrollView.widthAnchor.constraint(equalTo: sessionStatusContentStack.widthAnchor).isActive = true
-        renameRow.widthAnchor.constraint(equalTo: sessionStatusContentStack.widthAnchor).isActive = true
-        sessionDetailScrollView.widthAnchor.constraint(equalTo: sessionStatusContentStack.widthAnchor).isActive = true
+        let sessionStatusTopStack = NSStackView(views: [sessionScopeRow, sessionStatusScrollView])
+        sessionStatusTopStack.orientation = .vertical
+        sessionStatusTopStack.spacing = 8
+        sessionStatusTopStack.alignment = .leading
+        sessionStatusTopStack.distribution = .fill
+        sessionStatusTopStack.translatesAutoresizingMaskIntoConstraints = false
+        sessionScopeRow.widthAnchor.constraint(equalTo: sessionStatusTopStack.widthAnchor).isActive = true
+        sessionStatusScrollView.widthAnchor.constraint(equalTo: sessionStatusTopStack.widthAnchor).isActive = true
+
+        let sessionStatusBottomStack = NSStackView(views: [renameRow, sessionDetailScrollView])
+        sessionStatusBottomStack.orientation = .vertical
+        sessionStatusBottomStack.spacing = 8
+        sessionStatusBottomStack.alignment = .leading
+        sessionStatusBottomStack.distribution = .fill
+        sessionStatusBottomStack.translatesAutoresizingMaskIntoConstraints = false
+        renameRow.widthAnchor.constraint(equalTo: sessionStatusBottomStack.widthAnchor).isActive = true
+        sessionDetailScrollView.widthAnchor.constraint(equalTo: sessionStatusBottomStack.widthAnchor).isActive = true
+
         renameField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
         sessionScopeRow.setContentHuggingPriority(.required, for: .vertical)
         sessionScopeRow.setContentCompressionResistancePriority(.required, for: .vertical)
@@ -662,7 +834,19 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionStatusScrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         sessionDetailScrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
         sessionDetailScrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        let sessionStatusPanel = makePanel(title: "Session Status", metaLabel: sessionStatusMetaLabel, contentView: sessionStatusContentStack)
+        sessionStatusSplitView.isVertical = false
+        sessionStatusSplitView.dividerStyle = .thin
+        sessionStatusSplitView.translatesAutoresizingMaskIntoConstraints = false
+        sessionStatusSplitView.delegate = self
+        let sessionStatusTopPane = makeSplitPane(contentView: sessionStatusTopStack, minHeight: 110)
+        let sessionStatusBottomPane = makeSplitPane(contentView: sessionStatusBottomStack, minHeight: 92)
+        sessionStatusSplitView.addArrangedSubview(sessionStatusTopPane)
+        sessionStatusSplitView.addArrangedSubview(sessionStatusBottomPane)
+        sessionStatusSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
+        sessionStatusSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
+        let sessionStatusMinHeight = CGFloat(110 + 92) + sessionStatusSplitView.dividerThickness
+        sessionStatusSplitView.heightAnchor.constraint(greaterThanOrEqualToConstant: sessionStatusMinHeight).isActive = true
+        let sessionStatusPanel = makePanel(title: "Session Status", metaLabel: sessionStatusMetaLabel, contentView: sessionStatusSplitView)
         let logHeaderActions = NSStackView(views: [clearLogButton, saveLogButton])
         logHeaderActions.orientation = .horizontal
         logHeaderActions.spacing = 6
@@ -782,7 +966,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             ("reason", "原因", 320)
         ]
 
-        sessionStatusTableView.headerView = NSTableHeaderView()
+        let headerView = SessionStatusHeaderView()
+        headerView.filterDelegate = self
+        sessionStatusTableView.headerView = headerView
         sessionStatusTableView.usesAlternatingRowBackgroundColors = true
         sessionStatusTableView.allowsEmptySelection = true
         sessionStatusTableView.allowsMultipleSelection = false
@@ -835,6 +1021,272 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         case .archived:
             return "视图: 已归档 | 未加载归档 session。点击“检测状态”读取列表。"
         }
+    }
+
+    private func currentSessionSearchQuery() -> String {
+        sessionSearchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func isSessionPromptSearchEnabled() -> Bool {
+        sessionPromptSearchCheckbox.state == .on
+    }
+
+    private func invalidateSessionSearch(resetPromptCache: Bool = false) {
+        sessionSearchRevision += 1
+        isSessionPromptSearchRunning = false
+        sessionPromptSearchCompletedRevision = nil
+        sessionPromptSearchMatchedThreadIDs.removeAll()
+        sessionPromptSearchProgressCompleted = 0
+        sessionPromptSearchProgressTotal = 0
+        if resetPromptCache {
+            sessionPromptSearchCacheLock.lock()
+            sessionPromptSearchCache.removeAll()
+            sessionPromptSearchCacheLock.unlock()
+        }
+        updateSessionFilterHeaderIndicators()
+    }
+
+    private func fastSessionMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
+        guard !normalizedQuery.isEmpty else { return true }
+        let candidates = [
+            sessionActualName(session),
+            session.threadID,
+            sessionEffectiveTarget(session),
+            session.preview,
+            localizedSessionStatusLabel(session),
+            localizedSessionReason(session.reason)
+        ]
+        return candidates.contains { candidate in
+            candidate.localizedLowercase.contains(normalizedQuery)
+        }
+    }
+
+    private func matchesSessionFilters(_ session: SessionSnapshot) -> Bool {
+        let statusValue = localizedSessionStatusLabel(session)
+        if !selectedSessionStatusFilters.isEmpty && !selectedSessionStatusFilters.contains(statusValue) {
+            return false
+        }
+
+        let terminalValue = localizedTerminalState(session.terminalState)
+        if !selectedSessionTerminalFilters.isEmpty && !selectedSessionTerminalFilters.contains(terminalValue) {
+            return false
+        }
+
+        let ttyValue = session.tty.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : session.tty
+        if !selectedSessionTTYFilters.isEmpty && !selectedSessionTTYFilters.contains(ttyValue) {
+            return false
+        }
+
+        return true
+    }
+
+    private func sessionStatusOptionBaseOrder() -> [String] {
+        ["空闲", "中断后空闲", "运行中", "状态滞后", "残留输入", "消息排队", "未知", "断联", "已归档"]
+    }
+
+    private func sessionTerminalOptionBaseOrder() -> [String] {
+        ["可发送", "忙碌", "有残留输入", "不可达", "已归档", "未知"]
+    }
+
+    private func sessionFilterOptions(for kind: SessionFilterKind) -> [String] {
+        switch kind {
+        case .status:
+            let base = sessionStatusOptionBaseOrder()
+            guard !allSessionSnapshots.isEmpty else { return base }
+            let seen = Set(allSessionSnapshots.map(localizedSessionStatusLabel(_:)))
+            let extras = seen.subtracting(base).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            return base + extras
+        case .terminal:
+            let base = sessionTerminalOptionBaseOrder()
+            guard !allSessionSnapshots.isEmpty else { return base }
+            let seen = Set(allSessionSnapshots.map { localizedTerminalState($0.terminalState) })
+            let extras = seen.subtracting(base).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            return base + extras
+        case .tty:
+            var ttyValues = Set(allSessionSnapshots.map { snapshot in
+                let tty = snapshot.tty.trimmingCharacters(in: .whitespacesAndNewlines)
+                return tty.isEmpty ? "-" : tty
+            })
+            ttyValues.insert("-")
+            return ttyValues.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        }
+    }
+
+    private func selectedFilterValues(for kind: SessionFilterKind) -> Set<String> {
+        switch kind {
+        case .status:
+            return selectedSessionStatusFilters
+        case .terminal:
+            return selectedSessionTerminalFilters
+        case .tty:
+            return selectedSessionTTYFilters
+        }
+    }
+
+    private func setSelectedFilterValues(_ values: Set<String>, for kind: SessionFilterKind) {
+        switch kind {
+        case .status:
+            selectedSessionStatusFilters = values
+        case .terminal:
+            selectedSessionTerminalFilters = values
+        case .tty:
+            selectedSessionTTYFilters = values
+        }
+        updateSessionFilterHeaderIndicators()
+    }
+
+    private func sessionFilterKind(for columnIdentifier: String) -> SessionFilterKind? {
+        switch columnIdentifier {
+        case "status":
+            return .status
+        case "terminalState":
+            return .terminal
+        case "tty":
+            return .tty
+        default:
+            return nil
+        }
+    }
+
+    private func updateSessionFilterHeaderIndicators() {
+        sessionStatusTableView.headerView?.needsDisplay = true
+    }
+
+    func sessionHeaderSupportsFilter(for columnIdentifier: String) -> Bool {
+        sessionFilterKind(for: columnIdentifier) != nil
+    }
+
+    func sessionHeaderFilterIsActive(for columnIdentifier: String) -> Bool {
+        guard let kind = sessionFilterKind(for: columnIdentifier) else { return false }
+        return !selectedFilterValues(for: kind).isEmpty
+    }
+
+    func sessionHeaderFilterIsShown(for columnIdentifier: String) -> Bool {
+        isSessionFilterPanelShown() && sessionFilterPanelColumnIdentifier == columnIdentifier
+    }
+
+    func toggleSessionHeaderFilter(for columnIdentifier: String, columnRect: NSRect, in headerView: NSTableHeaderView) {
+        guard let kind = sessionFilterKind(for: columnIdentifier) else { return }
+
+        if isSessionFilterPanelShown(),
+           sessionFilterPanelKind == kind,
+           sessionFilterPanelColumnIdentifier == columnIdentifier {
+            closeSessionFilterPanel()
+            return
+        }
+
+        sessionFilterPanelKind = kind
+        sessionFilterPanelColumnIdentifier = columnIdentifier
+        sessionFilterPanelHeaderView = headerView
+
+        let width = max(columnRect.width + 26, 180)
+        rebuildSessionFilterPanel(kind: kind)
+
+        guard let panel = sessionFilterPanel,
+              let window = headerView.window else { return }
+        let height = panel.frame.height
+        let headerRectInWindow = headerView.convert(columnRect, to: nil)
+        let headerRectOnScreen = window.convertToScreen(headerRectInWindow)
+        let origin = NSPoint(x: headerRectOnScreen.minX, y: headerRectOnScreen.maxY - 1)
+        panel.setFrame(NSRect(origin: origin, size: NSSize(width: width, height: height)), display: false)
+        panel.orderFront(nil)
+        installSessionFilterOutsideMonitors(headerView: headerView)
+        updateSessionFilterHeaderIndicators()
+    }
+
+    private func scheduleSessionSearchRefresh(resetPromptCache: Bool = false) {
+        sessionSearchDebounceTimer?.invalidate()
+        invalidateSessionSearch(resetPromptCache: resetPromptCache)
+        sessionSearchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.renderSessionSnapshots(
+                scannedCount: self.lastSessionRenderScannedCount,
+                totalCount: self.lastSessionRenderTotalCount,
+                isComplete: self.lastSessionRenderIsComplete
+            )
+        }
+    }
+
+    private func sessionSearchSummary() -> String? {
+        let query = currentSessionSearchQuery()
+        guard !query.isEmpty else { return nil }
+        var parts = ["搜索: \(query)", "命中: \(sessionSnapshots.count)"]
+        if isSessionPromptSearchEnabled() {
+            if isSessionScanRunning {
+                parts.append("近提示词检索待扫描完成后继续")
+            } else if isSessionPromptSearchRunning {
+                parts.append("近提示词检索: \(sessionPromptSearchProgressCompleted)/\(sessionPromptSearchProgressTotal)")
+            } else if sessionPromptSearchCompletedRevision == sessionSearchRevision {
+                parts.append("近提示词已检索")
+            }
+        }
+        return parts.joined(separator: " | ")
+    }
+
+    private func updateSessionStatusMetaLabel() {
+        if allSessionSnapshots.isEmpty {
+            if isSessionScanRunning, let scannedCount = lastSessionRenderScannedCount, let totalCount = lastSessionRenderTotalCount {
+                var parts = ["视图: \(sessionScopeText())", "正在扫描 \(scannedCount)/\(totalCount)…"]
+                if let searchSummary = sessionSearchSummary() {
+                    parts.append(searchSummary)
+                }
+                sessionStatusMetaLabel.stringValue = parts.joined(separator: " | ")
+            } else {
+                sessionStatusMetaLabel.stringValue = sessionEmptyStateText()
+            }
+            return
+        }
+
+        var parts = ["视图: \(sessionScopeText())", "已加载: \(allSessionSnapshots.count)"]
+        if let scannedCount = lastSessionRenderScannedCount, let totalCount = lastSessionRenderTotalCount {
+            let progressText = lastSessionRenderIsComplete ? "已扫描: \(scannedCount)/\(totalCount)" : "扫描中: \(scannedCount)/\(totalCount)"
+            parts.append(progressText)
+            parts.append("总数: \(totalCount)")
+        }
+        if let searchSummary = sessionSearchSummary() {
+            parts.append(searchSummary)
+        }
+        parts.append("刷新: \(Self.timestampFormatter.string(from: Date()))")
+        sessionStatusMetaLabel.stringValue = parts.joined(separator: " | ")
+    }
+
+    private func rebuildDisplayedSessionSnapshots(preserveSelectionThreadID: String?) {
+        let query = currentSessionSearchQuery()
+        let normalizedQuery = query.localizedLowercase
+        let fastMatches: [SessionSnapshot]
+        if normalizedQuery.isEmpty {
+            fastMatches = allSessionSnapshots
+        } else {
+            fastMatches = allSessionSnapshots.filter { fastSessionMatchesQuery($0, normalizedQuery: normalizedQuery) }
+        }
+
+        var matchedThreadIDs = Set(fastMatches.map(\.threadID))
+        if !normalizedQuery.isEmpty, isSessionPromptSearchEnabled() {
+            matchedThreadIDs.formUnion(sessionPromptSearchMatchedThreadIDs)
+        }
+
+        if normalizedQuery.isEmpty {
+            sessionSnapshots = allSessionSnapshots
+        } else {
+            sessionSnapshots = allSessionSnapshots.filter { matchedThreadIDs.contains($0.threadID) }
+        }
+
+        sessionSnapshots = sessionSnapshots.filter(matchesSessionFilters(_:))
+
+        applySessionSorting()
+        sessionStatusTableView.reloadData()
+        restoreSessionSelection(preferredThreadID: preserveSelectionThreadID)
+        updateSessionStatusMetaLabel()
+
+        guard !normalizedQuery.isEmpty,
+              isSessionPromptSearchEnabled(),
+              !isSessionScanRunning,
+              !isSessionPromptSearchRunning,
+              sessionPromptSearchCompletedRevision != sessionSearchRevision else {
+            return
+        }
+
+        startSessionPromptSearch(query: normalizedQuery, revision: sessionSearchRevision, snapshots: allSessionSnapshots)
     }
 
     private func sessionActualName(_ session: SessionSnapshot) -> String {
@@ -1146,15 +1598,15 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return lines.joined(separator: "\n")
     }
 
-    private func loadPromptHistoryText(for session: SessionSnapshot) -> String {
+    private func recentUserMessageEntries(for session: SessionSnapshot, limit: Int? = nil) -> [(timestamp: String, message: String)]? {
         guard !session.rolloutPath.isEmpty else {
-            return "未找到 rollout 路径，无法读取提示词历史。"
+            return nil
         }
 
         let rolloutURL = URL(fileURLWithPath: session.rolloutPath)
         guard let data = try? Data(contentsOf: rolloutURL),
               let text = String(data: data, encoding: .utf8) else {
-            return "读取 rollout 文件失败：\(session.rolloutPath)"
+            return nil
         }
 
         var entries: [(timestamp: String, message: String)] = []
@@ -1176,12 +1628,84 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             }
         }
 
-        guard !entries.isEmpty else {
+        if let limit, entries.count > limit {
+            return Array(entries.suffix(limit))
+        }
+        return entries
+    }
+
+    private func recentPromptSearchCorpus(for session: SessionSnapshot) -> String {
+        sessionPromptSearchCacheLock.lock()
+        if let cached = sessionPromptSearchCache[session.threadID] {
+            sessionPromptSearchCacheLock.unlock()
+            return cached
+        }
+        sessionPromptSearchCacheLock.unlock()
+
+        let corpus = recentUserMessageEntries(for: session, limit: sessionPromptSearchEntryLimit)?
+            .map(\.message)
+            .joined(separator: "\n") ?? ""
+
+        sessionPromptSearchCacheLock.lock()
+        sessionPromptSearchCache[session.threadID] = corpus
+        sessionPromptSearchCacheLock.unlock()
+        return corpus
+    }
+
+    private func startSessionPromptSearch(query: String, revision: Int, snapshots: [SessionSnapshot]) {
+        isSessionPromptSearchRunning = true
+        sessionPromptSearchProgressCompleted = 0
+        sessionPromptSearchProgressTotal = snapshots.count
+        updateSessionStatusMetaLabel()
+
+        DispatchQueue.global(qos: .utility).async {
+            var matchedThreadIDs = Set<String>()
+
+            for (index, session) in snapshots.enumerated() {
+                if revision != self.sessionSearchRevision {
+                    return
+                }
+
+                let corpus = self.recentPromptSearchCorpus(for: session).localizedLowercase
+                if !corpus.isEmpty, corpus.contains(query) {
+                    matchedThreadIDs.insert(session.threadID)
+                }
+
+                if (index + 1) % 8 == 0 || index + 1 == snapshots.count {
+                    let completed = index + 1
+                    DispatchQueue.main.async {
+                        guard revision == self.sessionSearchRevision else { return }
+                        self.sessionPromptSearchProgressCompleted = completed
+                        self.updateSessionStatusMetaLabel()
+                    }
+                }
+            }
+
+            DispatchQueue.main.async {
+                guard revision == self.sessionSearchRevision else { return }
+                self.isSessionPromptSearchRunning = false
+                self.sessionPromptSearchCompletedRevision = revision
+                self.sessionPromptSearchMatchedThreadIDs = matchedThreadIDs
+                self.sessionPromptSearchProgressCompleted = snapshots.count
+                self.rebuildDisplayedSessionSnapshots(preserveSelectionThreadID: self.selectedSessionThreadID())
+            }
+        }
+    }
+
+    private func loadPromptHistoryText(for session: SessionSnapshot) -> String {
+        guard !session.rolloutPath.isEmpty else {
+            return "未找到 rollout 路径，无法读取提示词历史。"
+        }
+
+        guard FileManager.default.fileExists(atPath: session.rolloutPath) else {
+            return "读取 rollout 文件失败：\(session.rolloutPath)"
+        }
+        guard let entries = recentUserMessageEntries(for: session, limit: sessionPromptSearchEntryLimit),
+              !entries.isEmpty else {
             return "没有找到用户提示词历史。"
         }
 
-        let recentEntries = entries.suffix(12)
-        return recentEntries.enumerated().map { index, entry in
+        return entries.enumerated().map { index, entry in
             "提示词 \(index + 1)\n时间: \(entry.timestamp)\n\(entry.message)"
         }.joined(separator: "\n\n")
     }
@@ -1353,6 +1877,14 @@ conn.close()
             lastTopSplitWidth = topSplitView.bounds.width
         }
 
+        if !didApplyInitialSessionStatusSplitRatio,
+           sessionStatusSplitView.subviews.count == 2,
+           sessionStatusSplitView.bounds.height > sessionStatusSplitView.dividerThickness {
+            setSessionStatusSplitRatio(0.62)
+            didApplyInitialSessionStatusSplitRatio = true
+            lastSessionStatusSplitHeight = sessionStatusSplitView.bounds.height
+        }
+
         if !didApplyInitialContentSplitRatio,
            contentSplitView.subviews.count == 2,
            contentSplitView.bounds.height > contentSplitView.dividerThickness {
@@ -1372,6 +1904,18 @@ conn.close()
         guard didApplyInitialTopSplitRatio else { return }
         guard abs(currentWidth - lastTopSplitWidth) > 0.5 else { return }
         setTopSplitRatio(topSplitRatio)
+    }
+
+    private func preserveSessionStatusSplitRatioOnResizeIfNeeded() {
+        guard sessionStatusSplitView.subviews.count == 2 else { return }
+        let currentHeight = sessionStatusSplitView.bounds.height
+        guard currentHeight > sessionStatusSplitView.dividerThickness else { return }
+
+        defer { lastSessionStatusSplitHeight = currentHeight }
+
+        guard didApplyInitialSessionStatusSplitRatio else { return }
+        guard abs(currentHeight - lastSessionStatusSplitHeight) > 0.5 else { return }
+        setSessionStatusSplitRatio(sessionStatusSplitRatio)
     }
 
     private func preserveContentSplitRatioOnResizeIfNeeded() {
@@ -1398,6 +1942,18 @@ conn.close()
         isApplyingTopSplitRatio = false
     }
 
+    private func setSessionStatusSplitRatio(_ ratio: CGFloat) {
+        guard sessionStatusSplitView.subviews.count == 2 else { return }
+        let availableHeight = sessionStatusSplitView.bounds.height - sessionStatusSplitView.dividerThickness
+        guard availableHeight > 0 else { return }
+
+        let clampedRatio = min(max(ratio, 0.28), 0.82)
+        isApplyingSessionStatusSplitRatio = true
+        sessionStatusSplitView.setPosition(availableHeight * clampedRatio, ofDividerAt: 0)
+        sessionStatusSplitRatio = clampedRatio
+        isApplyingSessionStatusSplitRatio = false
+    }
+
     private func setContentSplitRatio(_ ratio: CGFloat) {
         guard contentSplitView.subviews.count == 2 else { return }
         let availableHeight = contentSplitView.bounds.height - contentSplitView.dividerThickness
@@ -1418,6 +1974,16 @@ conn.close()
         guard availableWidth > 0 else { return }
         let currentLeadingWidth = topSplitView.subviews[0].frame.width
         topSplitRatio = min(max(currentLeadingWidth / availableWidth, 0.2), 0.8)
+    }
+
+    private func updateSessionStatusSplitRatioFromCurrentLayout() {
+        guard !isApplyingSessionStatusSplitRatio else { return }
+        guard didApplyInitialSessionStatusSplitRatio else { return }
+        guard sessionStatusSplitView.subviews.count == 2 else { return }
+        let availableHeight = sessionStatusSplitView.bounds.height - sessionStatusSplitView.dividerThickness
+        guard availableHeight > 0 else { return }
+        let currentTopHeight = sessionStatusSplitView.subviews[0].frame.height
+        sessionStatusSplitRatio = min(max(currentTopHeight / availableHeight, 0.28), 0.82)
     }
 
     private func updateContentSplitRatioFromCurrentLayout() {
@@ -1479,6 +2045,9 @@ conn.close()
         metaLabel?.font = .systemFont(ofSize: 11, weight: .regular)
         metaLabel?.textColor = .secondaryLabelColor
         metaLabel?.lineBreakMode = .byTruncatingTail
+        metaLabel?.maximumNumberOfLines = 1
+        metaLabel?.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        metaLabel?.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         let headerViews = [titleStack, headerAccessoryView].compactMap { $0 }
         let headerStack = NSStackView(views: headerViews)
@@ -1488,6 +2057,7 @@ conn.close()
         headerStack.distribution = .fill
 
         titleStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        titleStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         headerAccessoryView?.setContentHuggingPriority(.required, for: .horizontal)
         headerStack.translatesAutoresizingMaskIntoConstraints = false
         contentView.translatesAutoresizingMaskIntoConstraints = false
@@ -1567,6 +2137,45 @@ conn.close()
         targetHistory = normalizedHistory(UserDefaults.standard.stringArray(forKey: DefaultsKey.targetHistory) ?? [])
         messageHistory = normalizedHistory(UserDefaults.standard.stringArray(forKey: DefaultsKey.messageHistory) ?? [])
         configureHistoryPopover()
+    }
+
+    private func configureSessionFilterPopover() {
+        sessionFilterStackView.orientation = .vertical
+        sessionFilterStackView.alignment = .leading
+        sessionFilterStackView.spacing = 6
+        sessionFilterStackView.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        sessionFilterStackView.translatesAutoresizingMaskIntoConstraints = false
+
+        let contentViewController = NSViewController()
+        sessionFilterContainerView.frame = NSRect(x: 0, y: 0, width: 240, height: 10)
+        sessionFilterContainerView.wantsLayer = true
+        sessionFilterContainerView.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+        sessionFilterContainerView.layer?.cornerRadius = 8
+        sessionFilterContainerView.layer?.borderWidth = 1
+        sessionFilterContainerView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.45).cgColor
+        sessionFilterContainerView.addSubview(sessionFilterStackView)
+        NSLayoutConstraint.activate([
+            sessionFilterStackView.leadingAnchor.constraint(equalTo: sessionFilterContainerView.leadingAnchor),
+            sessionFilterStackView.trailingAnchor.constraint(equalTo: sessionFilterContainerView.trailingAnchor),
+            sessionFilterStackView.topAnchor.constraint(equalTo: sessionFilterContainerView.topAnchor),
+            sessionFilterStackView.bottomAnchor.constraint(equalTo: sessionFilterContainerView.bottomAnchor)
+        ])
+        contentViewController.view = sessionFilterContainerView
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 10),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: true
+        )
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.hasShadow = true
+        panel.level = .popUpMenu
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.contentViewController = contentViewController
+        sessionFilterPanel = panel
     }
 
     private func configureHistoryPopover() {
@@ -1918,10 +2527,145 @@ conn.close()
         toggleHistoryDropdown(kind: .message)
     }
 
+    private func isSessionFilterPanelShown() -> Bool {
+        sessionFilterPanel?.isVisible == true
+    }
+
+    private func sessionFilterItems(for kind: SessionFilterKind) -> [String] {
+        ["__all__"] + sessionFilterOptions(for: kind)
+    }
+
+    @objc
+    private func handleSessionFilterCheckbox(_ sender: NSButton) {
+        guard let item = sender.identifier?.rawValue else { return }
+        toggleSessionFilterSelection(item: item)
+    }
+
+    private func makeSessionFilterCheckbox(item: String, selected: Bool) -> NSButton {
+        let button = NSButton(checkboxWithTitle: item == "__all__" ? "全部" : item, target: self, action: #selector(handleSessionFilterCheckbox(_:)))
+        button.identifier = NSUserInterfaceItemIdentifier(item)
+        button.state = selected ? .on : .off
+        button.setButtonType(.switch)
+        button.controlSize = .small
+        button.font = .systemFont(ofSize: 12)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        button.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
+        return button
+    }
+
+    private func toggleSessionFilterSelection(item: String) {
+        guard let kind = sessionFilterPanelKind else { return }
+        if item == "__all__" {
+            setSelectedFilterValues([], for: kind)
+        } else {
+            var selections = selectedFilterValues(for: kind)
+            if selections.contains(item) {
+                selections.remove(item)
+            } else {
+                selections.insert(item)
+            }
+            setSelectedFilterValues(selections, for: kind)
+        }
+
+        rebuildSessionFilterPanel(kind: kind)
+        renderSessionSnapshots(
+            scannedCount: lastSessionRenderScannedCount,
+            totalCount: lastSessionRenderTotalCount,
+            isComplete: lastSessionRenderIsComplete
+        )
+    }
+
+    private func closeSessionFilterPanel() {
+        sessionFilterPanel?.orderOut(nil)
+        sessionFilterPanelKind = nil
+        sessionFilterPanelColumnIdentifier = nil
+        sessionFilterPanelHeaderView = nil
+        if let sessionFilterOutsideLocalMonitor {
+            NSEvent.removeMonitor(sessionFilterOutsideLocalMonitor)
+            self.sessionFilterOutsideLocalMonitor = nil
+        }
+        if let sessionFilterOutsideGlobalMonitor {
+            NSEvent.removeMonitor(sessionFilterOutsideGlobalMonitor)
+            self.sessionFilterOutsideGlobalMonitor = nil
+        }
+        updateSessionFilterHeaderIndicators()
+    }
+
+    private func installSessionFilterOutsideMonitors(headerView: NSTableHeaderView) {
+        if let sessionFilterOutsideLocalMonitor {
+            NSEvent.removeMonitor(sessionFilterOutsideLocalMonitor)
+            self.sessionFilterOutsideLocalMonitor = nil
+        }
+        if let sessionFilterOutsideGlobalMonitor {
+            NSEvent.removeMonitor(sessionFilterOutsideGlobalMonitor)
+            self.sessionFilterOutsideGlobalMonitor = nil
+        }
+
+        sessionFilterOutsideLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            guard let self, self.isSessionFilterPanelShown() else { return event }
+            if let window = event.window, window == self.sessionFilterPanel {
+                return event
+            }
+
+            let eventLocation = NSEvent.mouseLocation
+            if let panel = self.sessionFilterPanel, panel.frame.contains(eventLocation) {
+                return event
+            }
+
+            if let window = headerView.window,
+               let columnIdentifier = self.sessionFilterPanelColumnIdentifier,
+               let columnIndex = headerView.tableView?.column(withIdentifier: NSUserInterfaceItemIdentifier(columnIdentifier)),
+               columnIndex >= 0 {
+                let activeColumnRect = headerView.headerRect(ofColumn: columnIndex)
+                let activeColumnRectInWindow = headerView.convert(activeColumnRect, to: nil)
+                let activeColumnRectOnScreen = window.convertToScreen(activeColumnRectInWindow)
+                if activeColumnRectOnScreen.contains(eventLocation) {
+                    return event
+                }
+            }
+
+            self.closeSessionFilterPanel()
+            return event
+        }
+
+        sessionFilterOutsideGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.closeSessionFilterPanel()
+            }
+        }
+    }
+
+    private func rebuildSessionFilterPanel(kind: SessionFilterKind) {
+        sessionFilterPanelKind = kind
+        sessionFilterStackView.arrangedSubviews.forEach { view in
+            sessionFilterStackView.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        let width = max(sessionFilterPanel?.frame.width ?? 220, 180)
+
+        let items = sessionFilterItems(for: kind)
+        let selectedValues = selectedFilterValues(for: kind)
+        for item in items {
+            let isSelected = item == "__all__" ? selectedValues.isEmpty : selectedValues.contains(item)
+            let checkbox = makeSessionFilterCheckbox(item: item, selected: isSelected)
+            sessionFilterStackView.addArrangedSubview(checkbox)
+        }
+
+        let rowHeight: CGFloat = 18
+        let verticalPadding = sessionFilterStackView.edgeInsets.top + sessionFilterStackView.edgeInsets.bottom
+        let contentHeight = max(verticalPadding + (CGFloat(items.count) * rowHeight) + (CGFloat(max(items.count - 1, 0)) * sessionFilterStackView.spacing), 44)
+        sessionFilterContainerView.frame = NSRect(x: 0, y: 0, width: width, height: contentHeight)
+        sessionFilterPanel?.contentViewController?.view.frame = sessionFilterContainerView.frame
+        sessionFilterPanel?.setContentSize(NSSize(width: width, height: contentHeight))
+        updateSessionFilterHeaderIndicators()
+    }
+
     private func makeHistoryArrowButton(action: Selector) -> NSButton {
-        let button = NSButton(title: "▾", target: self, action: action)
+        let button = NSButton(title: "", target: self, action: action)
         button.bezelStyle = .rounded
-        button.font = .systemFont(ofSize: 11, weight: .medium)
+        button.image = chevronDownImage(pointSize: 11, weight: .medium)
+        button.imagePosition = .imageOnly
         button.translatesAutoresizingMaskIntoConstraints = false
         button.widthAnchor.constraint(equalToConstant: 26).isActive = true
         return button
@@ -2240,14 +2984,14 @@ conn.close()
         guard !newSnapshots.isEmpty else { return }
 
         var mergedByID: [String: SessionSnapshot] = [:]
-        for snapshot in sessionSnapshots {
+        for snapshot in allSessionSnapshots {
             mergedByID[snapshot.threadID] = snapshot
         }
         for snapshot in newSnapshots {
             mergedByID[snapshot.threadID] = snapshot
         }
 
-        sessionSnapshots = mergedByID.values.sorted { lhs, rhs in
+        allSessionSnapshots = mergedByID.values.sorted { lhs, rhs in
             let lhsEpoch = TimeInterval(lhs.updatedAtEpoch) ?? 0
             let rhsEpoch = TimeInterval(rhs.updatedAtEpoch) ?? 0
             if lhsEpoch == rhsEpoch {
@@ -2259,27 +3003,10 @@ conn.close()
 
     private func renderSessionSnapshots(scannedCount: Int? = nil, totalCount: Int? = nil, isComplete: Bool = true) {
         let selectedThreadID = selectedSessionThreadID()
-        if sessionSnapshots.isEmpty {
-            if isSessionScanRunning, let scannedCount, let totalCount {
-                sessionStatusMetaLabel.stringValue = "视图: \(sessionScopeText()) | 正在扫描 \(scannedCount)/\(totalCount)…"
-            } else {
-                sessionStatusMetaLabel.stringValue = sessionEmptyStateText()
-            }
-            sessionStatusTableView.reloadData()
-            updateSessionDetailView()
-            return
-        }
-
-        let refreshedAt = Self.timestampFormatter.string(from: Date())
-        if let scannedCount, let totalCount {
-            let progressText = isComplete ? "已扫描: \(scannedCount)/\(totalCount)" : "扫描中: \(scannedCount)/\(totalCount)"
-            sessionStatusMetaLabel.stringValue = "视图: \(sessionScopeText()) | 已加载: \(sessionSnapshots.count) | \(progressText) | 总数: \(totalCount) | 刷新: \(refreshedAt)"
-        } else {
-            sessionStatusMetaLabel.stringValue = "视图: \(sessionScopeText()) | 已加载: \(sessionSnapshots.count) | 刷新: \(refreshedAt)"
-        }
-        applySessionSorting()
-        sessionStatusTableView.reloadData()
-        restoreSessionSelection(preferredThreadID: selectedThreadID)
+        lastSessionRenderScannedCount = scannedCount
+        lastSessionRenderTotalCount = totalCount
+        lastSessionRenderIsComplete = isComplete
+        rebuildDisplayedSessionSnapshots(preserveSelectionThreadID: selectedThreadID)
     }
 
     private func validateTarget(required: Bool = true) -> String? {
@@ -2867,7 +3594,7 @@ conn.close()
         setStatus("检测状态已停止", key: "scan")
         appendOutput("已请求停止检测状态。")
         if sessionScanTotal > 0 {
-            renderSessionSnapshots(scannedCount: sessionSnapshots.count, totalCount: sessionScanTotal, isComplete: false)
+            renderSessionSnapshots(scannedCount: allSessionSnapshots.count, totalCount: sessionScanTotal, isComplete: false)
             sessionStatusMetaLabel.stringValue += " | 已停止"
         } else {
             sessionStatusMetaLabel.stringValue = "视图: \(sessionScopeText()) | 检测已停止。"
@@ -2949,6 +3676,8 @@ conn.close()
         updateDetectStatusButtonState()
         setStatus("检测状态执行中…", key: "scan")
         appendOutput("执行 检测状态: session-count + probe-all batches")
+        invalidateSessionSearch(resetPromptCache: true)
+        allSessionSnapshots = []
         sessionSnapshots = []
         sessionStatusMetaLabel.stringValue = "视图: 普通 | 正在准备扫描…"
         sessionStatusTableView.reloadData()
@@ -2965,6 +3694,7 @@ conn.close()
                     guard self.sessionScanGeneration == generation else { return }
                     self.isSessionScanRunning = false
                     self.updateDetectStatusButtonState()
+                    self.allSessionSnapshots = []
                     self.sessionSnapshots = []
                     self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 检测状态失败: \(countResult.stderr.isEmpty ? countResult.stdout : countResult.stderr)"
                     self.sessionStatusTableView.reloadData()
@@ -3061,6 +3791,8 @@ conn.close()
         updateDetectStatusButtonState()
         setStatus("读取已归档 session 中…", key: "scan")
         appendOutput("执行 检测状态: thread-list --archived")
+        invalidateSessionSearch(resetPromptCache: true)
+        allSessionSnapshots = []
         sessionSnapshots = []
         sessionStatusMetaLabel.stringValue = "视图: 已归档 | 正在读取列表…"
         sessionStatusTableView.reloadData()
@@ -3078,6 +3810,7 @@ conn.close()
                 self.updateDetectStatusButtonState()
 
                 if result.status != 0 {
+                    self.allSessionSnapshots = []
                     self.sessionSnapshots = []
                     self.sessionStatusMetaLabel.stringValue = "视图: 已归档 | 读取失败: \(result.stderr.isEmpty ? result.stdout : result.stderr)"
                     self.sessionStatusTableView.reloadData()
@@ -3090,7 +3823,7 @@ conn.close()
                 }
 
                 let snapshots = self.parseThreadListOutput(result.stdout, archived: true)
-                self.sessionSnapshots = snapshots
+                self.allSessionSnapshots = snapshots
                 self.sessionScanTotal = snapshots.count
                 self.renderSessionSnapshots(scannedCount: snapshots.count, totalCount: snapshots.count, isComplete: true)
                 self.setStatus("已加载已归档 session", key: "scan")
@@ -3175,10 +3908,17 @@ conn.close()
     }
 
     @objc
+    private func toggleSessionPromptSearch() {
+        scheduleSessionSearchRefresh()
+    }
+
+    @objc
     private func changeSessionScope() {
         if isSessionScanRunning {
             stopSessionStatusScan()
         }
+        invalidateSessionSearch(resetPromptCache: true)
+        allSessionSnapshots = []
         sessionSnapshots = []
         sessionScanTotal = 0
         sessionStatusTableView.deselectAll(nil)
@@ -3260,9 +4000,9 @@ conn.close()
                 self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
 
                 if result.success {
-                    if let index = self.sessionSnapshots.firstIndex(where: { $0.threadID == session.threadID }) {
-                        let previous = self.sessionSnapshots[index]
-                        self.sessionSnapshots[index] = SessionSnapshot(
+                    if let index = self.allSessionSnapshots.firstIndex(where: { $0.threadID == session.threadID }) {
+                        let previous = self.allSessionSnapshots[index]
+                        self.allSessionSnapshots[index] = SessionSnapshot(
                             name: newName,
                             target: newName.isEmpty ? previous.threadID : newName,
                             threadID: previous.threadID,
@@ -3276,10 +4016,13 @@ conn.close()
                             isArchived: previous.isArchived
                         )
                     }
-                    self.applySessionSorting()
-                    self.sessionStatusTableView.reloadData()
+                    self.invalidateSessionSearch()
+                    self.renderSessionSnapshots(
+                        scannedCount: self.lastSessionRenderScannedCount,
+                        totalCount: self.lastSessionRenderTotalCount,
+                        isComplete: self.lastSessionRenderIsComplete
+                    )
                     self.selectSessionRow(threadID: session.threadID)
-                    self.updateSessionDetailView()
                     self.setStatus("保存名称完成", key: "action")
                     self.appendOutput(newName.isEmpty ? "已清空名称，恢复为未 rename 状态。" : "已保存名称: \(newName)")
                 } else {
@@ -3350,15 +4093,15 @@ conn.close()
 
             DispatchQueue.main.async {
                 if result.success {
+                    self.allSessionSnapshots.removeAll { $0.threadID == session.threadID }
                     self.sessionSnapshots.removeAll { $0.threadID == session.threadID }
                     if self.sessionScanTotal > 0 {
                         self.sessionScanTotal = max(0, self.sessionScanTotal - 1)
                     }
-                    self.sessionStatusTableView.reloadData()
-                    self.updateSessionDetailView()
+                    self.invalidateSessionSearch()
                     self.renderSessionSnapshots(
-                        scannedCount: self.sessionSnapshots.count,
-                        totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.sessionSnapshots.count,
+                        scannedCount: self.allSessionSnapshots.count,
+                        totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.allSessionSnapshots.count,
                         isComplete: true
                     )
                     self.setStatus("归档 Session 完成", key: "action")
@@ -3426,15 +4169,15 @@ conn.close()
 
             DispatchQueue.main.async {
                 if result.success {
+                    self.allSessionSnapshots.removeAll { $0.threadID == session.threadID }
                     self.sessionSnapshots.removeAll { $0.threadID == session.threadID }
                     if self.sessionScanTotal > 0 {
                         self.sessionScanTotal = max(0, self.sessionScanTotal - 1)
                     }
-                    self.sessionStatusTableView.reloadData()
-                    self.updateSessionDetailView()
+                    self.invalidateSessionSearch()
                     self.renderSessionSnapshots(
-                        scannedCount: self.sessionSnapshots.count,
-                        totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.sessionSnapshots.count,
+                        scannedCount: self.allSessionSnapshots.count,
+                        totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.allSessionSnapshots.count,
                         isComplete: true
                     )
                     self.setStatus("恢复归档完成", key: "action")
@@ -3517,15 +4260,15 @@ conn.close()
 
             DispatchQueue.main.async {
                 if result.success {
+                    self.allSessionSnapshots.removeAll { $0.threadID == session.threadID }
                     self.sessionSnapshots.removeAll { $0.threadID == session.threadID }
                     if self.sessionScanTotal > 0 {
                         self.sessionScanTotal = max(0, self.sessionScanTotal - 1)
                     }
-                    self.sessionStatusTableView.reloadData()
-                    self.updateSessionDetailView()
+                    self.invalidateSessionSearch()
                     self.renderSessionSnapshots(
-                        scannedCount: self.sessionSnapshots.count,
-                        totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.sessionSnapshots.count,
+                        scannedCount: self.allSessionSnapshots.count,
+                        totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.allSessionSnapshots.count,
                         isComplete: true
                     )
                     self.setStatus("彻底删除完成", key: "action")
@@ -3669,12 +4412,24 @@ conn.close()
         _ = validateAndCommitIntervalField(showAlert: true)
     }
 
+    func controlTextDidChange(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField else { return }
+        if field == sessionSearchField {
+            scheduleSessionSearchRefresh()
+        }
+    }
+
     func splitViewDidResizeSubviews(_ notification: Notification) {
         guard let splitView = notification.object as? NSSplitView else { return }
         if splitView == topSplitView {
             let widthDelta = abs(topSplitView.bounds.width - lastTopSplitWidth)
             if widthDelta <= 0.5 {
                 updateTopSplitRatioFromCurrentLayout()
+            }
+        } else if splitView == sessionStatusSplitView {
+            let heightDelta = abs(sessionStatusSplitView.bounds.height - lastSessionStatusSplitHeight)
+            if heightDelta <= 0.5 {
+                updateSessionStatusSplitRatioFromCurrentLayout()
             }
         } else if splitView == contentSplitView {
             let heightDelta = abs(contentSplitView.bounds.height - lastContentSplitHeight)
@@ -3685,7 +4440,7 @@ conn.close()
     }
 
     func splitView(_ splitView: NSSplitView, effectiveRect proposedEffectiveRect: NSRect, forDrawnRect drawnRect: NSRect, ofDividerAt dividerIndex: Int) -> NSRect {
-        guard splitView == topSplitView || splitView == contentSplitView else {
+        guard splitView == topSplitView || splitView == sessionStatusSplitView || splitView == contentSplitView else {
             return proposedEffectiveRect
         }
 
@@ -3702,6 +4457,14 @@ conn.close()
             let minLeading: CGFloat = 260
             let minTrailing: CGFloat = 220
             return min(max(proposedPosition, minLeading), availableWidth - minTrailing)
+        }
+
+        if splitView == sessionStatusSplitView {
+            let availableHeight = splitView.bounds.height - splitView.dividerThickness
+            guard availableHeight > 0 else { return proposedPosition }
+            let minTop: CGFloat = 110
+            let minBottom: CGFloat = 92
+            return min(max(proposedPosition, minTop), availableHeight - minBottom)
         }
 
         if splitView == contentSplitView {
