@@ -28,12 +28,12 @@ if [[ -z "$SDK_PATH" ]]; then
 fi
 
 if [[ -n "$SDK_PATH" ]]; then
-  swiftc -sdk "$SDK_PATH" -warnings-as-errors -typecheck "${ROOT}/CodexBianCeZheApp.swift"
+  swiftc -sdk "$SDK_PATH" -warnings-as-errors -typecheck "${ROOT}/CodeTaskMasterApp.swift"
 else
-  swiftc -warnings-as-errors -typecheck "${ROOT}/CodexBianCeZheApp.swift"
+  swiftc -warnings-as-errors -typecheck "${ROOT}/CodeTaskMasterApp.swift"
 fi
 
 printf '==> build app\n'
-"${ROOT}/build_codex_biancezhe_app.sh"
+"${ROOT}/build_code_taskmaster_app.sh"
 
 printf 'all checks passed\n'

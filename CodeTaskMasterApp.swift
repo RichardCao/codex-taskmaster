@@ -305,7 +305,7 @@ final class HistoryDropdownListView: NSView {
     override var isFlipped: Bool { true }
 }
 
-final class CodexBianCeZheApp: NSObject, NSApplicationDelegate {
+final class CodeTaskMasterApp: NSObject, NSApplicationDelegate {
     private var windowController: MainWindowController?
     private var didRunTerminationCleanup = false
 
@@ -353,7 +353,7 @@ final class CodexBianCeZheApp: NSObject, NSApplicationDelegate {
 
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Quit Codex Taskmaster", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit Code TaskMaster", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
 
@@ -383,7 +383,7 @@ final class MainWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Codex Taskmaster"
+        window.title = "Code TaskMaster"
         window.minSize = NSSize(width: 760, height: 560)
         window.contentMinSize = NSSize(width: 760, height: 560)
         window.contentMaxSize = NSSize(width: 10_000, height: 10_000)
@@ -612,7 +612,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionStatusMetaLabel.stringValue = sessionEmptyStateText()
         updateDetectStatusButtonState()
         stopButton.isEnabled = false
-        appendOutput("Codex Taskmaster is ready.")
+        appendOutput("Code TaskMaster is ready.")
         appendOutput("Active Loops will refresh automatically every \(Int(autoRefreshInterval)) seconds.")
         refreshLoopsSnapshot()
         startAutoRefresh()
@@ -3278,11 +3278,11 @@ conn.close()
 
     private func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags = []) throws {
         guard let source = CGEventSource(stateID: .combinedSessionState) else {
-            throw NSError(domain: "CodexTaskmaster", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法创建键盘事件源"])
+            throw NSError(domain: "CodeTaskMaster", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法创建键盘事件源"])
         }
         guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
-            throw NSError(domain: "CodexTaskmaster", code: 2, userInfo: [NSLocalizedDescriptionKey: "无法创建键盘事件"])
+            throw NSError(domain: "CodeTaskMaster", code: 2, userInfo: [NSLocalizedDescriptionKey: "无法创建键盘事件"])
         }
         keyDown.flags = flags
         keyUp.flags = flags
@@ -3352,7 +3352,7 @@ conn.close()
         do {
             try process.run()
         } catch {
-            throw NSError(domain: "CodexTaskmaster", code: 3, userInfo: [NSLocalizedDescriptionKey: "启动 Terminal 聚焦脚本失败: \(error.localizedDescription)"])
+            throw NSError(domain: "CodeTaskMaster", code: 3, userInfo: [NSLocalizedDescriptionKey: "启动 Terminal 聚焦脚本失败: \(error.localizedDescription)"])
         }
 
         if let input = script.data(using: .utf8) {
@@ -3365,7 +3365,7 @@ conn.close()
         if process.terminationStatus != 0 {
             let errData = stderr.fileHandleForReading.readDataToEndOfFile()
             let errText = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "聚焦 Terminal 失败"
-            throw NSError(domain: "CodexTaskmaster", code: 4, userInfo: [NSLocalizedDescriptionKey: errText])
+            throw NSError(domain: "CodeTaskMaster", code: 4, userInfo: [NSLocalizedDescriptionKey: errText])
         }
         usleep(120_000)
     }
@@ -3379,7 +3379,7 @@ conn.close()
 
     private func sendViaAppKeystrokes(ttyPath: String, message: String, clearExistingInput: Bool) throws {
         guard ensureAccessibilityTrust(prompt: true) else {
-            throw NSError(domain: "CodexTaskmaster", code: 5, userInfo: [NSLocalizedDescriptionKey: "Codex Taskmaster 没有辅助功能权限，无法发送按键"])
+            throw NSError(domain: "CodeTaskMaster", code: 5, userInfo: [NSLocalizedDescriptionKey: "Code TaskMaster 没有辅助功能权限，无法发送按键"])
         }
 
         try focusTerminalWindow(for: ttyPath)
@@ -3843,7 +3843,7 @@ conn.close()
             return
         }
         guard ensureAccessibilityTrust(prompt: true) else {
-            appendOutput("Codex Taskmaster 缺少辅助功能权限，无法发送按键。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
+            appendOutput("Code TaskMaster 缺少辅助功能权限，无法发送按键。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
             setStatus("缺少辅助功能权限")
             NSSound.beep()
             return
@@ -3866,7 +3866,7 @@ conn.close()
             return
         }
         guard ensureAccessibilityTrust(prompt: true) else {
-            appendOutput("Codex Taskmaster 缺少辅助功能权限，无法处理循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
+            appendOutput("Code TaskMaster 缺少辅助功能权限，无法处理循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
             setStatus("缺少辅助功能权限")
             NSSound.beep()
             return
@@ -4498,6 +4498,6 @@ conn.close()
 }
 
 let app = NSApplication.shared
-let delegate = CodexBianCeZheApp()
+let delegate = CodeTaskMasterApp()
 app.delegate = delegate
 app.run()

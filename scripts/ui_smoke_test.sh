@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_PATH="${CODEX_TASKMASTER_APP_PATH:-${ROOT}/Codex Taskmaster.app}"
-APP_NAME="${CODEX_TASKMASTER_APP_NAME:-Codex Taskmaster}"
-WINDOW_TITLE="${CODEX_TASKMASTER_WINDOW_TITLE:-Codex Taskmaster}"
+APP_PATH="${CODEX_TASKMASTER_APP_PATH:-${ROOT}/Code TaskMaster.app}"
+APP_NAME="${CODEX_TASKMASTER_APP_NAME:-Code TaskMaster}"
+WINDOW_TITLE="${CODEX_TASKMASTER_WINDOW_TITLE:-Code TaskMaster}"
 LAUNCH_TIMEOUT_SECONDS="${CODEX_TASKMASTER_UI_TIMEOUT_SECONDS:-15}"
 
 require_cmd() {
@@ -24,7 +24,7 @@ require_cmd osascript
 
 if [[ ! -d "$APP_PATH" ]]; then
   printf 'App bundle not found, building first: %s\n' "$APP_PATH"
-  "${ROOT}/build_codex_biancezhe_app.sh"
+  "${ROOT}/build_code_taskmaster_app.sh"
 fi
 
 trap cleanup EXIT
@@ -64,7 +64,7 @@ end run
 
 while time.time() < deadline:
     completed = subprocess.run(
-        ["osascript", "-", "Codex Taskmaster", "Codex Taskmaster"],
+        ["osascript", "-", "Code TaskMaster", "Code TaskMaster"],
         input=script,
         capture_output=True,
         text=True,

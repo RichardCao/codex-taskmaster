@@ -23,7 +23,7 @@
 ### 核心逻辑参考
 
 - [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh)
-- [CodexBianCeZheApp.swift](/Users/create/codex-terminal-app/CodexBianCeZheApp.swift)
+- [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
 
 说明：
 
@@ -53,10 +53,10 @@
 
 下面这些是 macOS 构建或产物，不是 Linux 迁移首要材料。
 
-- `Codex Taskmaster.app`
-- `CodexBianCeZhe-1024.png`
-- `CodexBianCeZhe.iconset/`
-- [build_codex_biancezhe_app.sh](/Users/create/codex-terminal-app/build_codex_biancezhe_app.sh)
+- `Code TaskMaster.app`
+- `CodeTaskMaster-1024.png`
+- `CodeTaskMaster.iconset/`
+- [build_code_taskmaster_app.sh](/Users/create/codex-terminal-app/build_code_taskmaster_app.sh)
 - [generate_icon.swift](/Users/create/codex-terminal-app/generate_icon.swift)
 - [scripts/ui_smoke_test.sh](/Users/create/codex-terminal-app/scripts/ui_smoke_test.sh)
 

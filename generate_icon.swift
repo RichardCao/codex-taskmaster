@@ -8,7 +8,7 @@ if let lastSentinel = rawArguments.lastIndex(of: "--"),
 } else {
     scriptArguments = []
 }
-let outputPath = scriptArguments.first ?? "CodexBianCeZhe-1024.png"
+let outputPath = scriptArguments.first ?? "CodeTaskMaster-1024.png"
 let canvas = NSSize(width: 1024, height: 1024)
 let image = NSImage(size: canvas)
 
@@ -165,48 +165,51 @@ whipMotion2.move(to: NSPoint(x: 780, y: 700))
 whipMotion2.line(to: NSPoint(x: 824, y: 734))
 stroke(whipMotion2, 0xE68F33, 6)
 
-let donkeyBody = NSBezierPath(roundedRect: NSRect(x: 482, y: 350, width: 304, height: 184), xRadius: 92, yRadius: 92)
+let donkeyBody = NSBezierPath(roundedRect: NSRect(x: 468, y: 352, width: 316, height: 178), xRadius: 90, yRadius: 90)
 fill(donkeyBody, 0x75655C)
 
-let donkeyBelly = NSBezierPath(roundedRect: NSRect(x: 540, y: 336, width: 174, height: 118), xRadius: 56, yRadius: 56)
+let donkeyBelly = NSBezierPath(roundedRect: NSRect(x: 528, y: 340, width: 184, height: 112), xRadius: 54, yRadius: 54)
 fill(donkeyBelly, 0xAB9380)
 
+let donkeyShoulder = NSBezierPath(roundedRect: NSRect(x: 584, y: 424, width: 116, height: 82), xRadius: 34, yRadius: 34)
+fill(donkeyShoulder, 0x75655C)
+
 let donkeyNeck = NSBezierPath()
-donkeyNeck.move(to: NSPoint(x: 562, y: 494))
-donkeyNeck.line(to: NSPoint(x: 626, y: 634))
-donkeyNeck.line(to: NSPoint(x: 686, y: 628))
-donkeyNeck.line(to: NSPoint(x: 646, y: 484))
+donkeyNeck.move(to: NSPoint(x: 590, y: 438))
+donkeyNeck.line(to: NSPoint(x: 680, y: 472))
+donkeyNeck.line(to: NSPoint(x: 732, y: 648))
+donkeyNeck.line(to: NSPoint(x: 646, y: 664))
 donkeyNeck.close()
 fill(donkeyNeck, 0x75655C)
 
-let donkeyHead = NSBezierPath(roundedRect: NSRect(x: 640, y: 540, width: 182, height: 110), xRadius: 42, yRadius: 42)
+let donkeyHead = NSBezierPath(roundedRect: NSRect(x: 658, y: 548, width: 176, height: 104), xRadius: 40, yRadius: 40)
 fill(donkeyHead, 0x75655C)
 
-let donkeyMuzzle = NSBezierPath(roundedRect: NSRect(x: 760, y: 562, width: 96, height: 70), xRadius: 28, yRadius: 28)
+let donkeyMuzzle = NSBezierPath(roundedRect: NSRect(x: 772, y: 568, width: 90, height: 66), xRadius: 26, yRadius: 26)
 fill(donkeyMuzzle, 0xB49E8A)
 
 let earLeft = NSBezierPath()
-earLeft.move(to: NSPoint(x: 714, y: 650))
-earLeft.line(to: NSPoint(x: 708, y: 794))
-earLeft.line(to: NSPoint(x: 748, y: 674))
+earLeft.move(to: NSPoint(x: 726, y: 658))
+earLeft.line(to: NSPoint(x: 718, y: 796))
+earLeft.line(to: NSPoint(x: 758, y: 680))
 earLeft.close()
 fill(earLeft, 0x75655C)
 
 let earRight = NSBezierPath()
-earRight.move(to: NSPoint(x: 760, y: 648))
-earRight.line(to: NSPoint(x: 784, y: 790))
-earRight.line(to: NSPoint(x: 798, y: 668))
+earRight.move(to: NSPoint(x: 772, y: 656))
+earRight.line(to: NSPoint(x: 800, y: 792))
+earRight.line(to: NSPoint(x: 810, y: 678))
 earRight.close()
 fill(earRight, 0x75655C)
 
-let donkeyEye = NSBezierPath(ovalIn: NSRect(x: 740, y: 598, width: 14, height: 14))
+let donkeyEye = NSBezierPath(ovalIn: NSRect(x: 752, y: 600, width: 14, height: 14))
 fill(donkeyEye, 0x181513)
 
 let donkeyMouth = NSBezierPath()
-donkeyMouth.move(to: NSPoint(x: 790, y: 582))
-donkeyMouth.curve(to: NSPoint(x: 828, y: 588),
-                  controlPoint1: NSPoint(x: 798, y: 574),
-                  controlPoint2: NSPoint(x: 814, y: 576))
+donkeyMouth.move(to: NSPoint(x: 802, y: 586))
+donkeyMouth.curve(to: NSPoint(x: 838, y: 592),
+                  controlPoint1: NSPoint(x: 808, y: 578),
+                  controlPoint2: NSPoint(x: 824, y: 580))
 stroke(donkeyMouth, 0x5F4A3E, 5)
 
 let tail = NSBezierPath()
@@ -220,49 +223,49 @@ let tailTip = NSBezierPath(ovalIn: NSRect(x: 422, y: 530, width: 24, height: 36)
 fill(tailTip, 0x2C231F)
 
 let hindBackLeg = NSBezierPath()
-hindBackLeg.move(to: NSPoint(x: 548, y: 352))
-hindBackLeg.line(to: NSPoint(x: 534, y: 238))
-hindBackLeg.line(to: NSPoint(x: 562, y: 238))
-hindBackLeg.line(to: NSPoint(x: 572, y: 350))
+hindBackLeg.move(to: NSPoint(x: 518, y: 360))
+hindBackLeg.line(to: NSPoint(x: 510, y: 230))
+hindBackLeg.line(to: NSPoint(x: 546, y: 230))
+hindBackLeg.line(to: NSPoint(x: 554, y: 360))
 hindBackLeg.close()
 fill(hindBackLeg, 0x5E4D43)
 
-let hindBackHoof = NSBezierPath(roundedRect: NSRect(x: 528, y: 224, width: 40, height: 22), xRadius: 8, yRadius: 8)
+let hindBackHoof = NSBezierPath(roundedRect: NSRect(x: 506, y: 216, width: 42, height: 22), xRadius: 8, yRadius: 8)
 fill(hindBackHoof, 0x2E241F)
 
 let hindFrontLeg = NSBezierPath()
-hindFrontLeg.move(to: NSPoint(x: 606, y: 348))
-hindFrontLeg.line(to: NSPoint(x: 618, y: 286))
-hindFrontLeg.line(to: NSPoint(x: 632, y: 214))
-hindFrontLeg.line(to: NSPoint(x: 660, y: 214))
-hindFrontLeg.line(to: NSPoint(x: 642, y: 348))
+hindFrontLeg.move(to: NSPoint(x: 570, y: 362))
+hindFrontLeg.line(to: NSPoint(x: 584, y: 292))
+hindFrontLeg.line(to: NSPoint(x: 600, y: 220))
+hindFrontLeg.line(to: NSPoint(x: 636, y: 220))
+hindFrontLeg.line(to: NSPoint(x: 618, y: 362))
 hindFrontLeg.close()
 fill(hindFrontLeg, 0x67564B)
 
-let hindFrontHoof = NSBezierPath(roundedRect: NSRect(x: 624, y: 200, width: 42, height: 22), xRadius: 8, yRadius: 8)
+let hindFrontHoof = NSBezierPath(roundedRect: NSRect(x: 596, y: 206, width: 42, height: 22), xRadius: 8, yRadius: 8)
 fill(hindFrontHoof, 0x2E241F)
 
 let frontBackLeg = NSBezierPath()
-frontBackLeg.move(to: NSPoint(x: 690, y: 352))
-frontBackLeg.line(to: NSPoint(x: 696, y: 252))
-frontBackLeg.line(to: NSPoint(x: 722, y: 252))
-frontBackLeg.line(to: NSPoint(x: 716, y: 352))
+frontBackLeg.move(to: NSPoint(x: 662, y: 362))
+frontBackLeg.line(to: NSPoint(x: 668, y: 248))
+frontBackLeg.line(to: NSPoint(x: 700, y: 248))
+frontBackLeg.line(to: NSPoint(x: 694, y: 362))
 frontBackLeg.close()
 fill(frontBackLeg, 0x5A493F)
 
-let frontBackHoof = NSBezierPath(roundedRect: NSRect(x: 692, y: 238, width: 38, height: 22), xRadius: 8, yRadius: 8)
+let frontBackHoof = NSBezierPath(roundedRect: NSRect(x: 662, y: 234, width: 40, height: 22), xRadius: 8, yRadius: 8)
 fill(frontBackHoof, 0x2E241F)
 
 let frontFrontLeg = NSBezierPath()
-frontFrontLeg.move(to: NSPoint(x: 748, y: 346))
-frontFrontLeg.line(to: NSPoint(x: 760, y: 284))
-frontFrontLeg.line(to: NSPoint(x: 778, y: 214))
-frontFrontLeg.line(to: NSPoint(x: 808, y: 214))
-frontFrontLeg.line(to: NSPoint(x: 786, y: 346))
+frontFrontLeg.move(to: NSPoint(x: 708, y: 360))
+frontFrontLeg.line(to: NSPoint(x: 720, y: 292))
+frontFrontLeg.line(to: NSPoint(x: 736, y: 220))
+frontFrontLeg.line(to: NSPoint(x: 768, y: 220))
+frontFrontLeg.line(to: NSPoint(x: 754, y: 360))
 frontFrontLeg.close()
 fill(frontFrontLeg, 0x66554A)
 
-let frontFrontHoof = NSBezierPath(roundedRect: NSRect(x: 774, y: 200, width: 40, height: 22), xRadius: 8, yRadius: 8)
+let frontFrontHoof = NSBezierPath(roundedRect: NSRect(x: 730, y: 206, width: 38, height: 22), xRadius: 8, yRadius: 8)
 fill(frontFrontHoof, 0x2E241F)
 
 let lazyMark1 = NSBezierPath()

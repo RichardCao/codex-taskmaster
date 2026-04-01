@@ -2,13 +2,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="Codex Taskmaster"
+APP_NAME="Code TaskMaster"
 APP_DIR="${ROOT}/${APP_NAME}.app"
 BIN_DIR="${APP_DIR}/Contents/MacOS"
 RES_DIR="${APP_DIR}/Contents/Resources"
-BIN_PATH="${BIN_DIR}/CodexTaskmaster"
-ICONSET_DIR="${ROOT}/CodexBianCeZhe.iconset"
-ICON_PNG="${ROOT}/CodexBianCeZhe-1024.png"
+BIN_PATH="${BIN_DIR}/CodeTaskMaster"
+ICONSET_DIR="${ROOT}/CodeTaskMaster.iconset"
+ICON_PNG="${ROOT}/CodeTaskMaster-1024.png"
 ICON_ICNS="${RES_DIR}/AppIcon.icns"
 HELPER_SRC="${ROOT}/codex_terminal_sender.sh"
 HELPER_DST="${RES_DIR}/codex_terminal_sender.sh"
@@ -43,7 +43,7 @@ resolve_sdk_path() {
 
 SDK_PATH="$(resolve_sdk_path)"
 
-swift -sdk "$SDK_PATH" "$ROOT/generate_icon.swift" -- "$ICON_PNG"
+MACOS_SDK_PATH="$SDK_PATH" "${ROOT}/scripts/generate_icon.sh" "$ICON_PNG"
 [[ -f "$ICON_PNG" ]] || {
   echo "failed to generate icon png at: $ICON_PNG" >&2
   exit 1
@@ -62,7 +62,13 @@ sips -z 256 256 "$ICON_PNG" --out "$ICONSET_DIR/icon_128x128@2x.png" >/dev/null
 sips -z 256 256 "$ICON_PNG" --out "$ICONSET_DIR/icon_256x256.png" >/dev/null
 sips -z 512 512 "$ICON_PNG" --out "$ICONSET_DIR/icon_256x256@2x.png" >/dev/null
 sips -z 512 512 "$ICON_PNG" --out "$ICONSET_DIR/icon_512x512.png" >/dev/null
-iconutil -c icns "$ICONSET_DIR" -o "$ICON_ICNS"
+
+ICON_AVAILABLE=1
+if ! python3 "${ROOT}/scripts/make_icns.py" "$ICONSET_DIR" "$ICON_ICNS"; then
+  echo "warning: failed to build icns from $ICONSET_DIR; app will use the default icon" >&2
+  rm -f "$ICON_ICNS"
+  ICON_AVAILABLE=0
+fi
 
 cp "$HELPER_SRC" "$HELPER_DST"
 chmod 755 "$HELPER_DST"
@@ -72,7 +78,7 @@ swiftc \
   -sdk "$SDK_PATH" \
   -framework AppKit \
   -o "$BIN_PATH" \
-  "$ROOT/CodexBianCeZheApp.swift"
+  "$ROOT/CodeTaskMasterApp.swift"
 
 cat >"${APP_DIR}/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -82,17 +88,15 @@ cat >"${APP_DIR}/Contents/Info.plist" <<'PLIST'
   <key>CFBundleDevelopmentRegion</key>
   <string>zh_CN</string>
   <key>CFBundleDisplayName</key>
-  <string>Codex Taskmaster</string>
+  <string>Code TaskMaster</string>
   <key>CFBundleExecutable</key>
-  <string>CodexTaskmaster</string>
-  <key>CFBundleIconFile</key>
-  <string>AppIcon</string>
+  <string>CodeTaskMaster</string>
   <key>CFBundleIdentifier</key>
   <string>io.github.codex-taskmaster</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>Codex Taskmaster</string>
+  <string>Code TaskMaster</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -108,6 +112,10 @@ cat >"${APP_DIR}/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+
+if [[ "$ICON_AVAILABLE" == "1" ]]; then
+  /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string AppIcon' "${APP_DIR}/Contents/Info.plist"
+fi
 
 printf 'APPL????' >"${APP_DIR}/Contents/PkgInfo"
 

@@ -5,8 +5,8 @@
 *.app/
 
 # Generated icon assets
-CodexBianCeZhe-1024.png
-CodexBianCeZhe.iconset/
+CodeTaskMaster-1024.png
+CodeTaskMaster.iconset/
 
 # Common editor temp files
 *.swp

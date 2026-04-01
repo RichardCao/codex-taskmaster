@@ -1,6 +1,6 @@
-# Codex Taskmaster
+# Code TaskMaster
 
-`Codex Taskmaster` 是一个原生 macOS 工具，用来向 Terminal 里运行的 Codex session 发送消息。它支持单次发送、循环发送、session 状态扫描、提示词历史查看，以及 session 的改名、归档、恢复和本地彻底删除。
+`Code TaskMaster` 是一个原生 macOS 工具，用来向 Terminal 里运行的 Codex session 发送消息。它支持单次发送、循环发送、session 状态扫描、提示词历史查看，以及 session 的改名、归档、恢复和本地彻底删除。
 
 这个项目面向本地 Codex CLI 工作流，核心目标有三点：
 
@@ -34,14 +34,26 @@
 在项目根目录执行：
 
 ```bash
-./build_codex_biancezhe_app.sh
+./build_code_taskmaster_app.sh
 ```
 
 这个脚本会完成：
 
 - 用 `generate_icon.swift` 生成图标
-- 构建 `Codex Taskmaster.app`
+- 构建 `Code TaskMaster.app`
 - 把 `codex_terminal_sender.sh` 打包进应用资源
+
+如果你只想单独更新图标，不要直接裸跑 `swift generate_icon.swift`，请改用：
+
+```bash
+bash ./scripts/generate_icon.sh
+```
+
+如果需要指定 SDK，也同样走脚本：
+
+```bash
+MACOS_SDK_PATH=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk bash ./scripts/generate_icon.sh
+```
 
 SDK 选择策略：
 
@@ -51,7 +63,7 @@ SDK 选择策略：
 例如：
 
 ```bash
-MACOS_SDK_PATH=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk ./build_codex_biancezhe_app.sh
+MACOS_SDK_PATH=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk ./build_code_taskmaster_app.sh
 ```
 
 ## 启动
@@ -59,7 +71,7 @@ MACOS_SDK_PATH=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk ./build_c
 构建完成后可直接打开：
 
 ```bash
-open -na "./Codex Taskmaster.app"
+open -na "./Code TaskMaster.app"
 ```
 
 也可以在 Finder 里双击打开。
@@ -98,7 +110,7 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 
 这个 UI smoke test 会：
 
-- 启动 `Codex Taskmaster.app`
+- 启动 `Code TaskMaster.app`
 - 等待主窗口出现
 - 通过 `System Events` 验证应用进程和窗口可见
 
@@ -111,7 +123,7 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 
 项目主要由两部分组成：
 
-- `CodexBianCeZheApp.swift`
+- `CodeTaskMasterApp.swift`
   - 桌面界面
   - session 状态扫描
   - 发送请求排队与结果回收
@@ -213,9 +225,9 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 
 ## 仓库结构
 
-- `CodexBianCeZheApp.swift`：主应用
+- `CodeTaskMasterApp.swift`：主应用
 - `codex_terminal_sender.sh`：helper CLI 与循环引擎
-- `build_codex_biancezhe_app.sh`：构建脚本
+- `build_code_taskmaster_app.sh`：构建脚本
 - `generate_icon.swift`：图标生成脚本
 - `scripts/check.sh`：项目检查入口
 - `scripts/regression_check.sh`：扩展回归入口，可选带 UI smoke test
