@@ -35,6 +35,8 @@ private enum DefaultsKey {
     static let interval = "interval"
     static let message = "message"
     static let forceSend = "forceSend"
+    static let targetHistory = "targetHistory"
+    static let messageHistory = "messageHistory"
 }
 
 private func initialTargetValue() -> String {
@@ -73,6 +75,146 @@ final class AdjustableSplitView: NSSplitView {
         NSColor.tertiaryLabelColor.withAlphaComponent(0.22).setFill()
         lineRect.fill()
     }
+}
+
+final class HistoryDropdownRowView: NSView {
+    private let titleButton = NSButton(title: "", target: nil, action: nil)
+    private let deleteButton = NSButton(title: "×", target: nil, action: nil)
+    private var trackingAreaRef: NSTrackingArea?
+    private var isClearAction = false
+    private let horizontalInset: CGFloat = 8
+    private let deleteWidth: CGFloat = 16
+    private let deleteTrailingInset: CGFloat = 6
+    private let contentGap: CGFloat = 8
+
+    var onSelect: (() -> Void)?
+    var onDelete: (() -> Void)?
+    var onHover: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+
+        wantsLayer = true
+        translatesAutoresizingMaskIntoConstraints = false
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        heightAnchor.constraint(equalToConstant: 22).isActive = true
+
+        titleButton.isBordered = false
+        titleButton.alignment = .left
+        titleButton.lineBreakMode = .byTruncatingMiddle
+        titleButton.target = self
+        titleButton.action = #selector(handleSelect)
+        titleButton.translatesAutoresizingMaskIntoConstraints = false
+        titleButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        titleButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        deleteButton.isBordered = false
+        deleteButton.font = .systemFont(ofSize: 12, weight: .semibold)
+        deleteButton.contentTintColor = .secondaryLabelColor
+        deleteButton.target = self
+        deleteButton.action = #selector(handleDelete)
+        deleteButton.translatesAutoresizingMaskIntoConstraints = false
+        deleteButton.setContentHuggingPriority(.required, for: .horizontal)
+        deleteButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        addSubview(titleButton)
+        addSubview(deleteButton)
+
+        setHighlighted(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaRef {
+            removeTrackingArea(trackingAreaRef)
+        }
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        trackingAreaRef = trackingArea
+    }
+
+    override func layout() {
+        super.layout()
+
+        let contentBounds = bounds
+        let buttonHeight = max(18, contentBounds.height - 4)
+
+        if deleteButton.isHidden {
+            deleteButton.frame = .zero
+            titleButton.frame = NSRect(
+                x: horizontalInset,
+                y: floor((contentBounds.height - buttonHeight) / 2),
+                width: max(0, contentBounds.width - (horizontalInset * 2)),
+                height: buttonHeight
+            )
+            return
+        }
+
+        let deleteX = max(horizontalInset, contentBounds.width - deleteTrailingInset - deleteWidth)
+        deleteButton.frame = NSRect(
+            x: deleteX,
+            y: floor((contentBounds.height - deleteWidth) / 2),
+            width: deleteWidth,
+            height: deleteWidth
+        )
+
+        let titleMaxX = deleteButton.frame.minX - contentGap
+        titleButton.frame = NSRect(
+            x: horizontalInset,
+            y: floor((contentBounds.height - buttonHeight) / 2),
+            width: max(0, titleMaxX - horizontalInset),
+            height: buttonHeight
+        )
+    }
+
+    func configure(title: String, isClearAction: Bool, canDelete: Bool) {
+        self.isClearAction = isClearAction
+        titleButton.title = title
+        titleButton.font = isClearAction
+            ? .systemFont(ofSize: 12, weight: .medium)
+            : .systemFont(ofSize: 12)
+        titleButton.contentTintColor = .labelColor
+        deleteButton.isHidden = !canDelete
+        needsLayout = true
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        onHover?()
+    }
+
+    func setHighlighted(_ highlighted: Bool) {
+        layer?.backgroundColor = highlighted ? NSColor.selectedContentBackgroundColor.cgColor : NSColor.clear.cgColor
+        titleButton.contentTintColor = highlighted ? .selectedTextColor : (isClearAction ? .secondaryLabelColor : .labelColor)
+        if !deleteButton.isHidden {
+            deleteButton.contentTintColor = highlighted ? .selectedTextColor : .secondaryLabelColor
+        }
+    }
+
+    @objc
+    private func handleSelect() {
+        onSelect?()
+    }
+
+    @objc
+    private func handleDelete() {
+        onDelete?()
+    }
+}
+
+final class HistoryDropdownListView: NSView {
+    override var isFlipped: Bool { true }
 }
 
 final class CodexBianCeZheApp: NSObject, NSApplicationDelegate {
@@ -178,6 +320,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         static let bottomPaneMinHeight: CGFloat = 106
     }
 
+    private enum HistoryKind: String {
+        case target
+        case message
+
+        var clearLabel: String {
+            switch self {
+            case .target:
+                return "清空最近目标"
+            case .message:
+                return "清空最近消息"
+            }
+        }
+    }
+
     private let helperPath = resolvedHelperPath()
 
     private enum SessionListMode {
@@ -210,9 +366,19 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let isArchived: Bool
     }
 
-    private let targetField = NSTextField(string: initialTargetValue())
+    private let targetField: NSTextField = {
+        let field = NSTextField()
+        field.stringValue = initialTargetValue()
+        return field
+    }()
     private let intervalField = NSTextField(string: UserDefaults.standard.string(forKey: DefaultsKey.interval) ?? "600")
-    private let messageField = NSTextField(string: UserDefaults.standard.string(forKey: DefaultsKey.message) ?? "继续")
+    private let messageField: NSTextField = {
+        let field = NSTextField()
+        field.stringValue = UserDefaults.standard.string(forKey: DefaultsKey.message) ?? "继续"
+        return field
+    }()
+    private lazy var targetHistoryButton = makeHistoryArrowButton(action: #selector(toggleTargetHistoryDropdown))
+    private lazy var messageHistoryButton = makeHistoryArrowButton(action: #selector(toggleMessageHistoryDropdown))
     private let forceSendCheckbox: NSButton = {
         let checkbox = NSButton(checkboxWithTitle: "强制发送（忽略 session 状态）", target: nil, action: nil)
         checkbox.state = UserDefaults.standard.bool(forKey: DefaultsKey.forceSend) ? .on : .off
@@ -242,6 +408,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var loopSnapshots: [LoopSnapshot] = []
     private var sessionSnapshots: [SessionSnapshot] = []
     private var loopWarnings: [String] = []
+    private var targetHistory: [String] = []
+    private var messageHistory: [String] = []
     private var isSessionScanRunning = false
     private var sessionScanGeneration = 0
     private var sessionScanTotal = 0
@@ -261,6 +429,15 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let sessionScanProcessLock = NSLock()
     private var currentSessionScanProcess: Process?
     private var sessionDetailLoadGeneration = 0
+    private let historyListView = HistoryDropdownListView()
+    private var historyPopoverKind: HistoryKind?
+    private var historyRowViews: [HistoryDropdownRowView] = []
+    private var historyHighlightedIndex: Int = -1
+    private var historyKeyMonitor: Any?
+    private var historyDropdownPanel: NSPanel?
+    private var historyDropdownScrollView: NSScrollView?
+    private var historyOutsideLocalMonitor: Any?
+    private var historyOutsideGlobalMonitor: Any?
 
     private lazy var sendButton = makeButton(title: "发送一次", action: #selector(sendOnce))
     private lazy var startButton = makeButton(title: "开始循环", action: #selector(startLoop))
@@ -282,6 +459,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     override func viewDidLoad() {
         super.viewDidLoad()
         buildUI()
+        loadHistoryState()
         normalizeInitialIntervalValue()
         sessionStatusMetaLabel.stringValue = sessionEmptyStateText()
         updateDetectStatusButtonState()
@@ -303,6 +481,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     deinit {
         refreshTimer?.invalidate()
         requestTimer?.invalidate()
+        removeHistoryKeyMonitor()
+        removeHistoryOutsideMonitors()
     }
 
     private func buildUI() {
@@ -319,12 +499,32 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         targetField.heightAnchor.constraint(equalToConstant: 24).isActive = true
         intervalField.heightAnchor.constraint(equalToConstant: 24).isActive = true
         messageField.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        targetHistoryButton.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        messageHistoryButton.heightAnchor.constraint(equalToConstant: 24).isActive = true
         forceSendCheckbox.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        targetField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        messageField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let targetInputRow = NSStackView(views: [targetField, targetHistoryButton])
+        targetInputRow.orientation = .horizontal
+        targetInputRow.spacing = 4
+        targetInputRow.alignment = .centerY
+        targetInputRow.translatesAutoresizingMaskIntoConstraints = false
+        targetField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        targetHistoryButton.setContentHuggingPriority(.required, for: .horizontal)
+
+        let messageInputRow = NSStackView(views: [messageField, messageHistoryButton])
+        messageInputRow.orientation = .horizontal
+        messageInputRow.spacing = 4
+        messageInputRow.alignment = .centerY
+        messageInputRow.translatesAutoresizingMaskIntoConstraints = false
+        messageField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        messageHistoryButton.setContentHuggingPriority(.required, for: .horizontal)
 
         let formGrid = NSGridView(views: [
-            [makeFieldLabel("Session 名称 / ID"), targetField],
+            [makeFieldLabel("Session 名称 / ID"), targetInputRow],
             [makeFieldLabel("循环间隔(秒)"), intervalField],
-            [makeFieldLabel("输出内容"), messageField],
+            [makeFieldLabel("输出内容"), messageInputRow],
             [makeFieldLabel("发送策略"), forceSendCheckbox]
         ])
         formGrid.rowSpacing = 8
@@ -333,7 +533,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         formGrid.yPlacement = .center
         formGrid.translatesAutoresizingMaskIntoConstraints = false
         formGrid.column(at: 0).width = 120
-        targetField.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
+        targetInputRow.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
 
         let buttonRow = NSStackView(views: [sendButton, startButton, refreshLoopsButton, detectStatusButton, stopButton, stopAllButton])
         buttonRow.orientation = .horizontal
@@ -670,6 +870,49 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             .filter { candidates.contains($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
 
+    private func selectedLoopTarget() -> String? {
+        let selectedRow = activeLoopsTableView.selectedRow
+        guard selectedRow >= 0, selectedRow < loopSnapshots.count else { return nil }
+        return loopSnapshots[selectedRow].target
+    }
+
+    private func restoreLoopSelection(preferredTarget: String?) {
+        guard let preferredTarget else {
+            activeLoopsTableView.deselectAll(nil)
+            stopButton.isEnabled = false
+            return
+        }
+
+        guard let row = loopSnapshots.firstIndex(where: { $0.target == preferredTarget }) else {
+            activeLoopsTableView.deselectAll(nil)
+            stopButton.isEnabled = false
+            return
+        }
+
+        activeLoopsTableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        activeLoopsTableView.scrollRowToVisible(row)
+        stopButton.isEnabled = true
+    }
+
+    private func selectedSessionThreadID() -> String? {
+        let selectedRow = sessionStatusTableView.selectedRow
+        guard selectedRow >= 0, selectedRow < sessionSnapshots.count else { return nil }
+        return sessionSnapshots[selectedRow].threadID
+    }
+
+    private func restoreSessionSelection(preferredThreadID: String?) {
+        guard let preferredThreadID,
+              let row = sessionSnapshots.firstIndex(where: { $0.threadID == preferredThreadID }) else {
+            sessionStatusTableView.deselectAll(nil)
+            updateSessionDetailView()
+            return
+        }
+
+        sessionStatusTableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        sessionStatusTableView.scrollRowToVisible(row)
+        updateSessionDetailView()
+    }
+
     private func parseThreadRuntimeStatus(_ raw: Any?) -> String {
         guard let object = raw as? [String: Any],
               let type = object["type"] as? String else {
@@ -779,9 +1022,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             case "threadID":
                 orderedAscending = lhs.threadID.localizedStandardCompare(rhs.threadID) == .orderedAscending
             case "status":
-                orderedAscending = lhs.status.localizedStandardCompare(rhs.status) == .orderedAscending
+                orderedAscending = localizedSessionStatusLabel(lhs).localizedStandardCompare(localizedSessionStatusLabel(rhs)) == .orderedAscending
             case "terminalState":
-                orderedAscending = lhs.terminalState.localizedStandardCompare(rhs.terminalState) == .orderedAscending
+                orderedAscending = localizedTerminalState(lhs.terminalState).localizedStandardCompare(localizedTerminalState(rhs.terminalState)) == .orderedAscending
             case "tty":
                 orderedAscending = lhs.tty.localizedStandardCompare(rhs.tty) == .orderedAscending
             case "updatedAt":
@@ -806,9 +1049,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         case "threadID":
             return lhs.threadID == rhs.threadID
         case "status":
-            return lhs.status == rhs.status
+            return localizedSessionStatusLabel(lhs) == localizedSessionStatusLabel(rhs)
         case "terminalState":
-            return lhs.terminalState == rhs.terminalState
+            return localizedTerminalState(lhs.terminalState) == localizedTerminalState(rhs.terminalState)
         case "tty":
             return lhs.tty == rhs.tty
         case "updatedAt":
@@ -820,14 +1063,78 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
+    private func localizedSessionStatusLabel(_ session: SessionSnapshot) -> String {
+        if session.isArchived {
+            return "已归档"
+        }
+        if session.terminalState == "unavailable" {
+            return "断联"
+        }
+
+        switch session.status {
+        case let status where status.hasPrefix("active"):
+            return "运行中"
+        case "idle_stable":
+            return "空闲"
+        case "interrupted_idle":
+            return "中断后空闲"
+        case "idle_with_residual_input":
+            return "残留输入"
+        case "queued_messages_visible":
+            return "消息排队"
+        case "rollout_stale":
+            return "状态滞后"
+        case "unknown":
+            return "未知"
+        default:
+            return session.status
+        }
+    }
+
+    private func localizedTerminalState(_ state: String) -> String {
+        switch state {
+        case "prompt_ready":
+            return "可发送"
+        case "prompt_with_input":
+            return "有残留输入"
+        case "busy":
+            return "忙碌"
+        case "unavailable":
+            return "不可达"
+        case "archived":
+            return "已归档"
+        default:
+            return state
+        }
+    }
+
+    private func sessionStatusColor(_ session: SessionSnapshot) -> NSColor {
+        if session.isArchived {
+            return .systemBlue
+        }
+        if session.terminalState == "unavailable" {
+            return .systemRed
+        }
+        switch session.status {
+        case let status where status.hasPrefix("active"):
+            return .systemOrange
+        case "idle_stable", "interrupted_idle":
+            return .systemGreen
+        case "idle_with_residual_input", "queued_messages_visible", "rollout_stale":
+            return .systemYellow
+        default:
+            return .secondaryLabelColor
+        }
+    }
+
     private func sessionDetailText(for session: SessionSnapshot) -> String {
         let name = sessionActualName(session)
         var lines = [
             "Name: \(name.isEmpty ? "-" : name)",
             "Session ID: \(session.threadID)",
             "Archived: \(session.isArchived ? "yes" : "no")",
-            "Status: \(session.status)",
-            "Terminal: \(session.terminalState)",
+            "Status: \(localizedSessionStatusLabel(session))",
+            "Terminal: \(localizedTerminalState(session.terminalState))",
             "TTY: \(session.tty.isEmpty ? "-" : session.tty)",
             "Updated: \(formatEpoch(session.updatedAtEpoch))",
             "原因: \(localizedSessionReason(session.reason))"
@@ -1243,6 +1550,383 @@ conn.close()
         return label
     }
 
+    private func normalizedHistory(_ values: [String], limit: Int = 10) -> [String] {
+        var ordered: [String] = []
+        for value in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !ordered.contains(trimmed) else { continue }
+            ordered.append(trimmed)
+            if ordered.count >= limit {
+                break
+            }
+        }
+        return ordered
+    }
+
+    private func loadHistoryState() {
+        targetHistory = normalizedHistory(UserDefaults.standard.stringArray(forKey: DefaultsKey.targetHistory) ?? [])
+        messageHistory = normalizedHistory(UserDefaults.standard.stringArray(forKey: DefaultsKey.messageHistory) ?? [])
+        configureHistoryPopover()
+    }
+
+    private func configureHistoryPopover() {
+        historyListView.translatesAutoresizingMaskIntoConstraints = false
+        historyListView.wantsLayer = true
+        historyListView.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+        historyListView.frame = NSRect(x: 0, y: 0, width: 320, height: 10)
+
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = .textBackgroundColor
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.documentView = historyListView
+        scrollView.frame = NSRect(x: 0, y: 0, width: 320, height: 10)
+        scrollView.autoresizingMask = [.width, .height]
+        historyDropdownScrollView = scrollView
+
+        let contentViewController = NSViewController()
+        contentViewController.view = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 10))
+        contentViewController.view.wantsLayer = true
+        contentViewController.view.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+        contentViewController.view.addSubview(scrollView)
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 10),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: true
+        )
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.hasShadow = true
+        panel.level = .popUpMenu
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.contentViewController = contentViewController
+        historyDropdownPanel = panel
+    }
+
+    private func historyValues(for kind: HistoryKind) -> [String] {
+        switch kind {
+        case .target:
+            return targetHistory
+        case .message:
+            return messageHistory
+        }
+    }
+
+    private func setHistoryValues(_ values: [String], for kind: HistoryKind) {
+        let normalized = normalizedHistory(values)
+        switch kind {
+        case .target:
+            targetHistory = normalized
+            UserDefaults.standard.set(normalized, forKey: DefaultsKey.targetHistory)
+        case .message:
+            messageHistory = normalized
+            UserDefaults.standard.set(normalized, forKey: DefaultsKey.messageHistory)
+        }
+        if isHistoryDropdownShown(), historyPopoverKind == kind {
+            rebuildHistoryPopover(kind: kind)
+        }
+    }
+
+    private func addHistoryValue(_ value: String, kind: HistoryKind) {
+        let updated = [value] + historyValues(for: kind)
+        setHistoryValues(updated, for: kind)
+    }
+
+    private func removeHistoryValue(_ value: String, kind: HistoryKind) {
+        let updated = historyValues(for: kind).filter { $0 != value }
+        setHistoryValues(updated, for: kind)
+    }
+
+    private func clearHistory(kind: HistoryKind) {
+        setHistoryValues([], for: kind)
+    }
+
+    private func historyControl(for kind: HistoryKind) -> NSTextField {
+        switch kind {
+        case .target:
+            return targetField
+        case .message:
+            return messageField
+        }
+    }
+
+    private func historyButton(for kind: HistoryKind) -> NSButton {
+        switch kind {
+        case .target:
+            return targetHistoryButton
+        case .message:
+            return messageHistoryButton
+        }
+    }
+
+    private func historyAnchorView(for kind: HistoryKind) -> NSView {
+        historyControl(for: kind)
+    }
+
+    private func historyDropdownWidth(for kind: HistoryKind) -> CGFloat {
+        let control = historyControl(for: kind)
+        control.layoutSubtreeIfNeeded()
+        return max(220, control.bounds.width)
+    }
+
+    private func installHistoryKeyMonitor() {
+        removeHistoryKeyMonitor()
+        historyKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.isHistoryDropdownShown() else { return event }
+
+            switch event.keyCode {
+            case 125:
+                self.moveHistoryHighlight(delta: 1)
+                return nil
+            case 126:
+                self.moveHistoryHighlight(delta: -1)
+                return nil
+            case 36, 76:
+                self.activateHighlightedHistoryRow()
+                return nil
+            case 53:
+                self.closeHistoryDropdown()
+                return nil
+            default:
+                return event
+            }
+        }
+    }
+
+    private func removeHistoryKeyMonitor() {
+        if let historyKeyMonitor {
+            NSEvent.removeMonitor(historyKeyMonitor)
+            self.historyKeyMonitor = nil
+        }
+    }
+
+    private func installHistoryOutsideMonitors(anchorView: NSView) {
+        removeHistoryOutsideMonitors()
+
+        historyOutsideLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            guard let self, self.isHistoryDropdownShown() else { return event }
+            guard let panel = self.historyDropdownPanel else { return event }
+
+            if let window = event.window, window == panel {
+                return event
+            }
+
+            let eventLocation = NSEvent.mouseLocation
+            if panel.frame.contains(eventLocation) {
+                return event
+            }
+
+            if let window = anchorView.window {
+                let anchorRectInWindow = anchorView.convert(anchorView.bounds, to: nil)
+                let anchorRectOnScreen = window.convertToScreen(anchorRectInWindow)
+                if anchorRectOnScreen.contains(eventLocation) {
+                    return event
+                }
+            }
+
+            self.closeHistoryDropdown()
+            return event
+        }
+
+        historyOutsideGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.closeHistoryDropdown()
+            }
+        }
+    }
+
+    private func removeHistoryOutsideMonitors() {
+        if let historyOutsideLocalMonitor {
+            NSEvent.removeMonitor(historyOutsideLocalMonitor)
+            self.historyOutsideLocalMonitor = nil
+        }
+        if let historyOutsideGlobalMonitor {
+            NSEvent.removeMonitor(historyOutsideGlobalMonitor)
+            self.historyOutsideGlobalMonitor = nil
+        }
+    }
+
+    private func isHistoryDropdownShown() -> Bool {
+        historyDropdownPanel?.isVisible == true
+    }
+
+    private func closeHistoryDropdown() {
+        historyDropdownPanel?.orderOut(nil)
+        removeHistoryKeyMonitor()
+        removeHistoryOutsideMonitors()
+        historyHighlightedIndex = -1
+        historyRowViews.forEach { $0.setHighlighted(false) }
+    }
+
+    private func setHistoryHighlightedIndex(_ index: Int) {
+        historyHighlightedIndex = index
+        for (rowIndex, rowView) in historyRowViews.enumerated() {
+            rowView.setHighlighted(rowIndex == index)
+        }
+    }
+
+    private func moveHistoryHighlight(delta: Int) {
+        guard !historyRowViews.isEmpty else { return }
+        let nextIndex: Int
+        if historyHighlightedIndex < 0 {
+            nextIndex = delta >= 0 ? 0 : historyRowViews.count - 1
+        } else {
+            nextIndex = max(0, min(historyRowViews.count - 1, historyHighlightedIndex + delta))
+        }
+        setHistoryHighlightedIndex(nextIndex)
+    }
+
+    private func activateHighlightedHistoryRow() {
+        guard historyHighlightedIndex >= 0, historyHighlightedIndex < historyRowViews.count else { return }
+        historyRowViews[historyHighlightedIndex].onSelect?()
+    }
+
+    private func historyDropdownHeight(for rowCount: Int) -> CGFloat {
+        CGFloat(min(max(1, rowCount), 8) * 22)
+    }
+
+    private func layoutHistoryRows(width: CGFloat) {
+        var y: CGFloat = 0
+        for row in historyRowViews {
+            row.frame = NSRect(x: 0, y: y, width: width, height: 22)
+            y += 22
+        }
+
+        for subview in historyListView.subviews where !(subview is HistoryDropdownRowView) {
+            subview.frame = NSRect(x: 8, y: 4, width: max(0, width - 16), height: 18)
+            y = max(y, subview.frame.maxY + 4)
+        }
+
+        historyListView.frame = NSRect(x: 0, y: 0, width: width, height: max(y, 22))
+        historyDropdownScrollView?.frame = NSRect(x: 0, y: 0, width: width, height: historyDropdownScrollView?.frame.height ?? 10)
+        historyDropdownScrollView?.documentView = historyListView
+    }
+
+    private func rebuildHistoryPopover(kind: HistoryKind) {
+        historyPopoverKind = kind
+        historyRowViews = []
+        historyHighlightedIndex = -1
+        historyListView.subviews.forEach { subview in
+            subview.removeFromSuperview()
+        }
+
+        let values = historyValues(for: kind)
+        var renderedRowCount = 0
+
+        for value in values {
+            let row = HistoryDropdownRowView()
+            row.configure(title: value, isClearAction: false, canDelete: true)
+            row.onHover = { [weak self, weak row] in
+                guard let self, let row else { return }
+                if let index = self.historyRowViews.firstIndex(where: { $0 === row }) {
+                    self.setHistoryHighlightedIndex(index)
+                }
+            }
+            row.onSelect = { [weak self] in
+                guard let self else { return }
+                self.historyControl(for: kind).stringValue = value
+                self.setStatus(kind == .target ? "已填入最近目标" : "已填入最近消息", key: "general")
+                self.closeHistoryDropdown()
+            }
+            row.onDelete = { [weak self] in
+                guard let self else { return }
+                self.removeHistoryValue(value, kind: kind)
+                self.rebuildHistoryPopover(kind: kind)
+                self.setStatus(kind == .target ? "已删除一条目标历史" : "已删除一条消息历史", key: "general")
+            }
+            historyListView.addSubview(row)
+            historyRowViews.append(row)
+            renderedRowCount += 1
+        }
+
+        if !values.isEmpty {
+            let clearRow = HistoryDropdownRowView()
+            clearRow.configure(title: kind.clearLabel, isClearAction: true, canDelete: false)
+            clearRow.onHover = { [weak self, weak clearRow] in
+                guard let self, let clearRow else { return }
+                if let index = self.historyRowViews.firstIndex(where: { $0 === clearRow }) {
+                    self.setHistoryHighlightedIndex(index)
+                }
+            }
+            clearRow.onSelect = { [weak self] in
+                guard let self else { return }
+                self.clearHistory(kind: kind)
+                self.setStatus(kind == .target ? "最近目标已清空" : "最近消息已清空", key: "general")
+                self.closeHistoryDropdown()
+            }
+            historyListView.addSubview(clearRow)
+            historyRowViews.append(clearRow)
+            renderedRowCount += 1
+        } else {
+            let emptyLabel = NSTextField(labelWithString: "暂无历史")
+            emptyLabel.font = .systemFont(ofSize: 12)
+            emptyLabel.textColor = .secondaryLabelColor
+            emptyLabel.alignment = .left
+            historyListView.addSubview(emptyLabel)
+            renderedRowCount = 1
+        }
+
+        let rowCount = max(1, renderedRowCount)
+        let width = historyDropdownPanel?.frame.width ?? 320
+        let height = historyDropdownHeight(for: rowCount)
+        layoutHistoryRows(width: width)
+        historyDropdownPanel?.contentViewController?.view.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        historyDropdownScrollView?.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        historyDropdownPanel?.setContentSize(NSSize(width: width, height: height))
+    }
+
+    private func toggleHistoryDropdown(kind: HistoryKind) {
+        let anchorView = historyAnchorView(for: kind)
+        if isHistoryDropdownShown(), historyPopoverKind == kind {
+            closeHistoryDropdown()
+            return
+        }
+
+        let width = historyDropdownWidth(for: kind)
+        historyDropdownPanel?.contentViewController?.view.frame = NSRect(x: 0, y: 0, width: width, height: 10)
+        historyDropdownScrollView?.frame = NSRect(x: 0, y: 0, width: width, height: 10)
+        historyDropdownPanel?.setContentSize(NSSize(width: width, height: 10))
+        rebuildHistoryPopover(kind: kind)
+        guard let panel = historyDropdownPanel,
+              let window = anchorView.window else { return }
+        let anchorRectInWindow = anchorView.convert(anchorView.bounds, to: nil)
+        let anchorRectOnScreen = window.convertToScreen(anchorRectInWindow)
+        let height = panel.frame.height
+        let origin = NSPoint(x: anchorRectOnScreen.minX, y: anchorRectOnScreen.minY - height + 1)
+        panel.setFrame(NSRect(origin: origin, size: NSSize(width: width, height: height)), display: false)
+        panel.orderFront(nil)
+        installHistoryKeyMonitor()
+        installHistoryOutsideMonitors(anchorView: anchorView)
+        if !historyRowViews.isEmpty {
+            setHistoryHighlightedIndex(0)
+        }
+    }
+
+    @objc
+    private func toggleTargetHistoryDropdown() {
+        toggleHistoryDropdown(kind: .target)
+    }
+
+    @objc
+    private func toggleMessageHistoryDropdown() {
+        toggleHistoryDropdown(kind: .message)
+    }
+
+    private func makeHistoryArrowButton(action: Selector) -> NSButton {
+        let button = NSButton(title: "▾", target: self, action: action)
+        button.bezelStyle = .rounded
+        button.font = .systemFont(ofSize: 11, weight: .medium)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.widthAnchor.constraint(equalToConstant: 26).isActive = true
+        return button
+    }
+
     private func makeButton(title: String, action: Selector) -> NSButton {
         let button = NSButton(title: title, target: self, action: action)
         button.bezelStyle = .rounded
@@ -1574,6 +2258,7 @@ conn.close()
     }
 
     private func renderSessionSnapshots(scannedCount: Int? = nil, totalCount: Int? = nil, isComplete: Bool = true) {
+        let selectedThreadID = selectedSessionThreadID()
         if sessionSnapshots.isEmpty {
             if isSessionScanRunning, let scannedCount, let totalCount {
                 sessionStatusMetaLabel.stringValue = "视图: \(sessionScopeText()) | 正在扫描 \(scannedCount)/\(totalCount)…"
@@ -1594,10 +2279,7 @@ conn.close()
         }
         applySessionSorting()
         sessionStatusTableView.reloadData()
-        if sessionStatusTableView.selectedRow >= sessionSnapshots.count {
-            sessionStatusTableView.deselectAll(nil)
-        }
-        updateSessionDetailView()
+        restoreSessionSelection(preferredThreadID: selectedThreadID)
     }
 
     private func validateTarget(required: Bool = true) -> String? {
@@ -2007,6 +2689,9 @@ conn.close()
                 }
 
                 if result.status == 0 {
+                    if actionName == "发送一次" || actionName == "开始循环" {
+                        self.recordCurrentInputsInHistory()
+                    }
                     self.setStatus("\(actionName)完成", key: "action")
                 } else {
                     self.setStatus("\(actionName)失败", key: "action")
@@ -2077,6 +2762,93 @@ conn.close()
         return (process.terminationStatus, outText, errText)
     }
 
+    private func conflictingLoops(for target: String) -> [LoopSnapshot] {
+        let trimmedTarget = target.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTarget.isEmpty else { return [] }
+
+        if let session = sessionSnapshots.first(where: { sessionPossibleTargets($0).contains(trimmedTarget) }) {
+            let targets = Set(loopTargetsAffectingSession(session))
+            return loopSnapshots.filter { targets.contains($0.target) }
+        }
+
+        return loopSnapshots.filter { $0.target == trimmedTarget }
+    }
+
+    private func promptToReplaceExistingLoops(conflicts: [LoopSnapshot], target: String) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "检测到已有循环"
+        let conflictList = conflicts.map(\.target).joined(separator: "、")
+        alert.informativeText = "目标 \(target) 已存在运行中的循环：\(conflictList)。为避免重复发送，只能保留一个循环。是否先停止旧循环，再启动新的循环？"
+        alert.addButton(withTitle: "替换旧循环")
+        alert.addButton(withTitle: "取消")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func recordCurrentInputsInHistory() {
+        let target = currentTarget()
+        let message = currentMessage()
+        if !target.isEmpty {
+            addHistoryValue(target, kind: .target)
+        }
+        if !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            addHistoryValue(message, kind: .message)
+        }
+    }
+
+    private func runLoopReplacement(target: String, interval: String, message: String, forceSend: Bool, conflicts: [LoopSnapshot]) {
+        persistDefaults()
+        setButtonsEnabled(false)
+        setStatus("开始循环执行中…", key: "action")
+
+        var displayArguments = ["start", "-t", target, "-i", interval, "-m", message]
+        if forceSend {
+            displayArguments.append("-f")
+        }
+        appendOutput("执行 开始循环: \(displayArguments.joined(separator: " "))")
+        appendOutput("检测到循环冲突，先停止旧循环: \(conflicts.map(\.target).joined(separator: ", "))")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            var failureText: String?
+
+            for conflict in conflicts {
+                let stopResult = self.runStandardHelper(arguments: ["stop", "-t", conflict.target])
+                if stopResult.status != 0 {
+                    failureText = [stopResult.stderr, stopResult.stdout].first(where: { !$0.isEmpty }) ?? "停止旧循环失败"
+                    break
+                }
+            }
+
+            let startResult: (status: Int32, stdout: String, stderr: String)
+            if let failureText {
+                startResult = (1, "", failureText)
+            } else {
+                var arguments = ["start", "-t", target, "-i", interval, "-m", message]
+                if forceSend {
+                    arguments.append("-f")
+                }
+                startResult = self.runStandardHelper(arguments: arguments)
+            }
+
+            DispatchQueue.main.async {
+                if !startResult.stdout.isEmpty {
+                    self.appendOutput(startResult.stdout)
+                }
+                if !startResult.stderr.isEmpty {
+                    self.appendOutput("stderr: \(startResult.stderr)")
+                }
+                if startResult.status == 0 {
+                    self.recordCurrentInputsInHistory()
+                    self.setStatus("开始循环完成", key: "action")
+                } else {
+                    self.setStatus("开始循环失败", key: "action")
+                }
+                self.setButtonsEnabled(true)
+                self.refreshLoopsSnapshot()
+            }
+        }
+    }
+
     private func stopSessionStatusScan() {
         guard isSessionScanRunning else { return }
         sessionScanShouldStop = true
@@ -2105,6 +2877,9 @@ conn.close()
 
     private func refreshLoopsSnapshot() {
         DispatchQueue.global(qos: .utility).async {
+            let selectedTarget = DispatchQueue.main.sync {
+                self.selectedLoopTarget()
+            }
             let process = Process()
             let stdout = Pipe()
             let stderr = Pipe()
@@ -2150,10 +2925,7 @@ conn.close()
                     self.activeLoopsMetaLabel.stringValue = self.loopWarnings.first ?? "Failed to load active loops."
                 }
                 self.activeLoopsTableView.reloadData()
-                if self.activeLoopsTableView.selectedRow >= self.loopSnapshots.count {
-                    self.activeLoopsTableView.deselectAll(nil)
-                }
-                self.stopButton.isEnabled = self.activeLoopsTableView.selectedRow >= 0
+                self.restoreLoopSelection(preferredTarget: selectedTarget)
             }
         }
     }
@@ -2366,6 +3138,24 @@ conn.close()
             NSSound.beep()
             return
         }
+
+        let conflicts = conflictingLoops(for: target)
+        if !conflicts.isEmpty {
+            guard promptToReplaceExistingLoops(conflicts: conflicts, target: target) else {
+                appendOutput("已取消开始循环：检测到互斥循环未替换。")
+                setStatus("开始循环已取消", key: "action")
+                return
+            }
+            runLoopReplacement(
+                target: target,
+                interval: interval,
+                message: currentMessage(),
+                forceSend: isForceSendEnabled(),
+                conflicts: conflicts
+            )
+            return
+        }
+
         var arguments = ["start", "-t", target, "-i", interval, "-m", currentMessage()]
         if isForceSendEnabled() {
             arguments.append("-f")
@@ -2424,6 +3214,7 @@ conn.close()
         let session = sessionSnapshots[clickedRow]
         let value = preferredTargetValue(for: session)
         targetField.stringValue = value
+        addHistoryValue(value, kind: .target)
         setStatus("已从 Session Status 填入 \(value)")
         if sessionActualName(session).isEmpty {
             appendOutput("Session Status 双击填入 ID: \(value)")
@@ -2826,9 +3617,10 @@ conn.close()
         case "threadID":
             textField.stringValue = session.threadID
         case "status":
-            textField.stringValue = session.status
+            textField.stringValue = "● \(localizedSessionStatusLabel(session))"
+            textField.textColor = sessionStatusColor(session)
         case "terminalState":
-            textField.stringValue = session.terminalState
+            textField.stringValue = localizedTerminalState(session.terminalState)
         case "tty":
             textField.stringValue = session.tty.isEmpty ? "-" : session.tty
         case "updatedAt":
