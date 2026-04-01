@@ -298,6 +298,11 @@ for key in keys:
         return 0
       fi
 
+      if [[ "$result_status" == "accepted" ]]; then
+        [[ -n "$result_text" ]] && printf '%s\n' "$result_text" >&2
+        return 2
+      fi
+
       [[ -n "$result_text" ]] && printf '%s\n' "$result_text" >&2
       return 1
     fi
@@ -1347,6 +1352,7 @@ process_loops_once() {
     fi
 
     local send_output
+    local send_status
     if send_output="$(send_message_when_ready "$target" "$message" "$SEND_STABLE_IDLE_SECONDS" "$LOOP_IDLE_TIMEOUT_SECONDS" "$force_send" 2>&1)"; then
       append_loop_log_line "$LOOP_LOG_FILE" "sent: ${send_output//$'\n'/ | }"
       sleep "$LOOP_POST_SEND_COOLDOWN_SECONDS"
@@ -1355,11 +1361,20 @@ process_loops_once() {
         STATE_TAG "$source_tag" \
         NEXT_RUN "$(( now + interval ))"
     else
-      append_loop_log_line "$LOOP_LOG_FILE" "deferred: ${send_output//$'\n'/ | }"
-      now="$(date +%s)"
-      write_kv_file "$LOOP_STATUS_FILE" \
-        STATE_TAG "$source_tag" \
-        NEXT_RUN "$(( now + LOOP_BUSY_RETRY_SECONDS ))"
+      send_status=$?
+      if [[ "$send_status" -eq 2 ]]; then
+        append_loop_log_line "$LOOP_LOG_FILE" "accepted: ${send_output//$'\n'/ | }"
+        now="$(date +%s)"
+        write_kv_file "$LOOP_STATUS_FILE" \
+          STATE_TAG "$source_tag" \
+          NEXT_RUN "$(( now + interval ))"
+      else
+        append_loop_log_line "$LOOP_LOG_FILE" "deferred: ${send_output//$'\n'/ | }"
+        now="$(date +%s)"
+        write_kv_file "$LOOP_STATUS_FILE" \
+          STATE_TAG "$source_tag" \
+          NEXT_RUN "$(( now + LOOP_BUSY_RETRY_SECONDS ))"
+      fi
     fi
   done
   shopt -u nullglob

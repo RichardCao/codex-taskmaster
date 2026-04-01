@@ -2012,6 +2012,7 @@ conn.close()
             "a newer turn_aborted event is present": "检测到更新的 turn_aborted 事件",
             "turn is complete, but terminal still shows unsent input": "回合已完成，但 Terminal 输入框里仍残留未发送内容",
             "turn is complete, but queued messages are still visible in Terminal": "回合已完成，但 Terminal 里仍能看到排队中的消息",
+            "message appears queued in terminal but no fresh acknowledgment was observed yet": "消息看起来已经进入终端排队区，但暂时还没有看到新的确认反馈",
             "terminal is back at a ready prompt while rollout still looks open": "Terminal 已回到可输入提示，但 rollout 记录看起来仍未闭合",
             "terminal is ready and a fresh interrupt log was recorded": "Terminal 已恢复可输入，且最近记录到新的中断日志",
             "tty not found": "未找到对应的终端 TTY",
@@ -3119,6 +3120,16 @@ conn.close()
         return (false, latestProbe)
     }
 
+    private func shouldTreatAsQueuedAcceptance(_ probe: (status: Int32, values: [String: String], stdout: String, stderr: String)) -> Bool {
+        guard probe.status == 0 else { return false }
+        let terminalState = probe.values["terminal_state"] ?? ""
+        if terminalState == "queued_messages_pending" {
+            return true
+        }
+        let reason = probe.values["reason"] ?? ""
+        return reason == "turn is complete, but queued messages are still visible in Terminal"
+    }
+
     private func handleQueuedSendRequest(at processingURL: URL) {
         let resultURL = URL(fileURLWithPath: resultRequestDirectoryPath, isDirectory: true)
             .appendingPathComponent(processingURL.deletingPathExtension().deletingPathExtension().lastPathComponent + ".result.json")
@@ -3255,6 +3266,23 @@ conn.close()
                 "probe_status": probeStatus,
                 "terminal_state": terminalState,
                 "detail": detail
+            ])
+            return
+        }
+
+        if shouldTreatAsQueuedAcceptance(verification.probe) {
+            let queuedProbeStatus = verification.probe.values["status"] ?? "unknown"
+            let queuedTerminalState = verification.probe.values["terminal_state"] ?? "unknown"
+            let detail = compactProbeSummary(verification.probe)
+            logActivity("发送请求已排队: status=accepted reason=queued_pending_feedback target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(queuedProbeStatus) terminal_state=\(queuedTerminalState) detail=\(detail)")
+            finish(with: [
+                "status": "accepted",
+                "reason": "queued_pending_feedback",
+                "target": target,
+                "force_send": forceSend,
+                "detail": detail,
+                "probe_status": queuedProbeStatus,
+                "terminal_state": queuedTerminalState
             ])
             return
         }
