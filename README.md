@@ -221,6 +221,11 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 - `scripts/regression_check.sh`：扩展回归入口，可选带 UI smoke test
 - `scripts/ui_smoke_test.sh`：独立 UI 启动烟雾测试
 - `tests/test_helper_smoke.sh`：helper 冒烟测试
+- `docs/ARCHITECTURE.md`：架构边界与分层建议
+- `docs/LINUX_PORTING.md`：Linux 迁移方案
+- `docs/PLATFORM_API.md`：平台适配接口约定
+- `docs/LINUX_HANDOFF.md`：迁移到 Linux 时的交接清单
+- `docs/LINUX_NEXT_STEPS.md`：Linux 开发行动说明书
 - `legacy/`：早期 AppleScript / JXA 原型
 
 `.app` 包、图标输出等生成产物默认不纳入 Git。
