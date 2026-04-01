@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import UniformTypeIdentifiers
 
 private let userHomeDirectory = NSHomeDirectory()
 private let autoRefreshInterval: TimeInterval = 3
@@ -69,7 +70,7 @@ final class AdjustableSplitView: NSSplitView {
             )
         }
 
-        NSColor.separatorColor.withAlphaComponent(0.7).setFill()
+        NSColor.tertiaryLabelColor.withAlphaComponent(0.22).setFill()
         lineRect.fill()
     }
 }
@@ -153,8 +154,8 @@ final class MainWindowController: NSWindowController {
             defer: false
         )
         window.title = "Codex Taskmaster"
-        window.minSize = NSSize(width: 760, height: 520)
-        window.contentMinSize = NSSize(width: 760, height: 520)
+        window.minSize = NSSize(width: 760, height: 560)
+        window.contentMinSize = NSSize(width: 760, height: 560)
         window.contentMaxSize = NSSize(width: 10_000, height: 10_000)
         window.contentViewController = contentViewController
         super.init(window: window)
@@ -168,6 +169,15 @@ final class MainWindowController: NSWindowController {
 }
 
 final class MainViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSSplitViewDelegate, NSTextFieldDelegate {
+    private enum LayoutMetrics {
+        static let headerHeight: CGFloat = 188
+        static let headerOuterMargin: CGFloat = 20
+        static let headerToContentSpacing: CGFloat = 6
+        static let contentBottomMargin: CGFloat = 20
+        static let topPaneMinHeight: CGFloat = 210
+        static let bottomPaneMinHeight: CGFloat = 106
+    }
+
     private let helperPath = resolvedHelperPath()
 
     private enum SessionListMode {
@@ -262,6 +272,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private lazy var archiveSessionButton = makeButton(title: "归档", action: #selector(archiveSelectedSession))
     private lazy var restoreSessionButton = makeButton(title: "恢复", action: #selector(restoreSelectedSession))
     private lazy var deleteSessionButton = makeButton(title: "删除", action: #selector(deleteSelectedSession))
+    private lazy var clearLogButton = makeButton(title: "清空日志", action: #selector(clearActivityLog))
+    private lazy var saveLogButton = makeButton(title: "保存日志", action: #selector(saveActivityLog))
 
     override func loadView() {
         self.view = NSView()
@@ -288,19 +300,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         preserveContentSplitRatioOnResizeIfNeeded()
     }
 
-    override func viewDidAppear() {
-        super.viewDidAppear()
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.setTopSplitRatio(0.5)
-            self.didApplyInitialTopSplitRatio = true
-            self.lastTopSplitWidth = self.topSplitView.bounds.width
-            self.setContentSplitRatio(0.62)
-            self.didApplyInitialContentSplitRatio = true
-            self.lastContentSplitHeight = self.contentSplitView.bounds.height
-        }
-    }
-
     deinit {
         refreshTimer?.invalidate()
         requestTimer?.invalidate()
@@ -310,20 +309,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         view.wantsLayer = true
         view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
-        let rootStack = NSStackView()
-        rootStack.orientation = .vertical
-        rootStack.spacing = 14
-        rootStack.alignment = .leading
-        rootStack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(rootStack)
-
-        NSLayoutConstraint.activate([
-            rootStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 20),
-            rootStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            rootStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            rootStack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -20)
-        ])
-
         targetField.placeholderString = "例如 test 或具体 session id"
         intervalField.placeholderString = "秒，例如 600"
         messageField.placeholderString = "例如 继续"
@@ -331,6 +316,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         intervalField.translatesAutoresizingMaskIntoConstraints = false
         messageField.translatesAutoresizingMaskIntoConstraints = false
         intervalField.delegate = self
+        targetField.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        intervalField.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        messageField.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        forceSendCheckbox.heightAnchor.constraint(equalToConstant: 20).isActive = true
 
         let formGrid = NSGridView(views: [
             [makeFieldLabel("Session 名称 / ID"), targetField],
@@ -338,27 +327,42 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             [makeFieldLabel("输出内容"), messageField],
             [makeFieldLabel("发送策略"), forceSendCheckbox]
         ])
-        formGrid.rowSpacing = 12
-        formGrid.columnSpacing = 14
+        formGrid.rowSpacing = 8
+        formGrid.columnSpacing = 12
         formGrid.xPlacement = .leading
         formGrid.yPlacement = .center
         formGrid.translatesAutoresizingMaskIntoConstraints = false
         formGrid.column(at: 0).width = 120
-        rootStack.addArrangedSubview(formGrid)
-        formGrid.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
         targetField.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
 
         let buttonRow = NSStackView(views: [sendButton, startButton, refreshLoopsButton, detectStatusButton, stopButton, stopAllButton])
         buttonRow.orientation = .horizontal
-        buttonRow.spacing = 10
+        buttonRow.spacing = 8
         buttonRow.alignment = .centerY
-        rootStack.addArrangedSubview(buttonRow)
-        buttonRow.widthAnchor.constraint(lessThanOrEqualTo: rootStack.widthAnchor).isActive = true
+        buttonRow.heightAnchor.constraint(equalToConstant: 30).isActive = true
 
         statusLabel.font = .systemFont(ofSize: 12, weight: .medium)
         statusLabel.textColor = .secondaryLabelColor
-        rootStack.addArrangedSubview(statusLabel)
-        statusLabel.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
+        statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.maximumNumberOfLines = 1
+        statusLabel.heightAnchor.constraint(equalToConstant: 16).isActive = true
+
+        let headerStack = NSStackView(views: [formGrid, buttonRow, statusLabel])
+        headerStack.orientation = .vertical
+        headerStack.spacing = 8
+        headerStack.alignment = .leading
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
+        headerStack.setContentHuggingPriority(.required, for: .vertical)
+        headerStack.setContentCompressionResistancePriority(.required, for: .vertical)
+        view.addSubview(headerStack)
+        headerStack.heightAnchor.constraint(equalToConstant: LayoutMetrics.headerHeight).isActive = true
+        buttonRow.widthAnchor.constraint(lessThanOrEqualTo: headerStack.widthAnchor).isActive = true
+        formGrid.setContentHuggingPriority(.required, for: .vertical)
+        buttonRow.setContentHuggingPriority(.required, for: .vertical)
+        statusLabel.setContentHuggingPriority(.required, for: .vertical)
+        formGrid.setContentCompressionResistancePriority(.required, for: .vertical)
+        buttonRow.setContentCompressionResistancePriority(.required, for: .vertical)
+        statusLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
         configureLoopsTable()
         activeLoopsScrollView.borderType = .bezelBorder
@@ -367,7 +371,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         activeLoopsScrollView.autohidesScrollers = true
         activeLoopsScrollView.drawsBackground = true
         activeLoopsScrollView.translatesAutoresizingMaskIntoConstraints = false
-        activeLoopsScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
+        activeLoopsScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 90).isActive = true
 
         configureSessionStatusTable()
         sessionStatusScrollView.borderType = .bezelBorder
@@ -376,7 +380,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionStatusScrollView.autohidesScrollers = true
         sessionStatusScrollView.drawsBackground = true
         sessionStatusScrollView.translatesAutoresizingMaskIntoConstraints = false
-        sessionStatusScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
+        sessionStatusScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 90).isActive = true
 
         configureTextView(sessionDetailView, inset: NSSize(width: 10, height: 8))
         sessionDetailView.font = .systemFont(ofSize: 12)
@@ -423,7 +427,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionDetailScrollView.drawsBackground = true
         sessionDetailScrollView.translatesAutoresizingMaskIntoConstraints = false
         sessionDetailScrollView.documentView = sessionDetailView
-        sessionDetailScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 110).isActive = true
+        sessionDetailScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 52).isActive = true
 
         configureTextView(outputView, inset: NSSize(width: 10, height: 10))
         outputView.string = ""
@@ -436,25 +440,42 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         outputScrollView.drawsBackground = true
         outputScrollView.translatesAutoresizingMaskIntoConstraints = false
         outputScrollView.documentView = outputView
-        outputScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
+        outputScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 100).isActive = true
 
         let activeLoopsPanel = makePanel(title: "Active Loops", metaLabel: activeLoopsMetaLabel, contentView: activeLoopsScrollView)
         let sessionStatusContentStack = NSStackView(views: [sessionScopeRow, sessionStatusScrollView, renameRow, sessionDetailScrollView])
         sessionStatusContentStack.orientation = .vertical
         sessionStatusContentStack.spacing = 8
         sessionStatusContentStack.alignment = .leading
+        sessionStatusContentStack.distribution = .fill
         sessionStatusContentStack.translatesAutoresizingMaskIntoConstraints = false
         sessionScopeRow.widthAnchor.constraint(equalTo: sessionStatusContentStack.widthAnchor).isActive = true
         sessionStatusScrollView.widthAnchor.constraint(equalTo: sessionStatusContentStack.widthAnchor).isActive = true
         renameRow.widthAnchor.constraint(equalTo: sessionStatusContentStack.widthAnchor).isActive = true
         sessionDetailScrollView.widthAnchor.constraint(equalTo: sessionStatusContentStack.widthAnchor).isActive = true
-        renameField.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
+        renameField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
+        sessionScopeRow.setContentHuggingPriority(.required, for: .vertical)
+        sessionScopeRow.setContentCompressionResistancePriority(.required, for: .vertical)
+        renameRow.setContentHuggingPriority(.required, for: .vertical)
+        renameRow.setContentCompressionResistancePriority(.required, for: .vertical)
+        sessionStatusScrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
+        sessionStatusScrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        sessionDetailScrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
+        sessionDetailScrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         let sessionStatusPanel = makePanel(title: "Session Status", metaLabel: sessionStatusMetaLabel, contentView: sessionStatusContentStack)
-        let logPanel = makePanel(title: "Activity Log", metaLabel: nil, contentView: outputScrollView)
-        let activeLoopsPane = makeSplitPane(contentView: activeLoopsPanel, minWidth: 260, minHeight: 220)
-        let sessionStatusPane = makeSplitPane(contentView: sessionStatusPanel, minWidth: 300, minHeight: 220)
-        let topContentPane = makeSplitPane(contentView: topSplitView, minHeight: 260)
-        let logPane = makeSplitPane(contentView: logPanel, minHeight: 180)
+        let logHeaderActions = NSStackView(views: [clearLogButton, saveLogButton])
+        logHeaderActions.orientation = .horizontal
+        logHeaderActions.spacing = 6
+        logHeaderActions.alignment = .centerY
+        clearLogButton.setContentHuggingPriority(.required, for: .horizontal)
+        saveLogButton.setContentHuggingPriority(.required, for: .horizontal)
+        clearLogButton.toolTip = "清空当前日志显示"
+        saveLogButton.toolTip = "保存当前日志到文件"
+        let logPanel = makePanel(title: "Activity Log", metaLabel: nil, contentView: outputScrollView, headerAccessoryView: logHeaderActions)
+        let activeLoopsPane = makeSplitPane(contentView: activeLoopsPanel, minWidth: 260, minHeight: 100)
+        let sessionStatusPane = makeSplitPane(contentView: sessionStatusPanel, minWidth: 220, minHeight: 100)
+        let topContentPane = makeSplitPane(contentView: topSplitView, minHeight: LayoutMetrics.topPaneMinHeight)
+        let logPane = makeSplitPane(contentView: logPanel, minHeight: LayoutMetrics.bottomPaneMinHeight)
         topSplitView.isVertical = true
         topSplitView.dividerStyle = .thin
         topSplitView.translatesAutoresizingMaskIntoConstraints = false
@@ -472,16 +493,26 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         contentSplitView.addArrangedSubview(logPane)
         contentSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         contentSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
-
-        rootStack.addArrangedSubview(contentSplitView)
-        contentSplitView.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
-        contentSplitView.heightAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
+        view.addSubview(contentSplitView)
+        let minimumContentHeight = LayoutMetrics.topPaneMinHeight + LayoutMetrics.bottomPaneMinHeight + contentSplitView.dividerThickness
+        contentSplitView.heightAnchor.constraint(greaterThanOrEqualToConstant: minimumContentHeight).isActive = true
         contentSplitView.setContentHuggingPriority(.defaultLow, for: .vertical)
         contentSplitView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         logPanel.setContentHuggingPriority(.defaultLow, for: .vertical)
         logPanel.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         outputScrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
         outputScrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+
+        NSLayoutConstraint.activate([
+            headerStack.topAnchor.constraint(equalTo: view.topAnchor, constant: LayoutMetrics.headerOuterMargin),
+            headerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            headerStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+
+            contentSplitView.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: LayoutMetrics.headerToContentSpacing),
+            contentSplitView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            contentSplitView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            contentSplitView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -LayoutMetrics.contentBottomMargin)
+        ])
     }
 
     private func configureTextView(_ textView: NSTextView, inset: NSSize) {
@@ -519,7 +550,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         activeLoopsTableView.delegate = self
         activeLoopsTableView.dataSource = self
         activeLoopsTableView.rowHeight = 24
-        activeLoopsTableView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        activeLoopsTableView.columnAutoresizingStyle = .noColumnAutoresizing
 
         for column in columns {
             let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.identifier))
@@ -528,9 +559,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.identifier, ascending: column.identifier != defaultLoopSortKey)
             if column.identifier == "lastLog" {
                 tableColumn.minWidth = 180
-                tableColumn.resizingMask = .autoresizingMask
+                tableColumn.resizingMask = [.autoresizingMask, .userResizingMask]
             } else {
-                tableColumn.resizingMask = []
+                tableColumn.minWidth = 60
+                tableColumn.resizingMask = .userResizingMask
             }
             activeLoopsTableView.addTableColumn(tableColumn)
         }
@@ -559,7 +591,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionStatusTableView.rowHeight = 24
         sessionStatusTableView.target = self
         sessionStatusTableView.doubleAction = #selector(handleSessionStatusDoubleClick)
-        sessionStatusTableView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        sessionStatusTableView.columnAutoresizingStyle = .noColumnAutoresizing
 
         for column in columns {
             let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.identifier))
@@ -568,9 +600,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.identifier, ascending: column.identifier == defaultSessionSortKey ? false : true)
             if column.identifier == "reason" {
                 tableColumn.minWidth = 220
-                tableColumn.resizingMask = .autoresizingMask
+                tableColumn.resizingMask = [.autoresizingMask, .userResizingMask]
             } else {
-                tableColumn.resizingMask = []
+                tableColumn.minWidth = 60
+                tableColumn.resizingMask = .userResizingMask
             }
             sessionStatusTableView.addTableColumn(tableColumn)
         }
@@ -1063,7 +1096,7 @@ conn.close()
         let availableHeight = contentSplitView.bounds.height - contentSplitView.dividerThickness
         guard availableHeight > 0 else { return }
 
-        let clampedRatio = min(max(ratio, 0.25), 0.82)
+        let clampedRatio = min(max(ratio, 0.18), 0.88)
         isApplyingContentSplitRatio = true
         contentSplitView.setPosition(availableHeight * clampedRatio, ofDividerAt: 0)
         contentSplitRatio = clampedRatio
@@ -1087,7 +1120,7 @@ conn.close()
         let availableHeight = contentSplitView.bounds.height - contentSplitView.dividerThickness
         guard availableHeight > 0 else { return }
         let currentTopHeight = contentSplitView.subviews[0].frame.height
-        contentSplitRatio = min(max(currentTopHeight / availableHeight, 0.25), 0.82)
+        contentSplitRatio = min(max(currentTopHeight / availableHeight, 0.18), 0.88)
     }
 
     private func localizedSessionReason(_ reason: String) -> String {
@@ -1127,33 +1160,54 @@ conn.close()
         return trimmed
     }
 
-    private func makePanel(title: String, metaLabel: NSTextField?, contentView: NSView) -> NSView {
+    private func makePanel(title: String, metaLabel: NSTextField?, contentView: NSView, headerAccessoryView: NSView? = nil) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
 
-        let headerViews = [titleLabel, metaLabel].compactMap { $0 }
-        let headerStack = NSStackView(views: headerViews)
-        headerStack.orientation = .vertical
-        headerStack.spacing = 2
-        headerStack.alignment = .leading
+        let titleStack = NSStackView(views: [titleLabel] + [metaLabel].compactMap { $0 })
+        titleStack.orientation = .vertical
+        titleStack.spacing = 2
+        titleStack.alignment = .leading
 
         metaLabel?.font = .systemFont(ofSize: 11, weight: .regular)
         metaLabel?.textColor = .secondaryLabelColor
         metaLabel?.lineBreakMode = .byTruncatingTail
 
-        let panelStack = NSStackView(views: [headerStack, contentView])
-        panelStack.orientation = .vertical
-        panelStack.spacing = 8
-        panelStack.alignment = .leading
-        panelStack.translatesAutoresizingMaskIntoConstraints = false
-        panelStack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
-        panelStack.setContentHuggingPriority(.defaultLow, for: .vertical)
-        panelStack.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        let headerViews = [titleStack, headerAccessoryView].compactMap { $0 }
+        let headerStack = NSStackView(views: headerViews)
+        headerStack.orientation = .horizontal
+        headerStack.spacing = 8
+        headerStack.alignment = .firstBaseline
+        headerStack.distribution = .fill
 
-        headerStack.widthAnchor.constraint(equalTo: panelStack.widthAnchor).isActive = true
-        contentView.widthAnchor.constraint(equalTo: panelStack.widthAnchor).isActive = true
+        titleStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        headerAccessoryView?.setContentHuggingPriority(.required, for: .horizontal)
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        headerStack.setContentHuggingPriority(.required, for: .vertical)
+        headerStack.setContentCompressionResistancePriority(.required, for: .vertical)
+        contentView.setContentHuggingPriority(.defaultLow, for: .vertical)
+        contentView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
-        return panelStack
+        let panelView = NSView()
+        panelView.translatesAutoresizingMaskIntoConstraints = false
+        panelView.addSubview(headerStack)
+        panelView.addSubview(contentView)
+        panelView.setContentHuggingPriority(.defaultLow, for: .vertical)
+        panelView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+
+        NSLayoutConstraint.activate([
+            headerStack.topAnchor.constraint(equalTo: panelView.topAnchor),
+            headerStack.leadingAnchor.constraint(equalTo: panelView.leadingAnchor),
+            headerStack.trailingAnchor.constraint(equalTo: panelView.trailingAnchor),
+
+            contentView.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 8),
+            contentView.leadingAnchor.constraint(equalTo: panelView.leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: panelView.trailingAnchor),
+            contentView.bottomAnchor.constraint(equalTo: panelView.bottomAnchor)
+        ])
+
+        return panelView
     }
 
     private func makeSplitPane(contentView: NSView, minWidth: CGFloat? = nil, minHeight: CGFloat? = nil) -> NSView {
@@ -1239,6 +1293,33 @@ conn.close()
         outputView.string.append(line)
         outputView.needsDisplay = true
         outputView.scrollToEndOfDocument(nil)
+    }
+
+    @objc
+    private func clearActivityLog() {
+        outputView.string = ""
+        outputView.needsDisplay = true
+        setStatus("日志已清空", key: "general")
+    }
+
+    @objc
+    private func saveActivityLog() {
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = "codex_taskmaster_log_\(Self.logFilenameFormatter.string(from: Date())).log"
+
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try outputView.string.write(to: url, atomically: true, encoding: .utf8)
+                setStatus("日志已保存到 \(url.lastPathComponent)", key: "general")
+            } catch {
+                NSSound.beep()
+                appendOutput("stderr: 保存日志失败: \(error.localizedDescription)")
+                setStatus("保存日志失败", key: "general")
+            }
+        }
     }
 
     private func setStatus(_ text: String, key: String = "general") {
@@ -2799,9 +2880,15 @@ conn.close()
     func splitViewDidResizeSubviews(_ notification: Notification) {
         guard let splitView = notification.object as? NSSplitView else { return }
         if splitView == topSplitView {
-            updateTopSplitRatioFromCurrentLayout()
+            let widthDelta = abs(topSplitView.bounds.width - lastTopSplitWidth)
+            if widthDelta <= 0.5 {
+                updateTopSplitRatioFromCurrentLayout()
+            }
         } else if splitView == contentSplitView {
-            updateContentSplitRatioFromCurrentLayout()
+            let heightDelta = abs(contentSplitView.bounds.height - lastContentSplitHeight)
+            if heightDelta <= 0.5 {
+                updateContentSplitRatioFromCurrentLayout()
+            }
         }
     }
 
@@ -2821,15 +2908,15 @@ conn.close()
             let availableWidth = splitView.bounds.width - splitView.dividerThickness
             guard availableWidth > 0 else { return proposedPosition }
             let minLeading: CGFloat = 260
-            let minTrailing: CGFloat = 300
+            let minTrailing: CGFloat = 220
             return min(max(proposedPosition, minLeading), availableWidth - minTrailing)
         }
 
         if splitView == contentSplitView {
             let availableHeight = splitView.bounds.height - splitView.dividerThickness
             guard availableHeight > 0 else { return proposedPosition }
-            let minTop: CGFloat = 260
-            let minBottom: CGFloat = 180
+            let minTop = LayoutMetrics.topPaneMinHeight
+            let minBottom = LayoutMetrics.bottomPaneMinHeight
             return min(max(proposedPosition, minTop), availableHeight - minBottom)
         }
 
@@ -2845,6 +2932,12 @@ conn.close()
     private static let loopTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+
+    private static let logFilenameFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd_HHmmss"
         return formatter
     }()
 }
