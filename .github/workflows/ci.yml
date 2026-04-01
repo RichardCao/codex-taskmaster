@@ -10,10 +10,51 @@ jobs:
   check:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || true
 
-      - name: Run checks
-        run: bash ./scripts/check.sh
+      - name: Inspect environment
+        run: |
+          sw_vers
+          xcode-select -p
+          xcodebuild -version
+          swift --version
+          xcrun --sdk macosx --show-sdk-path
+
+      - name: Shell syntax
+        run: bash -n ./codex_terminal_sender.sh
+
+      - name: Helper smoke tests
+        run: bash ./tests/test_helper_smoke.sh
+
+      - name: Swift typecheck
+        run: |
+          set -euo pipefail
+          SDK_PATH="${MACOS_SDK_PATH:-}"
+          if [[ -z "$SDK_PATH" ]]; then
+            for candidate in \
+              /Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk \
+              /Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk \
+              /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk \
+              /Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk \
+              /Library/Developer/CommandLineTools/SDKs/MacOSX14.5.sdk \
+              /Library/Developer/CommandLineTools/SDKs/MacOSX14.sdk
+            do
+              if [[ -d "$candidate" ]]; then
+                SDK_PATH="$candidate"
+                break
+              fi
+            done
+          fi
+          if [[ -n "$SDK_PATH" ]]; then
+            echo "Using SDK: $SDK_PATH"
+            swiftc -sdk "$SDK_PATH" -warnings-as-errors -typecheck ./CodexBianCeZheApp.swift
+          else
+            echo "Using SDK from default toolchain"
+            swiftc -warnings-as-errors -typecheck ./CodexBianCeZheApp.swift
+          fi
+
+      - name: Build app
+        run: bash ./build_codex_biancezhe_app.sh
