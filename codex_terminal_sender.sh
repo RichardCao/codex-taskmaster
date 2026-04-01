@@ -222,6 +222,82 @@ request_paths_for_id() {
   RESULT_FILE="${RESULT_REQUEST_DIR}/${request_id}.result.json"
 }
 
+find_matching_inflight_request() {
+  local target="$1"
+  local message="$2"
+
+  python3 - "$PENDING_REQUEST_DIR" "$PROCESSING_REQUEST_DIR" "$target" "$message" <<'PY'
+import json
+import os
+import sys
+
+pending_dir, processing_dir, target, message = sys.argv[1:]
+candidates = []
+
+for queue_state, directory in (("pending", pending_dir), ("processing", processing_dir)):
+    if not os.path.isdir(directory):
+        continue
+    for name in os.listdir(directory):
+        if not name.endswith(".request.json"):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except Exception:
+            continue
+        if str(payload.get("target", "")) != target:
+            continue
+        if str(payload.get("message", "")) != message:
+            continue
+        request_id = str(payload.get("request_id", "")) or name.removesuffix(".request.json")
+        created_at = int(payload.get("created_at", 0) or 0)
+        timeout_seconds = int(payload.get("timeout_seconds", 0) or 0)
+        force_send = "yes" if payload.get("force_send") else "no"
+        candidates.append((created_at, request_id, queue_state, timeout_seconds, force_send))
+
+if not candidates:
+    sys.exit(1)
+
+created_at, request_id, queue_state, timeout_seconds, force_send = max(candidates)
+print(f"request_id: {request_id}")
+print(f"queue_state: {queue_state}")
+print(f"created_at: {created_at}")
+print(f"timeout_seconds: {timeout_seconds}")
+print(f"force_send: {force_send}")
+PY
+}
+
+current_request_queue_state() {
+  local request_id="$1"
+  request_paths_for_id "$request_id"
+
+  if [[ -f "$REQUEST_FILE" ]]; then
+    printf 'pending\n'
+    return 0
+  fi
+
+  if [[ -f "$PROCESSING_FILE" ]]; then
+    printf 'processing\n'
+    return 0
+  fi
+
+  return 1
+}
+
+print_request_accepted_result() {
+  local reason="$1"
+  local target="$2"
+  local force_send="$3"
+  local detail="$4"
+
+  printf 'status: accepted\n'
+  printf 'reason: %s\n' "$reason"
+  printf 'target: %s\n' "$target"
+  printf 'force_send: %s\n' "$force_send"
+  printf 'detail: %s\n' "$detail"
+}
+
 queue_send_request() {
   local target="$1"
   local message="$2"
@@ -256,6 +332,8 @@ PY
 await_send_result() {
   local request_id="$1"
   local timeout_seconds="$2"
+  local target="$3"
+  local force_send="${4:-0}"
   local started_at
   started_at="$(date +%s)"
   request_paths_for_id "$request_id"
@@ -308,6 +386,18 @@ for key in keys:
     fi
 
     if (( $(date +%s) - started_at >= timeout_seconds )); then
+      local queue_state=""
+      queue_state="$(current_request_queue_state "$request_id" 2>/dev/null || true)"
+      if [[ -n "$queue_state" ]]; then
+        local elapsed_seconds
+        elapsed_seconds="$(( $(date +%s) - started_at ))"
+        print_request_accepted_result \
+          "request_still_processing" \
+          "$target" \
+          "$([[ "$force_send" == "1" ]] && echo yes || echo no)" \
+          "send request still ${queue_state} after ${elapsed_seconds}s; waiting for app feedback for request_id=${request_id}"
+        return 2
+      fi
       die "send request timed out after ${timeout_seconds}s waiting for app response"
     fi
 
@@ -1215,9 +1305,25 @@ send_message_when_ready() {
   local stable_seconds="${3:-$SEND_STABLE_IDLE_SECONDS}"
   local timeout_seconds="${4:-$SEND_IDLE_TIMEOUT_SECONDS}"
   local force_send="${5:-0}"
+  local inflight_request=""
+  inflight_request="$(find_matching_inflight_request "$target" "$message" 2>/dev/null || true)"
+  if [[ -n "$inflight_request" ]]; then
+    local inflight_request_id
+    local inflight_queue_state
+    local inflight_created_at
+    inflight_request_id="$(extract_probe_field "$inflight_request" "request_id")"
+    inflight_queue_state="$(extract_probe_field "$inflight_request" "queue_state")"
+    inflight_created_at="$(extract_probe_field "$inflight_request" "created_at")"
+    print_request_accepted_result \
+      "request_already_inflight" \
+      "$target" \
+      "$([[ "$force_send" == "1" ]] && echo yes || echo no)" \
+      "same target/message request is already ${inflight_queue_state:-pending} with request_id=${inflight_request_id:-unknown} created_at=${inflight_created_at:-0}"
+    return 2
+  fi
   local request_id
   request_id="$(queue_send_request "$target" "$message" "helper-send" "$timeout_seconds" "$force_send")"
-  await_send_result "$request_id" "$(( timeout_seconds + 10 ))"
+  await_send_result "$request_id" "$(( timeout_seconds + 10 ))" "$target" "$force_send"
 }
 
 find_unique_tty() {

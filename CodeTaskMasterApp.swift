@@ -3405,11 +3405,81 @@ conn.close()
         usleep(220_000)
     }
 
+    private func restoreFocusAfterTerminalSend(previousAppBundleID: String?) {
+        let currentAppBundleID = Bundle.main.bundleIdentifier ?? ""
+        let preferredBundleID: String
+        if let previousAppBundleID,
+           !previousAppBundleID.isEmpty,
+           previousAppBundleID != "com.apple.Terminal" {
+            preferredBundleID = previousAppBundleID
+        } else {
+            preferredBundleID = currentAppBundleID
+        }
+
+        let process = Process()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        let stdin = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = [
+            "-",
+            preferredBundleID
+        ]
+        process.standardOutput = stdout
+        process.standardError = stderr
+        process.standardInput = stdin
+
+        let script = """
+        on run argv
+          set preferredBundleID to item 1 of argv
+
+          tell application "System Events"
+            try
+              set frontAppName to name of first application process whose frontmost is true
+            on error
+              set frontAppName to ""
+            end try
+          end tell
+
+          if frontAppName is equal to "Terminal" then
+            try
+              tell application "Terminal" to hide
+            end try
+            delay 0.05
+          end if
+
+          if preferredBundleID is not "" then
+            try
+              tell application id preferredBundleID to activate
+            end try
+          end if
+        end run
+        """
+
+        do {
+            try process.run()
+            if let input = script.data(using: .utf8) {
+                let inputHandle = stdin.fileHandleForWriting
+                inputHandle.write(input)
+                try? inputHandle.close()
+            }
+            process.waitUntilExit()
+        } catch {
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        if process.terminationStatus != 0 {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
     private func sendViaAppKeystrokes(ttyPath: String, message: String, clearExistingInput: Bool) throws {
         guard ensureAccessibilityTrust(prompt: true) else {
             throw NSError(domain: "CodeTaskMaster", code: 5, userInfo: [NSLocalizedDescriptionKey: "Code TaskMaster 没有辅助功能权限，无法发送按键"])
         }
 
+        let previousFrontAppBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         try focusTerminalWindow(for: ttyPath)
 
         if clearExistingInput {
@@ -3424,6 +3494,7 @@ conn.close()
         usleep(350_000)
         try postKey(36)
         usleep(250_000)
+        restoreFocusAfterTerminalSend(previousAppBundleID: previousFrontAppBundleID)
     }
 
     private func runHelper(arguments: [String], actionName: String) {
