@@ -16,7 +16,7 @@
 2. `done` loop 熔断 / 暂停机制
    目标：连续同类失败时暂停 loop，而不是长期无意义重试。
 
-3. `pending` 自动重定位 live tty 的常态化兜底
+3. `done` 自动重定位 live tty 的常态化兜底
    目标：不只在 focus fail 时触发，也要在 tty 失联等场景下主动刷新。
 
 4. `pending` 发送结果可视化增强

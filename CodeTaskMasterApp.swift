@@ -538,6 +538,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let isArchived: Bool
     }
 
+    private struct LiveTTYResolution {
+        let tty: String?
+        let detail: String
+        let changed: Bool
+    }
+
     private let targetField: NSTextField = {
         let field = NSTextField()
         field.stringValue = initialTargetValue()
@@ -3530,6 +3536,64 @@ conn.close()
         return (tty.isEmpty ? nil : tty, detail)
     }
 
+    private func recoverLiveTTY(target: String, previousTTY: String?) -> LiveTTYResolution {
+        let previous = normalizedTTY(previousTTY ?? "")
+        let resolved = resolveLiveTTY(target: target)
+        guard let tty = resolved.tty, !tty.isEmpty else {
+            return LiveTTYResolution(tty: nil, detail: resolved.detail, changed: false)
+        }
+        return LiveTTYResolution(tty: tty, detail: resolved.detail, changed: tty != previous)
+    }
+
+    private func shouldAttemptPreflightTTYRecovery(initialTTY: String, terminalState: String) -> Bool {
+        normalizedTTY(initialTTY).isEmpty || terminalState == "unavailable"
+    }
+
+    private func prepareProbeForSend(
+        target: String,
+        initialProbe: (status: Int32, values: [String: String], stdout: String, stderr: String)
+    ) -> (probe: (status: Int32, values: [String: String], stdout: String, stderr: String), tty: String, resolution: LiveTTYResolution?) {
+        let rawInitialTTY = initialProbe.values["tty"] ?? ""
+        let initialTTY = rawInitialTTY == "-" ? "" : normalizedTTY(rawInitialTTY)
+        let initialTerminalState = initialProbe.values["terminal_state"] ?? "unknown"
+
+        guard shouldAttemptPreflightTTYRecovery(initialTTY: initialTTY, terminalState: initialTerminalState) else {
+            return (initialProbe, initialTTY, nil)
+        }
+
+        let resolution = recoverLiveTTY(target: target, previousTTY: initialTTY)
+        guard let resolvedTTY = resolution.tty, !resolvedTTY.isEmpty else {
+            return (initialProbe, initialTTY, resolution)
+        }
+
+        let refreshedProbe = probeResult(for: target)
+        if refreshedProbe.status == 0 {
+            let refreshedRawTTY = refreshedProbe.values["tty"] ?? ""
+            let refreshedTTY = refreshedRawTTY == "-" ? "" : normalizedTTY(refreshedRawTTY)
+            if !refreshedTTY.isEmpty {
+                return (refreshedProbe, refreshedTTY, resolution)
+            }
+        }
+
+        return (initialProbe, resolvedTTY, resolution)
+    }
+
+    private func appendLiveTTYResolutionDetail(_ baseDetail: String, resolution: LiveTTYResolution?) -> String {
+        guard let resolution else { return baseDetail }
+
+        var parts = [baseDetail]
+        if let tty = resolution.tty, !tty.isEmpty {
+            parts.append("live_tty_resolved=\(tty)")
+            parts.append("live_tty_changed=\(resolution.changed ? "yes" : "no")")
+        } else {
+            parts.append("live_tty_resolved=-")
+        }
+        if !resolution.detail.isEmpty {
+            parts.append("live_tty_detail=\(resolution.detail)")
+        }
+        return parts.filter { !$0.isEmpty }.joined(separator: " | ")
+    }
+
     private func makeTTYFocusFailureError(target: String, initialTTY: String, resolvedTTY: String?, resolveDetail: String) -> NSError {
         var detailParts = [
             "target=\(target)",
@@ -3565,7 +3629,7 @@ conn.close()
         return startingTTY
     }
 
-    private func sendWithLiveTTYRetry(target: String, initialTTY: String, message: String, clearExistingInput: Bool) throws -> String {
+    private func sendWithLiveTTYRecovery(target: String, initialTTY: String, message: String, clearExistingInput: Bool) throws -> String {
         let startingTTY = normalizedTTY(initialTTY)
 
         do {
@@ -3580,8 +3644,8 @@ conn.close()
                 throw error
             }
 
-            let resolved = resolveLiveTTY(target: target)
-            guard let liveTTY = resolved.tty, !liveTTY.isEmpty, liveTTY != startingTTY else {
+            let resolved = recoverLiveTTY(target: target, previousTTY: startingTTY)
+            guard let liveTTY = resolved.tty, !liveTTY.isEmpty, resolved.changed else {
                 throw makeTTYFocusFailureError(
                     target: target,
                     initialTTY: startingTTY,
@@ -3671,34 +3735,37 @@ conn.close()
             return
         }
 
-        let probeStatus = initialProbe.values["status"] ?? "unknown"
-        let terminalState = initialProbe.values["terminal_state"] ?? "unknown"
-        let rawTTY = initialProbe.values["tty"] ?? ""
-        let tty = rawTTY == "-" ? "" : rawTTY
-        let previousUserTimestamp = initialProbe.values["last_user_message_at"] ?? ""
+        let preparedProbe = prepareProbeForSend(target: target, initialProbe: initialProbe)
+        let activeProbe = preparedProbe.probe
+        let probeStatus = activeProbe.values["status"] ?? "unknown"
+        let terminalState = activeProbe.values["terminal_state"] ?? "unknown"
+        let tty = preparedProbe.tty
+        let previousUserTimestamp = activeProbe.values["last_user_message_at"] ?? ""
         let clearResidualInputBeforeSend = !forceSend && shouldAutoClearResidualInput(probeStatus: probeStatus, terminalState: terminalState)
         let sendableByState = isSendableProbeState(probeStatus: probeStatus, terminalState: terminalState)
         guard !tty.isEmpty else {
-            logActivity("发送请求失败: status=failed reason=tty_unavailable target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(compactProbeSummary(initialProbe))")
+            let detail = appendLiveTTYResolutionDetail(compactProbeSummary(activeProbe), resolution: preparedProbe.resolution)
+            logActivity("发送请求失败: status=failed reason=tty_unavailable target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
             finish(with: [
                 "status": "failed",
                 "reason": "tty_unavailable",
                 "target": target,
                 "force_send": forceSend,
-                "detail": compactProbeSummary(initialProbe),
+                "detail": detail,
                 "probe_status": probeStatus,
                 "terminal_state": terminalState
             ])
             return
         }
         guard forceSend || sendableByState else {
-            logActivity("发送请求失败: status=failed reason=not_sendable target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(compactProbeSummary(initialProbe))")
+            let detail = appendLiveTTYResolutionDetail(compactProbeSummary(activeProbe), resolution: preparedProbe.resolution)
+            logActivity("发送请求失败: status=failed reason=not_sendable target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
             finish(with: [
                 "status": "failed",
                 "reason": "not_sendable",
                 "target": target,
                 "force_send": forceSend,
-                "detail": compactProbeSummary(initialProbe),
+                "detail": detail,
                 "probe_status": probeStatus,
                 "terminal_state": terminalState
             ])
@@ -3708,7 +3775,7 @@ conn.close()
         let usedTTY: String
 
         do {
-            usedTTY = try sendWithLiveTTYRetry(
+            usedTTY = try sendWithLiveTTYRecovery(
                 target: target,
                 initialTTY: tty,
                 message: message,
@@ -3716,13 +3783,14 @@ conn.close()
             )
         } catch {
             let failureReason = sendFailureReason(for: error)
-            logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(error.localizedDescription)")
+            let detail = appendLiveTTYResolutionDetail(error.localizedDescription, resolution: preparedProbe.resolution)
+            logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
             finish(with: [
                 "status": "failed",
                 "reason": failureReason,
                 "target": target,
                 "force_send": forceSend,
-                "detail": error.localizedDescription,
+                "detail": detail,
                 "probe_status": probeStatus,
                 "terminal_state": terminalState
             ])
@@ -3737,7 +3805,8 @@ conn.close()
 
         if verification.success {
             let reason = forceSend ? "forced_sent" : "sent"
-            let detail = "sent message via app sender to target=\(target) tty=\(usedTTY) clear_existing_input=\(clearResidualInputBeforeSend ? "yes" : "no")"
+            let baseDetail = "sent message via app sender to target=\(target) tty=\(usedTTY) clear_existing_input=\(clearResidualInputBeforeSend ? "yes" : "no")"
+            let detail = appendLiveTTYResolutionDetail(baseDetail, resolution: preparedProbe.resolution)
             logActivity("发送请求完成: status=success reason=\(reason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
             finish(with: [
                 "status": "success",
@@ -3754,7 +3823,7 @@ conn.close()
         if shouldTreatAsQueuedAcceptance(verification.probe) {
             let queuedProbeStatus = verification.probe.values["status"] ?? "unknown"
             let queuedTerminalState = verification.probe.values["terminal_state"] ?? "unknown"
-            let detail = compactProbeSummary(verification.probe)
+            let detail = appendLiveTTYResolutionDetail(compactProbeSummary(verification.probe), resolution: preparedProbe.resolution)
             logActivity("发送请求已排队: status=accepted reason=queued_pending_feedback target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(queuedProbeStatus) terminal_state=\(queuedTerminalState) detail=\(detail)")
             finish(with: [
                 "status": "accepted",
@@ -3768,13 +3837,14 @@ conn.close()
             return
         }
 
-        logActivity("发送请求待确认: status=accepted reason=verification_pending target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(verification.probe.values["status"] ?? "unknown") terminal_state=\(verification.probe.values["terminal_state"] ?? "unknown") detail=\(compactProbeSummary(verification.probe))")
+        let verificationDetail = appendLiveTTYResolutionDetail(compactProbeSummary(verification.probe), resolution: preparedProbe.resolution)
+        logActivity("发送请求待确认: status=accepted reason=verification_pending target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(verification.probe.values["status"] ?? "unknown") terminal_state=\(verification.probe.values["terminal_state"] ?? "unknown") detail=\(verificationDetail)")
         finish(with: [
             "status": "accepted",
             "reason": "verification_pending",
             "target": target,
             "force_send": forceSend,
-            "detail": compactProbeSummary(verification.probe),
+            "detail": verificationDetail,
             "probe_status": verification.probe.values["status"] ?? "unknown",
             "terminal_state": verification.probe.values["terminal_state"] ?? "unknown"
         ])
