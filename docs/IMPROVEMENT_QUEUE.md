@@ -22,13 +22,13 @@
 4. `done` 发送结果可视化增强
    目标：把成功、已排队、待确认、TTY 失效、权限缺失等状态更明确地显示到 UI。
 
-5. `pending` Session 详情区显示最近发送结果与失败统计
+5. `done` Session 详情区显示最近发送结果与失败统计
    目标：选中 session 后能直接看到近几次发送记录、失败原因和 loop 占用情况。
 
-6. `pending` loop 发送频率保护与互斥增强
+6. `done` loop 发送频率保护与互斥增强
    目标：避免 force 模式或异常状态下高频重复发送。
 
-7. `pending` 日志查看能力增强
+7. `done` 日志查看能力增强
    目标：支持按 target / session 过滤，只看失败，导出单条 session 相关日志。
 
 8. `pending` 平台发送层继续抽象

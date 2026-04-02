@@ -317,6 +317,121 @@ CODEX_TASKMASTER_LOOP_FAILURE_PAUSE_THRESHOLD=3 \
 paused_counter_after="$(cat "$LOOP_SEND_COUNTER")"
 assert_equals "$paused_counter_after" "$paused_counter_before"
 
+CONFLICT_SEND_STUB="${TEST_TMP}/loop-send-success-stub.sh"
+CONFLICT_SEND_COUNTER="${TEST_TMP}/loop-send-success-counter.txt"
+cat >"$CONFLICT_SEND_STUB" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+counter_file="${CODEX_TASKMASTER_TEST_COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+count="$((count + 1))"
+printf '%s' "$count" >"$counter_file"
+printf 'status: success\n'
+printf 'reason: sent\n'
+printf 'detail: sent once\n'
+exit 0
+EOF
+chmod +x "$CONFLICT_SEND_STUB"
+
+mutex_a="mutex-a"
+mutex_b="mutex-b"
+mutex_thread_id="shared-thread"
+mutex_a_key="$(printf '%s' "$mutex_a" | shasum -a 256 | awk '{print $1}')"
+mutex_b_key="$(printf '%s' "$mutex_b" | shasum -a 256 | awk '{print $1}')"
+cat >"${STATE_DIR}/loops/${mutex_a_key}.loop" <<EOF
+TARGET=${mutex_a}
+INTERVAL=30
+MESSAGE=mutex-message-a
+FORCE_SEND=0
+THREAD_ID=${mutex_thread_id}
+EOF
+cat >"${STATE_DIR}/loops/${mutex_b_key}.loop" <<EOF
+TARGET=${mutex_b}
+INTERVAL=30
+MESSAGE=mutex-message-b
+FORCE_SEND=0
+THREAD_ID=${mutex_thread_id}
+EOF
+: > "${STATE_DIR}/runtime/loop-logs/${mutex_a_key}.log"
+: > "${STATE_DIR}/runtime/loop-logs/${mutex_b_key}.log"
+
+CODEX_TASKMASTER_SEND_STUB="$CONFLICT_SEND_STUB" \
+CODEX_TASKMASTER_TEST_COUNTER_FILE="$CONFLICT_SEND_COUNTER" \
+"$HELPER" loop-once
+
+assert_equals "$(cat "$CONFLICT_SEND_COUNTER")" "1"
+if [[ "$mutex_a_key" > "$mutex_b_key" ]]; then
+  mutex_loser="$mutex_a"
+else
+  mutex_loser="$mutex_b"
+fi
+mutex_loser_status="$("$HELPER" status -t "$mutex_loser")"
+assert_contains "$mutex_loser_status" "paused: yes"
+assert_contains "$mutex_loser_status" "failure_reason: loop_conflict_active_session"
+assert_contains "$mutex_loser_status" "pause_reason: loop_conflict_active_session"
+
+ACCEPTED_SEND_STUB="${TEST_TMP}/loop-send-accepted-stub.sh"
+cat >"$ACCEPTED_SEND_STUB" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'status: accepted\n'
+printf 'reason: request_already_inflight\n'
+printf 'detail: same target/message request is already processing\n'
+exit 2
+EOF
+chmod +x "$ACCEPTED_SEND_STUB"
+
+accepted_target="accepted-loop"
+accepted_key="$(printf '%s' "$accepted_target" | shasum -a 256 | awk '{print $1}')"
+cat >"${STATE_DIR}/loops/${accepted_key}.loop" <<EOF
+TARGET=${accepted_target}
+INTERVAL=5
+MESSAGE=accepted-message
+FORCE_SEND=0
+THREAD_ID=accepted-thread
+EOF
+: > "${STATE_DIR}/runtime/loop-logs/${accepted_key}.log"
+accepted_now_before="$(date +%s)"
+CODEX_TASKMASTER_SEND_STUB="$ACCEPTED_SEND_STUB" \
+CODEX_TASKMASTER_LOOP_ACCEPTED_RETRY_SECONDS=40 \
+"$HELPER" loop-once
+accepted_status="$("$HELPER" status -t "$accepted_target")"
+accepted_next_run="$(printf '%s\n' "$accepted_status" | awk -F': ' '$1=="next_run_epoch"{print $2}')"
+(( accepted_next_run - accepted_now_before >= 35 ))
+
+FORCE_FAILURE_STUB="${TEST_TMP}/loop-send-force-failure-stub.sh"
+cat >"$FORCE_FAILURE_STUB" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'status: failed\n'
+printf 'reason: send_unverified\n'
+printf 'detail: verification still pending\n'
+exit 1
+EOF
+chmod +x "$FORCE_FAILURE_STUB"
+
+force_target="force-loop"
+force_key="$(printf '%s' "$force_target" | shasum -a 256 | awk '{print $1}')"
+cat >"${STATE_DIR}/loops/${force_key}.loop" <<EOF
+TARGET=${force_target}
+INTERVAL=5
+MESSAGE=force-message
+FORCE_SEND=1
+THREAD_ID=force-thread
+EOF
+: > "${STATE_DIR}/runtime/loop-logs/${force_key}.log"
+force_now_before="$(date +%s)"
+CODEX_TASKMASTER_SEND_STUB="$FORCE_FAILURE_STUB" \
+CODEX_TASKMASTER_LOOP_UNVERIFIED_RETRY_SECONDS=22 \
+CODEX_TASKMASTER_LOOP_FORCE_FAILURE_RETRY_SECONDS=17 \
+"$HELPER" loop-once
+force_status="$("$HELPER" status -t "$force_target")"
+force_next_run="$(printf '%s\n' "$force_status" | awk -F': ' '$1=="next_run_epoch"{print $2}')"
+(( force_next_run - force_now_before >= 18 ))
+
 stop_output="$("$HELPER" stop -t alpha)"
 assert_contains "$stop_output" "stopped loop for target=alpha"
 stopped_status="$("$HELPER" status -t alpha)"
@@ -346,6 +461,10 @@ assert_contains "$duplicate_resume_output" "found multiple matching sessions for
 delete_loop_output="$("$HELPER" loop-delete -t alpha)"
 assert_contains "$delete_loop_output" "deleted loop for target=alpha"
 "$HELPER" loop-delete -t duplicate >/dev/null
+"$HELPER" loop-delete -t "$mutex_a" >/dev/null
+"$HELPER" loop-delete -t "$mutex_b" >/dev/null
+"$HELPER" loop-delete -t "$accepted_target" >/dev/null
+"$HELPER" loop-delete -t "$force_target" >/dev/null
 status_after_loop_delete="$("$HELPER" status)"
 assert_contains "$status_after_loop_delete" "no loops"
 

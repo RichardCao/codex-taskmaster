@@ -14,6 +14,9 @@ SEND_IDLE_TIMEOUT_SECONDS="${CODEX_TASKMASTER_SEND_IDLE_TIMEOUT_SECONDS:-20}"
 LOOP_IDLE_TIMEOUT_SECONDS="${CODEX_TASKMASTER_LOOP_IDLE_TIMEOUT_SECONDS:-12}"
 LOOP_BUSY_RETRY_SECONDS="${CODEX_TASKMASTER_LOOP_BUSY_RETRY_SECONDS:-5}"
 LOOP_FAILURE_PAUSE_THRESHOLD="${CODEX_TASKMASTER_LOOP_FAILURE_PAUSE_THRESHOLD:-5}"
+LOOP_ACCEPTED_RETRY_SECONDS="${CODEX_TASKMASTER_LOOP_ACCEPTED_RETRY_SECONDS:-30}"
+LOOP_UNVERIFIED_RETRY_SECONDS="${CODEX_TASKMASTER_LOOP_UNVERIFIED_RETRY_SECONDS:-20}"
+LOOP_FORCE_FAILURE_RETRY_SECONDS="${CODEX_TASKMASTER_LOOP_FORCE_FAILURE_RETRY_SECONDS:-15}"
 
 STATE_DIR="${CODEX_TASKMASTER_STATE_DIR:-${HOME}/.codex-terminal-sender}"
 REQUESTS_DIR="${STATE_DIR}/requests"
@@ -168,11 +171,13 @@ write_loop_definition() {
   local interval="$2"
   local message="$3"
   local force_send="${4:-0}"
+  local thread_id="${5:-}"
   write_kv_file "$LOOP_FILE" \
     TARGET "$target" \
     INTERVAL "$interval" \
     MESSAGE "$message" \
-    FORCE_SEND "$force_send"
+    FORCE_SEND "$force_send" \
+    THREAD_ID "$thread_id"
   touch "$LOOP_LOG_FILE" 2>/dev/null || true
 }
 
@@ -194,17 +199,102 @@ mark_loop_stopped_entry() {
   local force_send="${4:-0}"
   local stopped_reason="${5:-stopped_by_user}"
   local log_message="${6:-}"
+  local thread_id="${7:-}"
   local key
   local source_tag
 
   key="$(hash_target "$target")"
   paths_for_target "$key"
-  write_loop_definition "$target" "$interval" "$message" "$force_send"
+  write_loop_definition "$target" "$interval" "$message" "$force_send" "$thread_id"
   source_tag="$(loop_source_tag)"
   write_loop_status_kv "$source_tag" "" "0" "" "0" "" "1" "$stopped_reason"
   if [[ -n "$log_message" ]]; then
     append_loop_log_line "$LOOP_LOG_FILE" "$log_message"
   fi
+}
+
+find_conflicting_running_loop_target() {
+  local thread_id="$1"
+  local current_key="${2:-}"
+  local require_higher_priority="${3:-0}"
+  local loop_file
+  local key
+
+  [[ -n "$thread_id" ]] || return 1
+
+  shopt -s nullglob
+  for loop_file in "$LOOPS_DIR"/*.loop; do
+    key="$(basename "${loop_file%.loop}")"
+    [[ -n "$current_key" && "$key" == "$current_key" ]] && continue
+    paths_for_target "$key"
+    TARGET=""
+    INTERVAL=""
+    MESSAGE=""
+    FORCE_SEND="0"
+    THREAD_ID=""
+    load_kv_file "$loop_file"
+    [[ "${THREAD_ID:-}" == "$thread_id" ]] || continue
+
+    STOPPED=""
+    PAUSED=""
+    if [[ -f "$LOOP_STATUS_FILE" ]]; then
+      load_kv_file "$LOOP_STATUS_FILE"
+    fi
+    [[ "${STOPPED:-0}" == "1" ]] && continue
+    [[ "${PAUSED:-0}" == "1" ]] && continue
+    if [[ "$require_higher_priority" == "1" && -n "$current_key" && "$key" > "$current_key" ]]; then
+      continue
+    fi
+
+    printf '%s\n' "${TARGET:-$key}"
+    shopt -u nullglob
+    return 0
+  done
+  shopt -u nullglob
+  return 1
+}
+
+accepted_retry_delay_seconds() {
+  local interval="$1"
+  local accepted_reason="$2"
+  local delay="$interval"
+
+  case "$accepted_reason" in
+    queued_pending_feedback|verification_pending|request_already_inflight)
+      if (( LOOP_ACCEPTED_RETRY_SECONDS > delay )); then
+        delay="$LOOP_ACCEPTED_RETRY_SECONDS"
+      fi
+      ;;
+  esac
+
+  printf '%s\n' "$delay"
+}
+
+failure_retry_delay_seconds() {
+  local base_retry="$1"
+  local failure_reason="$2"
+  local force_send="${3:-0}"
+  local delay="$base_retry"
+
+  case "$failure_reason" in
+    send_unverified|send_unverified_after_tty_fallback|request_already_inflight)
+      if (( LOOP_UNVERIFIED_RETRY_SECONDS > delay )); then
+        delay="$LOOP_UNVERIFIED_RETRY_SECONDS"
+      fi
+      ;;
+  esac
+
+  if [[ "$force_send" == "1" ]]; then
+    case "$failure_reason" in
+      not_sendable|send_unverified|send_unverified_after_tty_fallback|request_already_inflight|busy_with_stream_issue|post_finalizing|busy_turn_open)
+        if (( LOOP_FORCE_FAILURE_RETRY_SECONDS > delay )); then
+          delay="$LOOP_FORCE_FAILURE_RETRY_SECONDS"
+        fi
+        ;;
+    esac
+  fi
+
+  printf '%s\n' "$delay"
 }
 
 has_active_loops() {
@@ -1630,12 +1720,14 @@ process_loops_once() {
     INTERVAL=""
     MESSAGE=""
     FORCE_SEND="0"
+    THREAD_ID=""
     load_kv_file "$loop_file"
 
     local target="$TARGET"
     local interval="$INTERVAL"
     local message="$MESSAGE"
     local force_send="${FORCE_SEND:-0}"
+    local thread_id="${THREAD_ID:-}"
     local key
     local source_tag
     local next_run=0
@@ -1686,6 +1778,14 @@ process_loops_once() {
       continue
     fi
 
+    local conflicting_target=""
+    conflicting_target="$(find_conflicting_running_loop_target "$thread_id" "$key" "1" 2>/dev/null || true)"
+    if [[ -n "$conflicting_target" ]]; then
+      append_loop_log_line "$LOOP_LOG_FILE" "paused: active loop conflict target=${target} conflicting_target=${conflicting_target} thread_id=${thread_id}"
+      write_loop_status_kv "$source_tag" "$now" "1" "loop_conflict_active_session" "1" "loop_conflict_active_session" "0" ""
+      continue
+    fi
+
     if [[ "$next_run" =~ ^[0-9]+$ ]] && (( now < next_run )); then
       continue
     fi
@@ -1701,10 +1801,16 @@ process_loops_once() {
     else
       send_status=$?
       if [[ "$send_status" -eq 2 ]]; then
+        local accepted_reason
+        local accepted_delay
+        accepted_reason="$(extract_probe_field "$send_output" "reason")"
+        [[ -n "$accepted_reason" ]] || accepted_reason="accepted"
+        accepted_delay="$(accepted_retry_delay_seconds "$interval" "$accepted_reason")"
         append_loop_log_line "$LOOP_LOG_FILE" "accepted: ${send_output//$'\n'/ | }"
         now="$(date +%s)"
-        write_loop_status_kv "$source_tag" "$(( now + interval ))" "0" "" "0" "" "0" ""
+        write_loop_status_kv "$source_tag" "$(( now + accepted_delay ))" "0" "" "0" "" "0" ""
       else
+        local retry_delay
         current_failure_reason="$(extract_probe_field "$send_output" "reason")"
         [[ -n "$current_failure_reason" ]] || current_failure_reason="unknown_failure"
         if [[ "$failure_reason" == "$current_failure_reason" ]]; then
@@ -1719,7 +1825,8 @@ process_loops_once() {
           append_loop_log_line "$LOOP_LOG_FILE" "paused: consecutive failure threshold reached count=${failure_count} reason=${current_failure_reason}"
           write_loop_status_kv "$source_tag" "$now" "$failure_count" "$current_failure_reason" "1" "$current_failure_reason" "0" ""
         else
-          write_loop_status_kv "$source_tag" "$(( now + LOOP_BUSY_RETRY_SECONDS ))" "$failure_count" "$current_failure_reason" "0" "" "0" ""
+          retry_delay="$(failure_retry_delay_seconds "$LOOP_BUSY_RETRY_SECONDS" "$current_failure_reason" "$force_send")"
+          write_loop_status_kv "$source_tag" "$(( now + retry_delay ))" "$failure_count" "$current_failure_reason" "0" "" "0" ""
         fi
       fi
     fi
@@ -1800,18 +1907,11 @@ start_loop() {
   local session_name
   local start_detail
   local failure_reason
+  local conflicting_target
 
   key="$(hash_target "$target")"
   paths_for_target "$key"
   write_loop_definition "$target" "$interval" "$message" "$force_send"
-
-  if ! start_detail="$(ensure_loop_daemon 2>&1)"; then
-    failure_reason="start_failed"
-    mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$failure_reason" "loop start failed target=${target} reason=${failure_reason}${start_detail:+ detail=${start_detail//$'\n'/ | }}"
-    stop_loop_daemon_if_idle
-    printf '%s\n' "${start_detail:-failed to start loop daemon}" >&2
-    return 1
-  fi
 
   if ! start_detail="$(resolve_thread_id "$target" 2>&1)"; then
     failure_reason="$(classify_loop_reason "$start_detail")"
@@ -1822,9 +1922,18 @@ start_loop() {
   fi
   thread_id="$start_detail"
 
+  conflicting_target="$(find_conflicting_running_loop_target "$thread_id" "$key" 2>/dev/null || true)"
+  if [[ -n "$conflicting_target" ]]; then
+    failure_reason="loop_conflict_active_session"
+    mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$failure_reason" "loop start blocked target=${target} reason=${failure_reason} conflicting_target=${conflicting_target} thread_id=${thread_id}" "$thread_id"
+    stop_loop_daemon_if_idle
+    printf 'another active loop already targets this session: %s\n' "$conflicting_target" >&2
+    return 1
+  fi
+
   if ! start_detail="$(load_target_metadata "$thread_id" 2>/dev/null)"; then
     failure_reason="start_failed"
-    mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$failure_reason" "loop start failed target=${target} reason=${failure_reason} detail=failed_to_load_target_metadata"
+    mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$failure_reason" "loop start failed target=${target} reason=${failure_reason} detail=failed_to_load_target_metadata" "$thread_id"
     stop_loop_daemon_if_idle
     die "failed to load target metadata for thread '${thread_id}'"
   fi
@@ -1832,12 +1941,21 @@ start_loop() {
 
   if ! start_detail="$(resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" 2>&1)"; then
     failure_reason="$(classify_loop_reason "$start_detail")"
-    mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$failure_reason" "loop start failed target=${target} reason=${failure_reason} detail=${start_detail//$'\n'/ | }"
+    mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$failure_reason" "loop start failed target=${target} reason=${failure_reason} detail=${start_detail//$'\n'/ | }" "$thread_id"
     stop_loop_daemon_if_idle
     printf '%s\n' "$start_detail" >&2
     return 1
   fi
 
+  if ! start_detail="$(ensure_loop_daemon 2>&1)"; then
+    failure_reason="start_failed"
+    mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$failure_reason" "loop start failed target=${target} reason=${failure_reason}${start_detail:+ detail=${start_detail//$'\n'/ | }}" "$thread_id"
+    stop_loop_daemon_if_idle
+    printf '%s\n' "${start_detail:-failed to start loop daemon}" >&2
+    return 1
+  fi
+
+  write_loop_definition "$target" "$interval" "$message" "$force_send" "$thread_id"
   source_tag="$(loop_source_tag)"
   write_loop_status_kv "$source_tag" "$(date +%s)" "0" "" "0" "" "0" ""
   append_loop_log_line "$LOOP_LOG_FILE" "loop started target=${target} interval=${interval}s force_send=$([[ "$force_send" == "1" ]] && echo yes || echo no) message=${message}"
@@ -1859,6 +1977,7 @@ resume_loop() {
   local thread_title
   local first_user_message
   local session_name
+  local conflicting_target
   key="$(hash_target "$target")"
   paths_for_target "$key"
   [[ -f "$LOOP_FILE" ]] || die "no loop found for target '${target}'"
@@ -1879,9 +1998,12 @@ resume_loop() {
   fi
 
   thread_id="$(resolve_thread_id "$target")"
+  conflicting_target="$(find_conflicting_running_loop_target "$thread_id" "$key" 2>/dev/null || true)"
+  [[ -z "$conflicting_target" ]] || die "another active loop already targets this session: ${conflicting_target}"
   IFS='|' read -r rollout_path thread_title first_user_message session_name <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
   resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" >/dev/null
   ensure_loop_daemon
+  write_loop_definition "$target" "${INTERVAL:-$DEFAULT_INTERVAL}" "${MESSAGE:-$DEFAULT_MESSAGE}" "${FORCE_SEND:-0}" "$thread_id"
 
   write_loop_status_kv "$source_tag" "$(date +%s)" "0" "" "0" "" "0" ""
   append_loop_log_line "$LOOP_LOG_FILE" "loop resumed target=${target}${failure_reason:+ previous_reason=${failure_reason}}"

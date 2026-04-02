@@ -29,11 +29,13 @@
 
 - 前者是 helper / loop / session 操作的主要参考实现
 - 后者虽然是 macOS UI，但里面有大量 session 解析、状态映射、结果解释逻辑
-- 最近还补了 4 个和 Linux 迁移语义相关的点：
+- 最近还补了 6 个和 Linux 迁移语义相关的点：
   - 发送结果新增“已受理待确认”中间态
   - 发送后焦点恢复
   - 避免发送链路卡住 UI 主线程
   - 发送前后恢复剪贴板，避免污染用户环境
+  - 同一真实 Session 的 loop 互斥与保守重试退避
+  - Activity Log 的失败过滤、按当前 Session 过滤、单 Session 导出
 
 ### 构建与测试参考
 
@@ -119,7 +121,7 @@ scripts/
 3. 实现 `tmux` target 解析
 4. 实现 `tmux` 单次发送
 5. 实现发送后验证和“已受理待确认”语义
-6. 接回 loop daemon
+6. 接回 loop daemon，并保留“同一 Session 同时只允许一个运行态 loop”的约束
 
 ## 交接建议
 

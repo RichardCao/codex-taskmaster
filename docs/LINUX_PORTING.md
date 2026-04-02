@@ -109,6 +109,8 @@ Linux 替代建议：
 - 发送成功 / 失败必须写日志
 - “已受理但还没验证到最终成功”必须单独记录，不能和失败混淆
 - loop 与单次发送走同一条发送主路径
+- 同一 canonical session / thread id 同一时刻只允许一个运行态 loop
+- 可以保留多个停止态 loop 配置，但不应放开多个运行态 loop
 - session 名称语义尽量贴近 `codex resume`
 - rename / archive / unarchive 优先走 Codex 原生能力
 - 平台自动化不能长期阻塞 UI 主线程；如果 Linux 以后补 GUI，这条也必须保留
@@ -229,3 +231,4 @@ Linux 替代建议：
   - 强制发送
   - 发送失败
   - 发送后验证失败
+  - 同一 Session loop 互斥导致的暂停或拒绝

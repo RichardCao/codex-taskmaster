@@ -70,6 +70,7 @@ detail
 
 - `status` 不应只允许 `success` / `failed`
 - 还应允许表示“平台已接手，但暂时还没验证到最终成功”的中间态，例如 `accepted`
+- 平台层只返回发送与验证结果，不负责决定 loop 的并发占用策略
 
 ## 平台必须实现的能力
 
@@ -195,6 +196,9 @@ verify_delivery(target, previous_timestamp, timeout_seconds) -> SendResult
 - next run 计算
 - loop daemon 调度
 - loop 日志写入
+- 同一 canonical session / thread id 只允许一个运行态 loop
+- 可以保留多个停止态 loop 历史配置
+- 对 `accepted`、`send_unverified` 等中间态或忙碌失败，需要支持更保守的重试退避
 
 ## Linux `tmux` 适配器建议
 
@@ -225,6 +229,7 @@ platform/linux/tmux_adapter.*
 - `verification_pending`
 - `queued_pending_feedback`
 - `probe_failed`
+- `loop_conflict_active_session`
 
 如果是平台私有原因，也要附带：
 

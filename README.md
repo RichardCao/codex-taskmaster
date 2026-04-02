@@ -13,13 +13,15 @@
 - 原生 AppKit 单窗口界面
 - `Session Status` 状态扫描与排序
 - `Active Loops` 循环任务列表与日志
+- 选中 session 后查看完整信息、最近发送统计、最近发送结果、相关 Loop、提示词历史
 - 单次发送与循环发送
 - 可选 `强制发送` 模式
-- 选中 session 后查看提示词历史
+- `Activity Log` 支持关键词筛选、仅失败过滤、按当前 Session 过滤、导出当前 Session 日志
 - session 改名
 - session 归档与恢复
 - 带风险提示的本地彻底删除
 - 按 session 状态决定是否允许发送
+- 同一真实 Session 同一时刻只允许一个运行态 loop，避免重复轰炸
 
 ## 运行要求
 
@@ -179,6 +181,14 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 - terminal 状态
 - 具体细节
 
+## Loop 语义
+
+- 停止或开始失败的 loop 会保留在 `Active Loops` 里，便于后续恢复或删除
+- 同一真实 Session 可以保留多个停止态历史配置
+- 但同一时刻只允许一个运行态 loop 指向同一 canonical session / thread id
+- 如果检测到同一 Session 已有其他运行中的 loop，新 loop 会被阻止或暂停，并记录 `loop_conflict_active_session`
+- 对 `accepted`、`send_unverified`、force 模式下的典型忙碌失败，loop 会使用更保守的重试延迟，避免高频重复发送
+
 ## Session 操作语义
 
 改名、归档和恢复归档优先走 Codex 原生 app-server API：
@@ -210,6 +220,14 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 - 发送后验证失败
 - session 操作结果
 
+界面中的 `Activity Log` 还支持：
+
+- 按 target / session / 关键词筛选
+- 只看失败
+- 只看当前选中 Session 的相关日志
+- 保存当前筛选后的日志视图
+- 单独导出当前 Session 的相关日志
+
 每个循环任务的日志保存在：
 
 ```text
@@ -222,6 +240,7 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 - 循环停止
 - 实际发送结果
 - 因忙碌或未就绪而延期的结果
+- 因同一 Session 已存在其他运行态 loop 而触发的互斥暂停
 
 ## 仓库结构
 

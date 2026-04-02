@@ -577,6 +577,25 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let isArchived: Bool
     }
 
+    private struct SendResultSnapshot {
+        let target: String
+        let status: String
+        let reason: String
+        let forceSend: Bool
+        let detail: String
+        let probeStatus: String
+        let terminalState: String
+        let updatedAtEpoch: TimeInterval
+    }
+
+    private struct ActivityLogEntry {
+        let timestamp: Date
+        let sourceText: String
+        let renderedText: String
+        let normalizedText: String
+        let isFailure: Bool
+    }
+
     private struct LiveTTYResolution {
         let tty: String?
         let detail: String
@@ -632,12 +651,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let statusLabel = NSTextField(labelWithString: "Ready")
     private let activeLoopsMetaLabel = NSTextField(labelWithString: "No active loops.")
     private let sessionStatusMetaLabel = NSTextField(labelWithString: "点击“检测状态”加载 session 列表。")
+    private let activityLogMetaLabel = NSTextField(labelWithString: "显示 0 / 0")
     private var refreshTimer: Timer?
     private var requestTimer: Timer?
     private var isProcessingSendRequest = false
     private var loopSnapshots: [LoopSnapshot] = []
     private var sessionSnapshots: [SessionSnapshot] = []
     private var allSessionSnapshots: [SessionSnapshot] = []
+    private var activityLogEntries: [ActivityLogEntry] = []
     private var loopWarnings: [String] = []
     private var preferredLoopSelectionTarget: String?
     private var targetHistory: [String] = []
@@ -707,6 +728,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var lastAmbiguityAlertAtBySignature: [String: Date] = [:]
     private var lastTargetValidationFailureReason: String?
     private var lastTargetValidationFailureDetail = ""
+    private var isFilteringActivityLogBySelectedSession = false
 
     private lazy var sendButton = makeButton(title: "发送一次", action: #selector(sendOnce))
     private lazy var startButton = makeButton(title: "开始循环", action: #selector(startLoop))
@@ -722,6 +744,27 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private lazy var deleteSessionButton = makeButton(title: "删除", action: #selector(deleteSelectedSession))
     private lazy var clearLogButton = makeButton(title: "清空日志", action: #selector(clearActivityLog))
     private lazy var saveLogButton = makeButton(title: "保存日志", action: #selector(saveActivityLog))
+    private lazy var exportSessionLogButton = makeButton(title: "导出当前 Session", action: #selector(exportSelectedSessionLogs))
+    private let activityLogSearchField: NSSearchField = {
+        let field = NSSearchField()
+        field.placeholderString = "筛选 target / session / 关键词"
+        field.sendsWholeSearchString = false
+        field.sendsSearchStringImmediately = true
+        field.recentsAutosaveName = nil
+        field.maximumRecents = 0
+        field.searchMenuTemplate = nil
+        return field
+    }()
+    private let activityLogFailuresOnlyCheckbox: NSButton = {
+        let checkbox = NSButton(checkboxWithTitle: "仅失败", target: nil, action: nil)
+        checkbox.toolTip = "只显示发送失败或 stderr 相关日志。"
+        return checkbox
+    }()
+    private let activityLogSelectedSessionCheckbox: NSButton = {
+        let checkbox = NSButton(checkboxWithTitle: "当前 Session", target: nil, action: nil)
+        checkbox.toolTip = "只显示当前选中 Session 相关日志。"
+        return checkbox
+    }()
     private let terminalAutomationQueue = DispatchQueue(label: "ai.codextaskmaster.terminal-automation")
 
     override func loadView() {
@@ -862,7 +905,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         configureTextView(sessionDetailView, inset: NSSize(width: 10, height: 8))
         sessionDetailView.font = .systemFont(ofSize: 12)
-        sessionDetailView.string = "选中一条 session 后，这里会显示完整信息和提示词历史。"
+        sessionDetailView.string = "选中一条 session 后，这里会显示完整信息、最近发送结果、相关 Loop 和提示词历史。"
 
         sessionScopeControl.target = self
         sessionScopeControl.action = #selector(changeSessionScope)
@@ -875,6 +918,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionPromptSearchCheckbox.target = self
         sessionPromptSearchCheckbox.action = #selector(toggleSessionPromptSearch)
         sessionPromptSearchCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        activityLogSearchField.delegate = self
+        activityLogSearchField.translatesAutoresizingMaskIntoConstraints = false
+        activityLogFailuresOnlyCheckbox.target = self
+        activityLogFailuresOnlyCheckbox.action = #selector(toggleActivityLogFailuresOnly)
+        activityLogFailuresOnlyCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        activityLogSelectedSessionCheckbox.target = self
+        activityLogSelectedSessionCheckbox.action = #selector(toggleActivityLogSelectedSessionFilter)
+        activityLogSelectedSessionCheckbox.translatesAutoresizingMaskIntoConstraints = false
 
         renameField.placeholderString = "输入新名称，留空可恢复为未 rename 状态"
         renameField.translatesAutoresizingMaskIntoConstraints = false
@@ -975,15 +1026,27 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let sessionStatusMinHeight = CGFloat(110 + 92) + sessionStatusSplitView.dividerThickness
         sessionStatusSplitView.heightAnchor.constraint(greaterThanOrEqualToConstant: sessionStatusMinHeight).isActive = true
         let sessionStatusPanel = makePanel(title: "Session Status", metaLabel: sessionStatusMetaLabel, contentView: sessionStatusSplitView)
-        let logHeaderActions = NSStackView(views: [clearLogButton, saveLogButton])
-        logHeaderActions.orientation = .horizontal
-        logHeaderActions.spacing = 6
-        logHeaderActions.alignment = .centerY
+        let logFilterControls = NSStackView(views: [activityLogSearchField, activityLogFailuresOnlyCheckbox, activityLogSelectedSessionCheckbox, exportSessionLogButton, clearLogButton, saveLogButton])
+        logFilterControls.orientation = .horizontal
+        logFilterControls.spacing = 6
+        logFilterControls.alignment = .centerY
+        logFilterControls.distribution = .fill
+        activityLogSearchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
+        activityLogSearchField.widthAnchor.constraint(lessThanOrEqualToConstant: 260).isActive = true
+        activityLogSearchField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        activityLogSearchField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        activityLogFailuresOnlyCheckbox.setContentHuggingPriority(.required, for: .horizontal)
+        activityLogFailuresOnlyCheckbox.setContentCompressionResistancePriority(.required, for: .horizontal)
+        activityLogSelectedSessionCheckbox.setContentHuggingPriority(.required, for: .horizontal)
+        activityLogSelectedSessionCheckbox.setContentCompressionResistancePriority(.required, for: .horizontal)
+        exportSessionLogButton.setContentHuggingPriority(.required, for: .horizontal)
+        exportSessionLogButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         clearLogButton.setContentHuggingPriority(.required, for: .horizontal)
         saveLogButton.setContentHuggingPriority(.required, for: .horizontal)
+        exportSessionLogButton.toolTip = "导出当前选中 Session 相关日志"
         clearLogButton.toolTip = "清空当前日志显示"
         saveLogButton.toolTip = "保存当前日志到文件"
-        let logPanel = makePanel(title: "Activity Log", metaLabel: nil, contentView: outputScrollView, headerAccessoryView: logHeaderActions)
+        let logPanel = makePanel(title: "Activity Log", metaLabel: activityLogMetaLabel, contentView: outputScrollView, headerAccessoryView: logFilterControls)
         let activeLoopsPane = makeSplitPane(contentView: activeLoopsPanel, minWidth: 260, minHeight: 100)
         let sessionStatusPane = makeSplitPane(contentView: sessionStatusPanel, minWidth: 220, minHeight: 100)
         let topContentPane = makeSplitPane(contentView: topSplitView, minHeight: LayoutMetrics.topPaneMinHeight)
@@ -1025,6 +1088,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             contentSplitView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
             contentSplitView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -LayoutMetrics.contentBottomMargin)
         ])
+
+        updateActivityLogMetaLabel()
+        updateActivityLogControls()
     }
 
     private func configureTextView(_ textView: NSTextView, inset: NSSize) {
@@ -1274,7 +1340,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             "invalid_request": "请求内容无效",
             "missing_accessibility_permission": "缺少辅助功能权限",
             "stopped_by_user": "已手动停止",
-            "start_failed": "启动失败"
+            "start_failed": "启动失败",
+            "loop_conflict_active_session": "同一 Session 已有其他运行中的 Loop"
         ]
 
         return mappings[trimmed] ?? trimmed
@@ -1867,6 +1934,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return loopSnapshots[selectedRow]
     }
 
+    private func selectedSessionSnapshot() -> SessionSnapshot? {
+        let selectedRow = sessionStatusTableView.selectedRow
+        guard selectedRow >= 0, selectedRow < sessionSnapshots.count else { return nil }
+        return sessionSnapshots[selectedRow]
+    }
+
     private func updateLoopActionButtons() {
         guard let loop = selectedLoopSnapshot() else {
             stopButton.isEnabled = false
@@ -1901,9 +1974,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func selectedSessionThreadID() -> String? {
-        let selectedRow = sessionStatusTableView.selectedRow
-        guard selectedRow >= 0, selectedRow < sessionSnapshots.count else { return nil }
-        return sessionSnapshots[selectedRow].threadID
+        selectedSessionSnapshot()?.threadID
     }
 
     private func restoreSessionSelection(preferredThreadID: String?) {
@@ -2164,6 +2235,166 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return lines.joined(separator: "\n")
     }
 
+    private func localizedSendStatusLabel(_ status: String) -> String {
+        switch status {
+        case "success":
+            return "成功"
+        case "accepted":
+            return "已受理"
+        case "failed":
+            return "失败"
+        default:
+            return status.isEmpty ? "-" : status
+        }
+    }
+
+    private func matchingLoopSnapshots(for session: SessionSnapshot) -> [LoopSnapshot] {
+        let candidates = Set(sessionPossibleTargets(session))
+        guard !candidates.isEmpty else { return [] }
+        return loopSnapshots.filter { candidates.contains($0.target.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
+    private func recentSendResults(for session: SessionSnapshot, maxItems: Int = 6, scanLimit: Int = 180) -> [SendResultSnapshot] {
+        let candidates = Set(sessionPossibleTargets(session))
+        guard !candidates.isEmpty else { return [] }
+
+        let directoryURL = URL(fileURLWithPath: resultRequestDirectoryPath, isDirectory: true)
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        let sortedFiles = files
+            .filter { $0.pathExtension == "json" }
+            .sorted {
+                let lhsDate = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let rhsDate = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return lhsDate > rhsDate
+            }
+
+        var results: [SendResultSnapshot] = []
+        for fileURL in sortedFiles.prefix(scanLimit) {
+            guard let data = try? Data(contentsOf: fileURL),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                continue
+            }
+
+            let target = (object["target"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard candidates.contains(target) else { continue }
+
+            let updatedAtEpoch = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)?
+                .timeIntervalSince1970 ?? 0
+            results.append(
+                SendResultSnapshot(
+                    target: target,
+                    status: object["status"] as? String ?? "",
+                    reason: object["reason"] as? String ?? "",
+                    forceSend: object["force_send"] as? Bool ?? false,
+                    detail: object["detail"] as? String ?? "",
+                    probeStatus: object["probe_status"] as? String ?? "",
+                    terminalState: object["terminal_state"] as? String ?? "",
+                    updatedAtEpoch: updatedAtEpoch
+                )
+            )
+
+            if results.count >= maxItems {
+                break
+            }
+        }
+
+        return results
+    }
+
+    private func recentSendStatsText(for results: [SendResultSnapshot]) -> String {
+        guard !results.isEmpty else {
+            return "最近发送统计\n暂无匹配该 session 的发送结果。"
+        }
+
+        let successCount = results.filter { $0.status == "success" }.count
+        let acceptedCount = results.filter { $0.status == "accepted" }.count
+        let failedResults = results.filter { $0.status == "failed" }
+        let failedCount = failedResults.count
+
+        var reasonCounts: [String: Int] = [:]
+        for result in failedResults {
+            let key = localizedSendReason(result.reason)
+            reasonCounts[key, default: 0] += 1
+        }
+
+        let topReasons = reasonCounts
+            .sorted { lhs, rhs in
+                if lhs.value == rhs.value {
+                    return lhs.key.localizedStandardCompare(rhs.key) == .orderedAscending
+                }
+                return lhs.value > rhs.value
+            }
+            .prefix(3)
+            .map { "\($0.key) (\($0.value))" }
+            .joined(separator: "，")
+
+        let latest = results[0]
+        var lines = [
+            "最近发送统计",
+            "共 \(results.count) 次 | 成功 \(successCount) | 已受理 \(acceptedCount) | 失败 \(failedCount)",
+            "最近一次: \(localizedSendStatusLabel(latest.status)) | \(localizedSendReason(latest.reason)) | \(formatEpoch(String(Int(latest.updatedAtEpoch))))"
+        ]
+        if !topReasons.isEmpty {
+            lines.append("失败原因: \(topReasons)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func recentSendResultsText(for results: [SendResultSnapshot]) -> String {
+        guard !results.isEmpty else {
+            return "最近发送结果\n暂无匹配该 session 的发送记录。"
+        }
+
+        return results.enumerated().map { index, result in
+            var lines = [
+                "结果 \(index + 1)",
+                "时间: \(formatEpoch(String(Int(result.updatedAtEpoch))))",
+                "Target: \(result.target)",
+                "状态: \(localizedSendStatusLabel(result.status))",
+                "原因: \(localizedSendReason(result.reason))",
+                "模式: \(result.forceSend ? "force" : "idle")"
+            ]
+            if !result.probeStatus.isEmpty {
+                lines.append("Probe: \(result.probeStatus)")
+            }
+            if !result.terminalState.isEmpty {
+                lines.append("Terminal: \(localizedTerminalState(result.terminalState))")
+            }
+            if !result.detail.isEmpty {
+                lines.append("Detail: \(result.detail)")
+            }
+            return lines.joined(separator: "\n")
+        }.joined(separator: "\n\n")
+    }
+
+    private func loopOccupancyText(for session: SessionSnapshot) -> String {
+        let loops = matchingLoopSnapshots(for: session)
+        guard !loops.isEmpty else {
+            return "相关 Loop\n无"
+        }
+
+        return (["相关 Loop"] + loops.map { loop in
+            let nextRun = loop.stopped == "yes" ? "-" : formatEpoch(loop.nextRunEpoch)
+            let reason = loopResultReasonLabel(loop)
+            var lines = [
+                "Target: \(loop.target)",
+                "状态: \(loopStateLabel(loop)) | 结果: \(loopResultLabel(loop))",
+                "间隔: \(loop.intervalSeconds)s | 模式: \(loop.forceSend == "yes" ? "force" : "idle") | 下次: \(nextRun)"
+            ]
+            if !reason.isEmpty {
+                lines.append("原因: \(reason)")
+            }
+            return lines.joined(separator: "\n")
+        }).joined(separator: "\n\n")
+    }
+
     private func recentUserMessageEntries(for session: SessionSnapshot, limit: Int? = nil) -> [(timestamp: String, message: String)]? {
         guard !session.rolloutPath.isEmpty else {
             return nil
@@ -2285,8 +2516,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             archiveSessionButton.isEnabled = false
             restoreSessionButton.isEnabled = false
             deleteSessionButton.isEnabled = false
-            sessionDetailView.string = "选中一条 session 后，这里会显示完整信息和提示词历史。"
+            sessionDetailView.string = "选中一条 session 后，这里会显示完整信息、最近发送结果、相关 Loop 和提示词历史。"
             sessionDetailView.scrollToBeginningOfDocument(nil)
+            updateActivityLogControls()
+            if isFilteringActivityLogBySelectedSession {
+                refreshActivityLogView(scrollToEnd: false)
+            }
             return
         }
 
@@ -2300,8 +2535,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         renameField.placeholderString = session.isArchived
             ? "已归档 session 需先恢复后再改名"
             : "输入新名称，留空可恢复为未 rename 状态"
-        sessionDetailView.string = "\(sessionDetailText(for: session))\n\n提示词历史加载中…"
+        let sendResults = recentSendResults(for: session)
+        let initialDetailText = [
+            sessionDetailText(for: session),
+            recentSendStatsText(for: sendResults),
+            loopOccupancyText(for: session),
+            "最近发送结果\n加载中…",
+            "提示词历史\n加载中…"
+        ].joined(separator: "\n\n")
+        sessionDetailView.string = initialDetailText
         sessionDetailView.scrollToBeginningOfDocument(nil)
+        updateActivityLogControls()
+        if isFilteringActivityLogBySelectedSession {
+            refreshActivityLogView(scrollToEnd: false)
+        }
 
         sessionDetailLoadGeneration += 1
         let generation = sessionDetailLoadGeneration
@@ -2309,7 +2556,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         DispatchQueue.global(qos: .utility).async {
             let historyText = self.loadPromptHistoryText(for: session)
-            let detailText = "\(self.sessionDetailText(for: session))\n\n提示词历史\n\(historyText)"
+            let sendResults = self.recentSendResults(for: session)
+            let detailText = [
+                self.sessionDetailText(for: session),
+                self.recentSendStatsText(for: sendResults),
+                self.loopOccupancyText(for: session),
+                self.recentSendResultsText(for: sendResults),
+                "提示词历史\n\(historyText)"
+            ].joined(separator: "\n\n")
 
             DispatchQueue.main.async {
                 guard self.sessionDetailLoadGeneration == generation else { return }
@@ -3267,6 +3521,137 @@ conn.close()
         forceSendCheckbox.state == .on
     }
 
+    private func currentActivityLogQuery() -> String {
+        activityLogSearchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func isActivityLogFailuresOnlyEnabled() -> Bool {
+        activityLogFailuresOnlyCheckbox.state == .on
+    }
+
+    private func displayedActivityLogEntries() -> [ActivityLogEntry] {
+        let normalizedQuery = currentActivityLogQuery().localizedLowercase
+        let selectedSession = isFilteringActivityLogBySelectedSession ? selectedSessionSnapshot() : nil
+
+        return activityLogEntries.filter { entry in
+            if isActivityLogFailuresOnlyEnabled(), !entry.isFailure {
+                return false
+            }
+            if !normalizedQuery.isEmpty, !entry.normalizedText.contains(normalizedQuery) {
+                return false
+            }
+            if let selectedSession, !activityLogEntry(entry, matches: selectedSession) {
+                return false
+            }
+            return true
+        }
+    }
+
+    private func activityLogEntry(_ entry: ActivityLogEntry, matches session: SessionSnapshot) -> Bool {
+        var candidates = sessionPossibleTargets(session)
+        candidates.append(session.threadID)
+        let tty = session.tty.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tty.isEmpty {
+            candidates.append(tty)
+            candidates.append("/dev/\(tty)")
+        }
+
+        let normalizedText = entry.normalizedText
+        for rawCandidate in candidates {
+            let candidate = rawCandidate.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+            guard !candidate.isEmpty else { continue }
+
+            let anchoredPatterns = [
+                "target: \(candidate)",
+                "target=\(candidate)",
+                "thread_id: \(candidate)",
+                "thread_id=\(candidate)",
+                "session id: \(candidate)",
+                "session id=\(candidate)",
+                "tty: \(candidate)",
+                "tty=\(candidate)",
+                "/dev/\(candidate)",
+                " -t \(candidate)",
+                "'\(candidate)'"
+            ]
+            if anchoredPatterns.contains(where: { normalizedText.contains($0) }) {
+                return true
+            }
+
+            if candidate.count >= 12 || candidate.contains("-") || candidate.contains("/") {
+                if normalizedText.contains(candidate) {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
+    private func renderedActivityLogText(for entries: [ActivityLogEntry]) -> String {
+        entries.map(\.renderedText).joined()
+    }
+
+    private func updateActivityLogMetaLabel(displayedCount: Int? = nil) {
+        let shown = displayedCount ?? displayedActivityLogEntries().count
+        let total = activityLogEntries.count
+        guard total > 0 else {
+            var emptyText = "显示 0 / 0"
+            if isFilteringActivityLogBySelectedSession {
+                emptyText += " | 当前 Session"
+            }
+            activityLogMetaLabel.stringValue = emptyText
+            return
+        }
+
+        var parts = ["显示 \(shown) / \(total)"]
+        if isActivityLogFailuresOnlyEnabled() {
+            parts.append("仅失败")
+        }
+        if isFilteringActivityLogBySelectedSession {
+            if let session = selectedSessionSnapshot() {
+                let title = sessionActualName(session)
+                parts.append("当前 Session: \(title.isEmpty ? session.threadID : title)")
+            } else {
+                parts.append("当前 Session: 未选择")
+            }
+        }
+        let query = currentActivityLogQuery()
+        if !query.isEmpty {
+            parts.append("筛选: \(query)")
+        }
+        activityLogMetaLabel.stringValue = parts.joined(separator: " | ")
+    }
+
+    private func refreshActivityLogView(scrollToEnd: Bool) {
+        let entries = displayedActivityLogEntries()
+        outputView.string = renderedActivityLogText(for: entries)
+        outputView.needsDisplay = true
+        if scrollToEnd {
+            outputView.scrollToEndOfDocument(nil)
+        } else {
+            outputView.scrollToBeginningOfDocument(nil)
+        }
+        updateActivityLogMetaLabel(displayedCount: entries.count)
+        updateActivityLogControls()
+    }
+
+    private func updateActivityLogControls() {
+        let hasSelection = selectedSessionSnapshot() != nil
+        exportSessionLogButton.isEnabled = hasSelection
+        activityLogSelectedSessionCheckbox.state = isFilteringActivityLogBySelectedSession ? .on : .off
+        activityLogSelectedSessionCheckbox.isEnabled = hasSelection || isFilteringActivityLogBySelectedSession
+    }
+
+    private func defaultSessionLogFilename(for session: SessionSnapshot) -> String {
+        let preferred = sessionActualName(session).isEmpty ? session.threadID : sessionActualName(session)
+        let sanitized = preferred
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+        return "codex_taskmaster_session_log_\(sanitized)_\(Self.logFilenameFormatter.string(from: Date())).log"
+    }
+
     private func setButtonsEnabled(_ enabled: Bool) {
         [sendButton, startButton, refreshLoopsButton, stopAllButton].forEach { $0.isEnabled = enabled }
         detectStatusButton.isEnabled = enabled || isSessionScanRunning
@@ -3285,21 +3670,34 @@ conn.close()
     }
 
     private func appendOutput(_ text: String) {
-        let prefix = Self.timestampFormatter.string(from: Date())
+        let timestamp = Date()
+        let prefix = Self.timestampFormatter.string(from: timestamp)
         let normalized = text
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map { $0.isEmpty ? "" : "  \($0)" }
             .joined(separator: "\n")
         let line = "[\(prefix)]\n\(normalized)\n\n"
-        outputView.string.append(line)
-        outputView.needsDisplay = true
-        outputView.scrollToEndOfDocument(nil)
+        let normalizedText = text.localizedLowercase
+        let isFailure = normalizedText.contains("status=failed")
+            || normalizedText.contains("stderr:")
+            || normalizedText.contains("发送请求失败")
+            || normalizedText.contains("失败")
+        activityLogEntries.append(
+            ActivityLogEntry(
+                timestamp: timestamp,
+                sourceText: text,
+                renderedText: line,
+                normalizedText: normalizedText,
+                isFailure: isFailure
+            )
+        )
+        refreshActivityLogView(scrollToEnd: true)
     }
 
     @objc
     private func clearActivityLog() {
-        outputView.string = ""
-        outputView.needsDisplay = true
+        activityLogEntries.removeAll()
+        refreshActivityLogView(scrollToEnd: false)
         setStatus("日志已清空", key: "general")
     }
 
@@ -3313,7 +3711,7 @@ conn.close()
 
         if panel.runModal() == .OK, let url = panel.url {
             do {
-                try outputView.string.write(to: url, atomically: true, encoding: .utf8)
+                try renderedActivityLogText(for: displayedActivityLogEntries()).write(to: url, atomically: true, encoding: .utf8)
                 setStatus("日志已保存到 \(url.lastPathComponent)", key: "general")
             } catch {
                 NSSound.beep()
@@ -3321,6 +3719,62 @@ conn.close()
                 setStatus("保存日志失败", key: "general")
             }
         }
+    }
+
+    @objc
+    private func exportSelectedSessionLogs() {
+        guard let session = selectedSessionSnapshot() else {
+            appendOutput("请先选择一条 Session，再导出相关日志。")
+            setStatus("请选择一个 Session", key: "general")
+            NSSound.beep()
+            return
+        }
+
+        let matchingEntries = activityLogEntries.filter { activityLogEntry($0, matches: session) }
+        guard !matchingEntries.isEmpty else {
+            appendOutput("当前选中的 Session 暂无匹配日志可导出。")
+            setStatus("当前 Session 暂无日志", key: "general")
+            NSSound.beep()
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = defaultSessionLogFilename(for: session)
+
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try renderedActivityLogText(for: matchingEntries).write(to: url, atomically: true, encoding: .utf8)
+                setStatus("已导出当前 Session 日志", key: "general")
+            } catch {
+                NSSound.beep()
+                appendOutput("stderr: 导出当前 Session 日志失败: \(error.localizedDescription)")
+                setStatus("导出 Session 日志失败", key: "general")
+            }
+        }
+    }
+
+    @objc
+    private func toggleActivityLogFailuresOnly() {
+        refreshActivityLogView(scrollToEnd: false)
+    }
+
+    @objc
+    private func toggleActivityLogSelectedSessionFilter() {
+        if activityLogSelectedSessionCheckbox.state == .on {
+            guard selectedSessionSnapshot() != nil else {
+                activityLogSelectedSessionCheckbox.state = .off
+                setStatus("请先选择一个 Session，再启用当前 Session 日志过滤", key: "general")
+                NSSound.beep()
+                return
+            }
+            isFilteringActivityLogBySelectedSession = true
+        } else {
+            isFilteringActivityLogBySelectedSession = false
+        }
+        refreshActivityLogView(scrollToEnd: false)
     }
 
     private func setStatus(_ text: String, key: String = "general") {
@@ -4937,6 +5391,9 @@ conn.close()
                 self.restoreLoopSelection(preferredTarget: selectedTarget)
                 self.refreshTableWrapping(self.activeLoopsTableView)
                 self.updateLoopActionButtons()
+                if self.sessionStatusTableView.selectedRow >= 0 {
+                    self.updateSessionDetailView()
+                }
             }
         }
     }
@@ -5779,6 +6236,10 @@ conn.close()
         guard let field = obj.object as? NSTextField else { return }
         if field == sessionSearchField {
             scheduleSessionSearchRefresh()
+            return
+        }
+        if field == activityLogSearchField {
+            refreshActivityLogView(scrollToEnd: false)
         }
     }
 
