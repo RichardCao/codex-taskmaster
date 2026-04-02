@@ -648,6 +648,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var sessionScanShouldStop = false
     private var statusSegments: [String: String] = [:]
     private var statusSegmentColors: [String: NSColor] = [:]
+    private var statusSegmentClearWorkItems: [String: DispatchWorkItem] = [:]
     private let defaultLoopSortKey = "nextRun"
     private let defaultSessionSortKey = "updatedAt"
     private var lastValidIntervalValue = "600"
@@ -3328,14 +3329,132 @@ conn.close()
 
     private func setStatus(_ text: String, key: String, color: NSColor?) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        statusSegmentClearWorkItems[key]?.cancel()
+        statusSegmentClearWorkItems.removeValue(forKey: key)
+
         if trimmed.isEmpty {
             statusSegments.removeValue(forKey: key)
             statusSegmentColors.removeValue(forKey: key)
         } else {
             statusSegments[key] = trimmed
-            statusSegmentColors[key] = color ?? .secondaryLabelColor
+            statusSegmentColors[key] = resolvedStatusColor(text: trimmed, key: key, explicitColor: color)
+            if let delay = statusAutoClearDelay(for: trimmed, key: key) {
+                scheduleStatusAutoClear(key: key, expectedText: trimmed, delay: delay)
+            }
         }
 
+        refreshVisibleStatusLabel()
+    }
+
+    private func resolvedStatusColor(text: String, key: String, explicitColor: NSColor?) -> NSColor {
+        if let explicitColor {
+            return explicitColor
+        }
+
+        if isStatusProgress(text) {
+            return .systemBlue
+        }
+        if isStatusFailure(text) {
+            return .systemRed
+        }
+        if isStatusWarning(text) {
+            return .systemOrange
+        }
+        if isStatusSuccess(text) {
+            return .systemGreen
+        }
+        return key == "general" ? .secondaryLabelColor : .tertiaryLabelColor
+    }
+
+    private func statusAutoClearDelay(for text: String, key: String) -> TimeInterval? {
+        if isStatusProgress(text) {
+            return nil
+        }
+
+        switch key {
+        case "send":
+            if isStatusFailure(text) {
+                return 12
+            }
+            if text.contains("待确认") || text.contains("已受理") || text.contains("已排队") {
+                return 9
+            }
+            if isStatusSuccess(text) {
+                return 5
+            }
+            return 7
+        case "action":
+            if isStatusFailure(text) {
+                return 10
+            }
+            if isStatusWarning(text) {
+                return 7
+            }
+            if isStatusSuccess(text) {
+                return 4
+            }
+            return 6
+        case "scan":
+            if isStatusFailure(text) {
+                return 10
+            }
+            if isStatusSuccess(text) {
+                return 4
+            }
+            return 6
+        case "general":
+            if isStatusFailure(text) {
+                return 10
+            }
+            if isStatusWarning(text) {
+                return 8
+            }
+            return 4
+        default:
+            if isStatusFailure(text) {
+                return 10
+            }
+            if isStatusSuccess(text) {
+                return 4
+            }
+            return 6
+        }
+    }
+
+    private func scheduleStatusAutoClear(key: String, expectedText: String, delay: TimeInterval) {
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard self.statusSegments[key] == expectedText else { return }
+            self.statusSegments.removeValue(forKey: key)
+            self.statusSegmentColors.removeValue(forKey: key)
+            self.statusSegmentClearWorkItems.removeValue(forKey: key)
+            self.refreshVisibleStatusLabel()
+        }
+        statusSegmentClearWorkItems[key] = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    private func isStatusProgress(_ text: String) -> Bool {
+        text.contains("执行中") || text.contains("保存名称中") || text.contains("归档 Session 中") ||
+        text.contains("恢复归档中") || text.contains("彻底删除中") || text.contains("读取已归档 session 中")
+    }
+
+    private func isStatusFailure(_ text: String) -> Bool {
+        text.contains("失败") || text.contains("缺少辅助功能权限") || text.contains("目标不唯一")
+    }
+
+    private func isStatusWarning(_ text: String) -> Bool {
+        text.contains("已受理") || text.contains("待确认") || text.contains("已排队") ||
+        text.contains("已取消") || text.contains("请选择") || text.contains("无效")
+    }
+
+    private func isStatusSuccess(_ text: String) -> Bool {
+        text.contains("完成") || text.contains("已加载") || text.contains("已保存") ||
+        text.contains("已清空") || text.contains("已填入") || text.contains("Ready") ||
+        text.contains("已停止")
+    }
+
+    private func refreshVisibleStatusLabel() {
         let orderedKeys = ["send", "action", "scan", "general"]
         if let winningKey = orderedKeys.first(where: { statusSegments[$0]?.isEmpty == false }),
            let winningText = statusSegments[winningKey] {
