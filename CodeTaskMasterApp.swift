@@ -305,11 +305,74 @@ final class HistoryDropdownListView: NSView {
     override var isFlipped: Bool { true }
 }
 
+private struct PasteboardSnapshot {
+    let items: [[NSPasteboard.PasteboardType: Data]]
+    let changeCount: Int
+}
+
+final class AppFocusTracker {
+    static let shared = AppFocusTracker()
+
+    private let currentProcessID = ProcessInfo.processInfo.processIdentifier
+    private var activationObserver: Any?
+    private let stateLock = NSLock()
+    private var lastNonTaskMasterBundleID = ""
+
+    private init() {}
+
+    deinit {
+        if let activationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
+        }
+    }
+
+    func start() {
+        guard activationObserver == nil else { return }
+
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleActivation(notification)
+        }
+
+        if let app = NSWorkspace.shared.frontmostApplication {
+            updateTrackedAppIfNeeded(app)
+        }
+    }
+
+    func preferredReturnBundleID(fallback: String) -> String {
+        stateLock.lock()
+        let tracked = lastNonTaskMasterBundleID
+        stateLock.unlock()
+        return tracked.isEmpty ? fallback : tracked
+    }
+
+    private func handleActivation(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+            return
+        }
+        updateTrackedAppIfNeeded(app)
+    }
+
+    private func updateTrackedAppIfNeeded(_ app: NSRunningApplication) {
+        guard app.processIdentifier != currentProcessID else { return }
+        guard let bundleID = app.bundleIdentifier, !bundleID.isEmpty else { return }
+        guard bundleID != "com.apple.Terminal" else { return }
+
+        stateLock.lock()
+        lastNonTaskMasterBundleID = bundleID
+        stateLock.unlock()
+    }
+}
+
 final class CodeTaskMasterApp: NSObject, NSApplicationDelegate {
     private var windowController: MainWindowController?
     private var didRunTerminationCleanup = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppFocusTracker.shared.start()
         NSApp.setActivationPolicy(.regular)
         NSApp.mainMenu = buildMainMenu()
         let controller = MainWindowController()
@@ -597,6 +660,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private lazy var deleteSessionButton = makeButton(title: "删除", action: #selector(deleteSelectedSession))
     private lazy var clearLogButton = makeButton(title: "清空日志", action: #selector(clearActivityLog))
     private lazy var saveLogButton = makeButton(title: "保存日志", action: #selector(saveActivityLog))
+    private let terminalAutomationQueue = DispatchQueue(label: "ai.codextaskmaster.terminal-automation")
 
     override func loadView() {
         self.view = NSView()
@@ -3227,7 +3291,7 @@ conn.close()
         let ttyPath = tty.hasPrefix("/dev/") ? tty : "/dev/\(tty)"
 
         do {
-            try DispatchQueue.main.sync {
+            try terminalAutomationQueue.sync {
                 try self.sendViaAppKeystrokes(
                     ttyPath: ttyPath,
                     message: message,
@@ -3251,7 +3315,7 @@ conn.close()
         let verification = verifyUserMessageAdvanced(
             target: target,
             previousTimestamp: previousUserTimestamp,
-            timeoutSeconds: max(4, min(timeoutSeconds.doubleValue, 8))
+            timeoutSeconds: max(8, min(timeoutSeconds.doubleValue, 14))
         )
 
         if verification.success {
@@ -3287,10 +3351,10 @@ conn.close()
             return
         }
 
-        logActivity("发送请求失败: status=failed reason=send_unverified target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(verification.probe.values["status"] ?? "unknown") terminal_state=\(verification.probe.values["terminal_state"] ?? "unknown") detail=\(compactProbeSummary(verification.probe))")
+        logActivity("发送请求待确认: status=accepted reason=verification_pending target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(verification.probe.values["status"] ?? "unknown") terminal_state=\(verification.probe.values["terminal_state"] ?? "unknown") detail=\(compactProbeSummary(verification.probe))")
         finish(with: [
-            "status": "failed",
-            "reason": "send_unverified",
+            "status": "accepted",
+            "reason": "verification_pending",
             "target": target,
             "force_send": forceSend,
             "detail": compactProbeSummary(verification.probe),
@@ -3316,6 +3380,42 @@ conn.close()
         keyUp.flags = flags
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
+    }
+
+    private func snapshotGeneralPasteboard() -> PasteboardSnapshot {
+        let pasteboard = NSPasteboard.general
+        let items = (pasteboard.pasteboardItems ?? []).map { item in
+            var snapshot: [NSPasteboard.PasteboardType: Data] = [:]
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    snapshot[type] = data
+                }
+            }
+            return snapshot
+        }
+        return PasteboardSnapshot(items: items, changeCount: pasteboard.changeCount)
+    }
+
+    @discardableResult
+    private func restoreGeneralPasteboard(_ snapshot: PasteboardSnapshot, expectedChangeCount: Int?) -> Bool {
+        let pasteboard = NSPasteboard.general
+        if let expectedChangeCount, pasteboard.changeCount != expectedChangeCount {
+            return false
+        }
+
+        pasteboard.clearContents()
+        guard !snapshot.items.isEmpty else {
+            return true
+        }
+
+        let restoredItems = snapshot.items.map { dataByType -> NSPasteboardItem in
+            let item = NSPasteboardItem()
+            for (type, data) in dataByType {
+                item.setData(data, forType: type)
+            }
+            return item
+        }
+        return pasteboard.writeObjects(restoredItems)
     }
 
     private func focusTerminalWindow(for ttyPath: String) throws {
@@ -3407,14 +3507,15 @@ conn.close()
 
     private func restoreFocusAfterTerminalSend(previousAppBundleID: String?) {
         let currentAppBundleID = Bundle.main.bundleIdentifier ?? ""
-        let preferredBundleID: String
+        let immediatePreviousBundleID: String
         if let previousAppBundleID,
            !previousAppBundleID.isEmpty,
            previousAppBundleID != "com.apple.Terminal" {
-            preferredBundleID = previousAppBundleID
+            immediatePreviousBundleID = previousAppBundleID
         } else {
-            preferredBundleID = currentAppBundleID
+            immediatePreviousBundleID = currentAppBundleID
         }
+        let preferredBundleID = AppFocusTracker.shared.preferredReturnBundleID(fallback: immediatePreviousBundleID)
 
         let process = Process()
         let stdout = Pipe()
@@ -3423,7 +3524,8 @@ conn.close()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = [
             "-",
-            preferredBundleID
+            preferredBundleID,
+            currentAppBundleID
         ]
         process.standardOutput = stdout
         process.standardError = stderr
@@ -3432,27 +3534,57 @@ conn.close()
         let script = """
         on run argv
           set preferredBundleID to item 1 of argv
+          set fallbackBundleID to item 2 of argv
 
-          tell application "System Events"
-            try
-              set frontAppName to name of first application process whose frontmost is true
-            on error
-              set frontAppName to ""
-            end try
-          end tell
+          repeat with attempt from 1 to 6
+            tell application "System Events"
+              try
+                set frontAppName to name of first application process whose frontmost is true
+              on error
+                set frontAppName to ""
+              end try
+            end tell
 
-          if frontAppName is equal to "Terminal" then
-            try
-              tell application "Terminal" to hide
-            end try
+            if frontAppName is equal to "Terminal" then
+              try
+                tell application "Terminal" to hide
+              end try
+              delay 0.05
+            end if
+
+            if preferredBundleID is not "" then
+              try
+                tell application id preferredBundleID to activate
+              end try
+            end if
+
             delay 0.05
-          end if
 
-          if preferredBundleID is not "" then
+            tell application "System Events"
+              try
+                set frontBundleID to bundle identifier of first application process whose frontmost is true
+              on error
+                set frontBundleID to ""
+              end try
+            end tell
+
+            if frontBundleID is equal to preferredBundleID then
+              return "preferred"
+            end if
+
+            if frontBundleID is not "com.apple.Terminal" and frontBundleID is not "" then
+              return "non_terminal"
+            end if
+          end repeat
+
+          if fallbackBundleID is not "" then
             try
-              tell application id preferredBundleID to activate
+              tell application id fallbackBundleID to activate
+              return "fallback"
             end try
           end if
+
+          error "failed to restore focus away from Terminal"
         end run
         """
 
@@ -3479,22 +3611,34 @@ conn.close()
             throw NSError(domain: "CodeTaskMaster", code: 5, userInfo: [NSLocalizedDescriptionKey: "Code TaskMaster 没有辅助功能权限，无法发送按键"])
         }
 
-        let previousFrontAppBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        let currentAppBundleID = Bundle.main.bundleIdentifier ?? ""
+        let previousFrontAppBundleID = AppFocusTracker.shared.preferredReturnBundleID(
+            fallback: NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? currentAppBundleID
+        )
         try focusTerminalWindow(for: ttyPath)
+        defer {
+            restoreFocusAfterTerminalSend(previousAppBundleID: previousFrontAppBundleID)
+        }
 
         if clearExistingInput {
             try clearPromptInputIfNeeded()
         }
 
+        let pasteboardSnapshot = snapshotGeneralPasteboard()
+        var temporaryPasteboardChangeCount: Int?
+        defer {
+            _ = restoreGeneralPasteboard(pasteboardSnapshot, expectedChangeCount: temporaryPasteboardChangeCount)
+        }
+
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(message, forType: .string)
+        temporaryPasteboardChangeCount = NSPasteboard.general.changeCount
 
         usleep(250_000)
         try postKey(9, flags: .maskCommand)
         usleep(350_000)
         try postKey(36)
-        usleep(250_000)
-        restoreFocusAfterTerminalSend(previousAppBundleID: previousFrontAppBundleID)
+        usleep(600_000)
     }
 
     private func runHelper(arguments: [String], actionName: String) {
@@ -3507,18 +3651,19 @@ conn.close()
             let result = self.runStandardHelper(arguments: arguments)
 
             DispatchQueue.main.async {
+                let accepted = result.status == 2
                 if !result.stdout.isEmpty {
                     self.appendOutput(result.stdout)
                 }
                 if !result.stderr.isEmpty {
-                    self.appendOutput("stderr: \(result.stderr)")
+                    self.appendOutput(accepted ? result.stderr : "stderr: \(result.stderr)")
                 }
 
-                if result.status == 0 {
+                if result.status == 0 || accepted {
                     if actionName == "发送一次" || actionName == "开始循环" {
                         self.recordCurrentInputsInHistory()
                     }
-                    self.setStatus("\(actionName)完成", key: "action")
+                    self.setStatus(accepted ? "\(actionName)已受理" : "\(actionName)完成", key: "action")
                 } else {
                     self.setStatus("\(actionName)失败", key: "action")
                 }
