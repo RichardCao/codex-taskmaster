@@ -66,6 +66,11 @@ terminal_state
 detail
 ```
 
+补充约束：
+
+- `status` 不应只允许 `success` / `failed`
+- 还应允许表示“平台已接手，但暂时还没验证到最终成功”的中间态，例如 `accepted`
+
 ## 平台必须实现的能力
 
 ### 1. 列出运行中的目标宿主
@@ -146,6 +151,7 @@ send_to_endpoint(endpoint_id, message, submit=true)
 - 文本必须完整送达
 - `submit=true` 时必须真正触发提交
 - 返回平台侧执行结果
+- 如果平台已确认“输入已提交到宿主，但最终是否被 Codex 接收还需稍后验证”，必须能返回中间态，而不是直接伪装成失败
 
 ### 6. 发送后验证
 
@@ -216,6 +222,8 @@ platform/linux/tmux_adapter.*
 - `not_sendable`
 - `send_interrupted`
 - `send_unverified`
+- `verification_pending`
+- `queued_pending_feedback`
 - `probe_failed`
 
 如果是平台私有原因，也要附带：
@@ -230,3 +238,5 @@ detail
 - GUI 不直接拼平台命令
 - 平台适配器不负责 UI 展示文案
 - 文案本地化放在 UI 或展示层
+- 平台自动化如果可能阻塞较久，不应长期占用 GUI 主线程
+- 如果平台实现需要临时借用系统剪贴板，必须负责恢复，避免污染用户当前剪贴板
