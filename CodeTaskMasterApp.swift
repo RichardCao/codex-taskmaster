@@ -516,6 +516,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let forceSend: String
         let message: String
         let nextRunEpoch: String
+        let paused: String
+        let failureCount: String
+        let failureReason: String
+        let pauseReason: String
         let logPath: String
         let lastLogLine: String
     }
@@ -628,6 +632,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var lastSessionRenderScannedCount: Int?
     private var lastSessionRenderTotalCount: Int?
     private var lastSessionRenderIsComplete = true
+    private let tableCellFont = NSFont.systemFont(ofSize: 12)
+    private let tableCellHorizontalPadding: CGFloat = 12
+    private let tableCellVerticalPadding: CGFloat = 6
+    private let tableBaseRowHeight: CGFloat = 24
+    private let tableWrappedRowHeightCap: CGFloat = 110
     private var selectedSessionStatusFilters = Set<String>()
     private var selectedSessionTerminalFilters = Set<String>()
     private var selectedSessionTTYFilters = Set<String>()
@@ -984,12 +993,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func configureLoopsTable() {
         let columns: [(identifier: String, title: String, width: CGFloat)] = [
-            ("target", "Target", 140),
-            ("interval", "Interval", 70),
-            ("forceSend", "Mode", 80),
-            ("nextRun", "Next Run", 140),
-            ("message", "Message", 130),
-            ("lastLog", "Last Result", 420)
+            ("state", "Status", 88),
+            ("target", "Target", 88),
+            ("interval", "Interval", 72),
+            ("forceSend", "Mode", 72),
+            ("nextRun", "Next Run", 120),
+            ("message", "Message", 120),
+            ("lastLog", "Last Result", 180)
         ]
 
         activeLoopsTableView.headerView = NSTableHeaderView()
@@ -998,7 +1008,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         activeLoopsTableView.allowsMultipleSelection = false
         activeLoopsTableView.delegate = self
         activeLoopsTableView.dataSource = self
-        activeLoopsTableView.rowHeight = 24
+        activeLoopsTableView.rowHeight = tableBaseRowHeight
         activeLoopsTableView.columnAutoresizingStyle = .noColumnAutoresizing
 
         for column in columns {
@@ -1006,11 +1016,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             tableColumn.title = column.title
             tableColumn.width = column.width
             tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.identifier, ascending: column.identifier != defaultLoopSortKey)
+            tableColumn.minWidth = loopColumnMinimumWidth(column.identifier)
             if column.identifier == "lastLog" {
-                tableColumn.minWidth = 180
                 tableColumn.resizingMask = [.autoresizingMask, .userResizingMask]
             } else {
-                tableColumn.minWidth = 60
                 tableColumn.resizingMask = .userResizingMask
             }
             activeLoopsTableView.addTableColumn(tableColumn)
@@ -1022,13 +1031,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func configureSessionStatusTable() {
         let columns: [(identifier: String, title: String, width: CGFloat)] = [
-            ("name", "Name", 180),
-            ("threadID", "Session ID", 210),
-            ("status", "Status", 150),
-            ("terminalState", "Terminal", 110),
-            ("tty", "TTY", 80),
-            ("updatedAt", "Updated", 140),
-            ("reason", "原因", 320)
+            ("name", "Name", 96),
+            ("threadID", "Session ID", 160),
+            ("status", "Status", 96),
+            ("terminalState", "Terminal", 92),
+            ("tty", "TTY", 72),
+            ("updatedAt", "Updated", 118),
+            ("reason", "原因", 180)
         ]
 
         let headerView = SessionStatusHeaderView()
@@ -1039,7 +1048,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionStatusTableView.allowsMultipleSelection = false
         sessionStatusTableView.delegate = self
         sessionStatusTableView.dataSource = self
-        sessionStatusTableView.rowHeight = 24
+        sessionStatusTableView.rowHeight = tableBaseRowHeight
         sessionStatusTableView.target = self
         sessionStatusTableView.doubleAction = #selector(handleSessionStatusDoubleClick)
         sessionStatusTableView.columnAutoresizingStyle = .noColumnAutoresizing
@@ -1049,11 +1058,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             tableColumn.title = column.title
             tableColumn.width = column.width
             tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.identifier, ascending: column.identifier == defaultSessionSortKey ? false : true)
+            tableColumn.minWidth = sessionColumnMinimumWidth(column.identifier)
             if column.identifier == "reason" {
-                tableColumn.minWidth = 220
                 tableColumn.resizingMask = [.autoresizingMask, .userResizingMask]
             } else {
-                tableColumn.minWidth = 60
                 tableColumn.resizingMask = .userResizingMask
             }
             sessionStatusTableView.addTableColumn(tableColumn)
@@ -1063,12 +1071,285 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionStatusTableView.sortDescriptors = [NSSortDescriptor(key: defaultSessionSortKey, ascending: false)]
     }
 
+    private func loopColumnMinimumWidth(_ identifier: String) -> CGFloat {
+        switch identifier {
+        case "state":
+            return 84
+        case "target", "message":
+            return 88
+        case "nextRun":
+            return 110
+        case "lastLog":
+            return 180
+        default:
+            return 68
+        }
+    }
+
+    private func loopColumnMaximumWidth(_ identifier: String) -> CGFloat {
+        switch identifier {
+        case "state":
+            return 132
+        case "target":
+            return 220
+        case "interval", "forceSend":
+            return 90
+        case "nextRun":
+            return 190
+        case "message":
+            return 280
+        case "lastLog":
+            return 520
+        default:
+            return 240
+        }
+    }
+
+    private func sessionColumnMinimumWidth(_ identifier: String) -> CGFloat {
+        switch identifier {
+        case "name", "status":
+            return 88
+        case "threadID":
+            return 140
+        case "terminalState":
+            return 90
+        case "tty":
+            return 68
+        case "updatedAt":
+            return 108
+        case "reason":
+            return 180
+        default:
+            return 80
+        }
+    }
+
+    private func sessionColumnMaximumWidth(_ identifier: String) -> CGFloat {
+        switch identifier {
+        case "name":
+            return 220
+        case "threadID":
+            return 320
+        case "status":
+            return 150
+        case "terminalState":
+            return 150
+        case "tty":
+            return 120
+        case "updatedAt":
+            return 180
+        case "reason":
+            return 460
+        default:
+            return 240
+        }
+    }
+
     private func preferredTargetValue(for session: SessionSnapshot) -> String {
         let actualName = sessionActualName(session)
         if !actualName.isEmpty {
             return actualName
         }
         return session.threadID
+    }
+
+    private func loopStateLabel(_ loop: LoopSnapshot) -> String {
+        if loop.paused == "yes" {
+            return "已暂停"
+        }
+
+        let line = loop.lastLogLine.localizedLowercase
+        if line.contains("status: success") || line.contains("reason: forced_sent") || line.contains("reason: sent_when_idle") {
+            return "健康"
+        }
+        if line.contains("status: accepted") || line.contains("queued_pending_feedback") || line.contains("request_still_processing") {
+            return "排队"
+        }
+        if line.contains("deferred:") {
+            return "待重试"
+        }
+        if line.contains("failed") || line.contains("status=failed") {
+            return "失败"
+        }
+        if !loop.lastLogLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "未知"
+        }
+        return "等待"
+    }
+
+    private func loopStateColor(_ loop: LoopSnapshot) -> NSColor {
+        switch loopStateLabel(loop) {
+        case "健康":
+            return .systemGreen
+        case "排队", "待重试":
+            return .systemYellow
+        case "已暂停", "失败":
+            return .systemRed
+        default:
+            return .secondaryLabelColor
+        }
+    }
+
+    private func loopStateSortRank(_ loop: LoopSnapshot) -> Int {
+        switch loopStateLabel(loop) {
+        case "健康":
+            return 0
+        case "排队":
+            return 1
+        case "待重试":
+            return 2
+        case "等待":
+            return 3
+        case "未知":
+            return 4
+        case "已暂停":
+            return 5
+        case "失败":
+            return 6
+        default:
+            return 7
+        }
+    }
+
+    private func stringValueForLoopColumn(_ identifier: String, loop: LoopSnapshot) -> String {
+        switch identifier {
+        case "state":
+            return "● \(loopStateLabel(loop))"
+        case "target":
+            return loop.target
+        case "interval":
+            return "\(loop.intervalSeconds)s"
+        case "forceSend":
+            return loop.forceSend == "yes" ? "force" : "idle"
+        case "nextRun":
+            return formatEpoch(loop.nextRunEpoch)
+        case "message":
+            return loop.message
+        case "lastLog":
+            return loop.lastLogLine
+        default:
+            return ""
+        }
+    }
+
+    private func stringValueForSessionColumn(_ identifier: String, session: SessionSnapshot) -> String {
+        switch identifier {
+        case "name":
+            return sessionActualName(session)
+        case "threadID":
+            return session.threadID
+        case "status":
+            return "● \(localizedSessionStatusLabel(session))"
+        case "terminalState":
+            return localizedTerminalState(session.terminalState)
+        case "tty":
+            return session.tty.isEmpty ? "-" : session.tty
+        case "updatedAt":
+            return formatEpoch(session.updatedAtEpoch)
+        case "reason":
+            return localizedSessionReason(session.reason)
+        default:
+            return ""
+        }
+    }
+
+    private func stringValueForTableCell(tableView: NSTableView, identifier: String, row: Int) -> String {
+        if tableView == activeLoopsTableView {
+            guard row < loopSnapshots.count else {
+                return identifier == activeLoopsTableView.tableColumns.first?.identifier.rawValue ? (loopWarnings.first ?? "Warning") : ""
+            }
+            return stringValueForLoopColumn(identifier, loop: loopSnapshots[row])
+        }
+
+        guard row < sessionSnapshots.count else {
+            return ""
+        }
+        return stringValueForSessionColumn(identifier, session: sessionSnapshots[row])
+    }
+
+    private func shouldWrapRow(_ row: Int, in tableView: NSTableView) -> Bool {
+        row >= 0 && row == tableView.selectedRow
+    }
+
+    private func tableColumnMaximumWidth(tableView: NSTableView, identifier: String) -> CGFloat {
+        if tableView == activeLoopsTableView {
+            return loopColumnMaximumWidth(identifier)
+        }
+        return sessionColumnMaximumWidth(identifier)
+    }
+
+    private func headerWidthPadding(for tableColumn: NSTableColumn, in tableView: NSTableView) -> CGFloat {
+        if tableView == sessionStatusTableView {
+            switch tableColumn.identifier.rawValue {
+            case "status", "terminalState", "tty":
+                return 56
+            default:
+                return 30
+            }
+        }
+        return 24
+    }
+
+    private func measuredTextWidth(_ text: String) -> CGFloat {
+        let attributes: [NSAttributedString.Key: Any] = [.font: tableCellFont]
+        return ceil((text as NSString).size(withAttributes: attributes).width)
+    }
+
+    private func adjustTableColumnWidths(_ tableView: NSTableView) {
+        guard !tableView.tableColumns.isEmpty else { return }
+
+        for column in tableView.tableColumns {
+            let identifier = column.identifier.rawValue
+            let headerWidth = measuredTextWidth(column.title) + headerWidthPadding(for: column, in: tableView) + tableCellHorizontalPadding
+            let rowCount = tableView == activeLoopsTableView ? loopSnapshots.count : sessionSnapshots.count
+            var widest = headerWidth
+
+            if rowCount > 0 {
+                for row in 0..<rowCount {
+                    let value = stringValueForTableCell(tableView: tableView, identifier: identifier, row: row)
+                    widest = max(widest, measuredTextWidth(value) + tableCellHorizontalPadding)
+                }
+            }
+
+            let clampedWidth = min(max(widest, column.minWidth), tableColumnMaximumWidth(tableView: tableView, identifier: identifier))
+            if abs(column.width - clampedWidth) > 0.5 {
+                column.width = clampedWidth
+            }
+        }
+    }
+
+    private func measuredWrappedHeight(for text: String, width: CGFloat) -> CGFloat {
+        guard width > 0 else { return tableBaseRowHeight }
+        let attributes: [NSAttributedString.Key: Any] = [.font: tableCellFont]
+        let boundingRect = (text as NSString).boundingRect(
+            with: NSSize(width: width, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attributes
+        )
+        return ceil(boundingRect.height) + tableCellVerticalPadding
+    }
+
+    private func wrappedRowHeight(for row: Int, in tableView: NSTableView) -> CGFloat {
+        guard shouldWrapRow(row, in: tableView) else { return tableBaseRowHeight }
+
+        var requiredHeight = tableBaseRowHeight
+        for column in tableView.tableColumns {
+            let availableWidth = column.width - tableCellHorizontalPadding
+            guard availableWidth > 12 else { continue }
+            let value = stringValueForTableCell(tableView: tableView, identifier: column.identifier.rawValue, row: row)
+            guard !value.isEmpty else { continue }
+            requiredHeight = max(requiredHeight, measuredWrappedHeight(for: value, width: availableWidth))
+        }
+
+        return min(max(requiredHeight, tableBaseRowHeight), tableWrappedRowHeightCap)
+    }
+
+    private func refreshTableWrapping(_ tableView: NSTableView) {
+        guard tableView.numberOfRows > 0 else { return }
+        let rowIndexes = IndexSet(integersIn: 0..<tableView.numberOfRows)
+        let columnIndexes = IndexSet(integersIn: 0..<tableView.numberOfColumns)
+        tableView.noteHeightOfRows(withIndexesChanged: rowIndexes)
+        tableView.reloadData(forRowIndexes: rowIndexes, columnIndexes: columnIndexes)
     }
 
     private func currentSessionListMode() -> SessionListMode {
@@ -1340,7 +1621,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         applySessionSorting()
         sessionStatusTableView.reloadData()
+        adjustTableColumnWidths(sessionStatusTableView)
         restoreSessionSelection(preferredThreadID: preserveSelectionThreadID)
+        refreshTableWrapping(sessionStatusTableView)
         updateSessionStatusMetaLabel()
 
         guard !normalizedQuery.isEmpty,
@@ -1487,6 +1770,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         loopSnapshots.sort { lhs, rhs in
             let orderedAscending: Bool
             switch key {
+            case "state":
+                orderedAscending = loopStateSortRank(lhs) < loopStateSortRank(rhs)
             case "target":
                 orderedAscending = lhs.target.localizedStandardCompare(rhs.target) == .orderedAscending
             case "interval":
@@ -1512,6 +1797,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func compareLoopValuesEqual(lhs: LoopSnapshot, rhs: LoopSnapshot, key: String) -> Bool {
         switch key {
+        case "state":
+            return loopStateLabel(lhs) == loopStateLabel(rhs)
         case "target":
             return lhs.target == rhs.target
         case "interval":
@@ -2915,6 +3202,10 @@ conn.close()
                     forceSend: current["force_send"] ?? "no",
                     message: current["message"] ?? "unknown",
                     nextRunEpoch: current["next_run_epoch"] ?? "unknown",
+                    paused: current["paused"] ?? "no",
+                    failureCount: current["failure_count"] ?? "0",
+                    failureReason: current["failure_reason"] ?? "",
+                    pauseReason: current["pause_reason"] ?? "",
                     logPath: current["log"] ?? "-",
                     lastLogLine: current["last_log_line"] ?? ""
                 )
@@ -4022,7 +4313,9 @@ conn.close()
                     self.activeLoopsMetaLabel.stringValue = self.loopWarnings.first ?? "Failed to load active loops."
                 }
                 self.activeLoopsTableView.reloadData()
+                self.adjustTableColumnWidths(self.activeLoopsTableView)
                 self.restoreLoopSelection(preferredTarget: selectedTarget)
+                self.refreshTableWrapping(self.activeLoopsTableView)
             }
         }
     }
@@ -4681,18 +4974,25 @@ conn.close()
             cellView.identifier = identifier
             textField = NSTextField(labelWithString: "")
             textField.translatesAutoresizingMaskIntoConstraints = false
+            textField.font = tableCellFont
             textField.lineBreakMode = .byTruncatingTail
             textField.maximumNumberOfLines = 1
+            textField.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
             cellView.addSubview(textField)
             cellView.textField = textField
             NSLayoutConstraint.activate([
-                textField.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: 6),
-                textField.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -6),
-                textField.centerYAnchor.constraint(equalTo: cellView.centerYAnchor)
+                textField.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: tableCellHorizontalPadding / 2),
+                textField.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -(tableCellHorizontalPadding / 2)),
+                textField.topAnchor.constraint(equalTo: cellView.topAnchor, constant: tableCellVerticalPadding / 2),
+                textField.bottomAnchor.constraint(equalTo: cellView.bottomAnchor, constant: -(tableCellVerticalPadding / 2))
             ])
         }
 
         textField.textColor = .labelColor
+        let wrapsText = shouldWrapRow(row, in: tableView)
+        textField.lineBreakMode = wrapsText ? .byWordWrapping : .byTruncatingTail
+        textField.maximumNumberOfLines = wrapsText ? 0 : 1
+        textField.toolTip = nil
 
         if tableView == activeLoopsTableView {
             if row >= loopSnapshots.count {
@@ -4703,45 +5003,23 @@ conn.close()
             }
 
             let loop = loopSnapshots[row]
-            switch tableColumn.identifier.rawValue {
-            case "target":
-                textField.stringValue = loop.target
-            case "interval":
-                textField.stringValue = "\(loop.intervalSeconds)s"
-            case "forceSend":
-                textField.stringValue = loop.forceSend == "yes" ? "force" : "idle"
-            case "nextRun":
-                textField.stringValue = formatEpoch(loop.nextRunEpoch)
-            case "message":
-                textField.stringValue = loop.message
-            case "lastLog":
-                textField.stringValue = loop.lastLogLine
-            default:
-                textField.stringValue = ""
+            let columnID = tableColumn.identifier.rawValue
+            textField.stringValue = stringValueForLoopColumn(columnID, loop: loop)
+            if columnID == "state" {
+                textField.textColor = loopStateColor(loop)
             }
             textField.toolTip = textField.stringValue
             return cellView
         }
 
         let session = sessionSnapshots[row]
-        switch tableColumn.identifier.rawValue {
-        case "name":
-            textField.stringValue = sessionActualName(session)
-        case "threadID":
-            textField.stringValue = session.threadID
+        let columnID = tableColumn.identifier.rawValue
+        textField.stringValue = stringValueForSessionColumn(columnID, session: session)
+        switch columnID {
         case "status":
-            textField.stringValue = "● \(localizedSessionStatusLabel(session))"
             textField.textColor = sessionStatusColor(session)
-        case "terminalState":
-            textField.stringValue = localizedTerminalState(session.terminalState)
-        case "tty":
-            textField.stringValue = session.tty.isEmpty ? "-" : session.tty
-        case "updatedAt":
-            textField.stringValue = formatEpoch(session.updatedAtEpoch)
-        case "reason":
-            textField.stringValue = localizedSessionReason(session.reason)
         default:
-            textField.stringValue = ""
+            break
         }
         textField.toolTip = textField.stringValue
         return cellView
@@ -4759,23 +5037,48 @@ conn.close()
             } else {
                 stopButton.isEnabled = false
             }
+            refreshTableWrapping(activeLoopsTableView)
             return
         }
         if tableView == sessionStatusTableView {
+            refreshTableWrapping(sessionStatusTableView)
             updateSessionDetailView()
         }
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        if tableView == activeLoopsTableView {
+            guard row < loopSnapshots.count else { return tableBaseRowHeight }
+            return wrappedRowHeight(for: row, in: tableView)
+        }
+        if tableView == sessionStatusTableView {
+            guard row < sessionSnapshots.count else { return tableBaseRowHeight }
+            return wrappedRowHeight(for: row, in: tableView)
+        }
+        return tableBaseRowHeight
     }
 
     func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
         if tableView == activeLoopsTableView {
             applyLoopSorting()
             activeLoopsTableView.reloadData()
+            adjustTableColumnWidths(activeLoopsTableView)
+            refreshTableWrapping(activeLoopsTableView)
             return
         }
         if tableView == sessionStatusTableView {
             applySessionSorting()
             sessionStatusTableView.reloadData()
+            adjustTableColumnWidths(sessionStatusTableView)
+            refreshTableWrapping(sessionStatusTableView)
             updateSessionDetailView()
+        }
+    }
+
+    func tableViewColumnDidResize(_ notification: Notification) {
+        guard let tableView = notification.object as? NSTableView else { return }
+        if tableView == activeLoopsTableView || tableView == sessionStatusTableView {
+            refreshTableWrapping(tableView)
         }
     }
 
