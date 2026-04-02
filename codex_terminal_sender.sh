@@ -39,8 +39,11 @@ Usage:
   codex_terminal_sender.sh send        -t TARGET [-m MESSAGE] [-f]
   codex_terminal_sender.sh start       -t TARGET [-m MESSAGE] [-i SECONDS] [-f]
   codex_terminal_sender.sh stop        [-t TARGET | --all]
+  codex_terminal_sender.sh loop-delete -t TARGET
+  codex_terminal_sender.sh loop-save-stopped -t TARGET [-m MESSAGE] [-i SECONDS] [-f] [-r REASON]
   codex_terminal_sender.sh status      [-t TARGET]
   codex_terminal_sender.sh probe       -t TARGET
+  codex_terminal_sender.sh resolve-thread-id -t TARGET
   codex_terminal_sender.sh resolve-live-tty -t TARGET
   codex_terminal_sender.sh probe-all   [-l LIMIT] [-o OFFSET]
   codex_terminal_sender.sh session-count
@@ -51,14 +54,20 @@ Usage:
   codex_terminal_sender.sh thread-list [--archived]
   codex_terminal_sender.sh wait-idle   -t TARGET [-s SECONDS] [-w SECONDS]
   codex_terminal_sender.sh loop-once
+  codex_terminal_sender.sh loop-resume -t TARGET
   codex_terminal_sender.sh loop-daemon
 
 Commands:
   send        Send one message to the matching Terminal tab via GUI paste + Return
   start       Create or update a repeating loop
-  stop        Stop one loop by target, or all loops with --all
+  stop        Mark one loop as stopped by target, or all loops with --all
+  loop-delete Remove one loop entry from local Active Loops state
+  loop-save-stopped
+              Save one loop entry directly in stopped state
   status      Show one loop status by target, or all loop statuses
   probe       Inspect the local Codex rollout/log state for one target
+  resolve-thread-id
+              Resolve one target to a unique Codex thread id
   resolve-live-tty
               Resolve the current live Terminal TTY for one target
   probe-all   Inspect known Codex sessions and summarize their statuses
@@ -76,6 +85,7 @@ Commands:
               List Codex sessions via the native app-server API
   wait-idle   Wait until the target appears stably idle
   loop-once   Internal command: run one loop scheduling tick
+  loop-resume Clear a paused loop state and reschedule it immediately
   loop-daemon Internal command: user-owned background loop runner
 EOF
 }
@@ -107,6 +117,10 @@ paths_for_target() {
   LOOP_LOG_FILE="${LOOP_LOG_DIR}/${key}.log"
 }
 
+loop_source_tag() {
+  stat -f '%m:%z' "$LOOP_FILE" 2>/dev/null || echo missing
+}
+
 load_kv_file() {
   local file="$1"
   # shellcheck disable=SC1090
@@ -127,6 +141,97 @@ write_kv_file() {
     done
   } >"$tmp"
   mv "$tmp" "$file"
+}
+
+write_loop_status_kv() {
+  local source_tag="$1"
+  local next_run="$2"
+  local failure_count="$3"
+  local failure_reason="$4"
+  local paused="$5"
+  local paused_reason="$6"
+  local stopped="$7"
+  local stopped_reason="$8"
+  write_kv_file "$LOOP_STATUS_FILE" \
+    STATE_TAG "$source_tag" \
+    NEXT_RUN "$next_run" \
+    FAILURE_COUNT "$failure_count" \
+    FAILURE_REASON "$failure_reason" \
+    PAUSED "$paused" \
+    PAUSED_REASON "$paused_reason" \
+    STOPPED "$stopped" \
+    STOPPED_REASON "$stopped_reason"
+}
+
+write_loop_definition() {
+  local target="$1"
+  local interval="$2"
+  local message="$3"
+  local force_send="${4:-0}"
+  write_kv_file "$LOOP_FILE" \
+    TARGET "$target" \
+    INTERVAL "$interval" \
+    MESSAGE "$message" \
+    FORCE_SEND "$force_send"
+  touch "$LOOP_LOG_FILE" 2>/dev/null || true
+}
+
+classify_loop_reason() {
+  local detail="$1"
+  if [[ "$detail" == *"found multiple matching sessions for target"* ]] || [[ "$detail" == *"found multiple matching thread titles for target"* ]] || [[ "$detail" == *"found multiple matching Terminal ttys for target"* ]]; then
+    printf 'ambiguous_target\n'
+  elif [[ "$detail" == *"tty not found"* ]] || [[ "$detail" == *"could not find a running 'codex resume"* ]] || [[ "$detail" == *"tty unavailable"* ]]; then
+    printf 'tty_unavailable\n'
+  else
+    printf 'start_failed\n'
+  fi
+}
+
+mark_loop_stopped_entry() {
+  local target="$1"
+  local interval="$2"
+  local message="$3"
+  local force_send="${4:-0}"
+  local stopped_reason="${5:-stopped_by_user}"
+  local log_message="${6:-}"
+  local key
+  local source_tag
+
+  key="$(hash_target "$target")"
+  paths_for_target "$key"
+  write_loop_definition "$target" "$interval" "$message" "$force_send"
+  source_tag="$(loop_source_tag)"
+  write_loop_status_kv "$source_tag" "" "0" "" "0" "" "1" "$stopped_reason"
+  if [[ -n "$log_message" ]]; then
+    append_loop_log_line "$LOOP_LOG_FILE" "$log_message"
+  fi
+}
+
+has_active_loops() {
+  local loop_file
+  local key
+
+  shopt -s nullglob
+  for loop_file in "$LOOPS_DIR"/*.loop; do
+    key="$(basename "${loop_file%.loop}")"
+    paths_for_target "$key"
+    STOPPED=""
+    if [[ -f "$LOOP_STATUS_FILE" ]]; then
+      load_kv_file "$LOOP_STATUS_FILE"
+    fi
+    if [[ "${STOPPED:-0}" != "1" ]]; then
+      shopt -u nullglob
+      return 0
+    fi
+  done
+  shopt -u nullglob
+  return 1
+}
+
+stop_loop_daemon_if_idle() {
+  if ! has_active_loops; then
+    stop_user_owned_sender_daemons || true
+  fi
 }
 
 is_pid_running() {
@@ -448,16 +553,20 @@ matching_ids = [thread_id for thread_id, thread_name in latest_names.items() if 
 if len(matching_ids) == 1:
     print(matching_ids[0], end="")
     raise SystemExit(0)
+if len(matching_ids) > 1:
+    raise SystemExit(f"found multiple matching sessions for target '{target}': {' '.join(matching_ids)}")
 
 conn = sqlite3.connect(db_path)
 cur = conn.cursor()
-row = cur.execute(
-    "select id from threads where title = ? order by updated_at desc limit 1",
+rows = cur.execute(
+    "select id from threads where title = ? order by updated_at desc",
     (target,),
-).fetchone()
+).fetchall()
 conn.close()
-if row and row[0]:
-    print(row[0], end="")
+if len(rows) > 1:
+    raise SystemExit(f"found multiple matching thread titles for target '{target}': {' '.join(row[0] for row in rows if row and row[0])}")
+if len(rows) == 1 and rows[0][0]:
+    print(rows[0][0], end="")
 PY
     )"
   fi
@@ -466,20 +575,10 @@ PY
   printf '%s\n' "$thread_id"
 }
 
-probe_session_status() {
-  local target="$1"
-  local thread_id
-  local rollout_path
-  local thread_title
-  local first_user_message
-  local session_name
-  local tty_name=""
+load_target_metadata() {
+  local thread_id="$1"
 
-  require_cmd python3
-  require_cmd sqlite3
-
-  thread_id="$(resolve_thread_id "$target")"
-  IFS='|' read -r rollout_path thread_title first_user_message session_name <<<"$(python3 - "$CODEX_STATE_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "$thread_id" <<'PY'
+  python3 - "$CODEX_STATE_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "$thread_id" <<'PY'
 import json
 import os
 import sqlite3
@@ -516,19 +615,92 @@ if row:
     values.append(session_name)
     print("|".join(values))
 PY
- 2>/dev/null)"
+}
 
-  [[ -n "${rollout_path:-}" && -f "${rollout_path:-}" ]] || die "could not find rollout path for target '$target'"
-  tty_name="$(find_unique_tty "$target" 2>/dev/null || true)"
+resolve_target_tty() {
+  local target="$1"
+  local thread_id="$2"
+  local thread_title="$3"
+  local first_user_message="$4"
+  local session_name="$5"
+  local tty_name=""
+  local tty_error=""
+  local attempt_status=1
+
+  try_candidate() {
+    local candidate="$1"
+    [[ -n "$candidate" ]] || return 1
+    local output=""
+    local error=""
+    set +e
+    output="$(find_unique_tty "$candidate" 2>&1)"
+    attempt_status=$?
+    set -e
+    if [[ "$attempt_status" -eq 0 ]]; then
+      tty_name="$output"
+      return 0
+    fi
+    tty_error="$output"
+    return "$attempt_status"
+  }
+
+  if ! try_candidate "$target"; then
+    if [[ "$attempt_status" -eq 2 ]]; then
+      printf '%s\n' "$tty_error" >&2
+      return 2
+    fi
+  fi
   if [[ -z "$tty_name" && -n "${session_name:-}" && "$session_name" != "$target" ]]; then
-    tty_name="$(find_unique_tty "$session_name" 2>/dev/null || true)"
+    if ! try_candidate "$session_name"; then
+      if [[ "$attempt_status" -eq 2 ]]; then
+        printf '%s\n' "$tty_error" >&2
+        return 2
+      fi
+    fi
   fi
   if [[ -z "$tty_name" && -n "${thread_id:-}" && "$thread_id" != "$target" ]]; then
-    tty_name="$(find_unique_tty "$thread_id" 2>/dev/null || true)"
+    if ! try_candidate "$thread_id"; then
+      if [[ "$attempt_status" -eq 2 ]]; then
+        printf '%s\n' "$tty_error" >&2
+        return 2
+      fi
+    fi
   fi
   if [[ -z "$tty_name" && -n "${thread_title:-}" && "$thread_title" != "$target" && "${thread_title:-}" != "${first_user_message:-}" ]]; then
-    tty_name="$(find_unique_tty "$thread_title" 2>/dev/null || true)"
+    if ! try_candidate "$thread_title"; then
+      if [[ "$attempt_status" -eq 2 ]]; then
+        printf '%s\n' "$tty_error" >&2
+        return 2
+      fi
+    fi
   fi
+
+  if [[ -n "$tty_name" ]]; then
+    printf '%s\n' "$tty_name"
+    return 0
+  fi
+
+  [[ -n "$tty_error" ]] && printf '%s\n' "$tty_error" >&2
+  return 1
+}
+
+probe_session_status() {
+  local target="$1"
+  local thread_id
+  local rollout_path
+  local thread_title
+  local first_user_message
+  local session_name
+  local tty_name=""
+
+  require_cmd python3
+  require_cmd sqlite3
+
+  thread_id="$(resolve_thread_id "$target")"
+  IFS='|' read -r rollout_path thread_title first_user_message session_name <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
+
+  [[ -n "${rollout_path:-}" && -f "${rollout_path:-}" ]] || die "could not find rollout path for target '$target'"
+  tty_name="$(resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" 2>/dev/null || true)"
 
   python3 - "$thread_id" "$thread_title" "$session_name" "$rollout_path" "$tty_name" "$CODEX_LOGS_DB_PATH" "$PROBE_RECENT_LOG_WINDOW_SECONDS" <<'PY'
 import json
@@ -1372,14 +1544,22 @@ find_unique_tty() {
     1) printf '%s\n' "$tty_list" | sed '/^$/d' ;;
     *)
       printf "found multiple matching Terminal ttys for target '%s': %s\n" "$target" "$(printf '%s' "$tty_list" | tr '\n' ' ')" >&2
-      return 1
+      return 2
       ;;
   esac
 }
 
 resolve_live_tty() {
   local target="$1"
-  find_unique_tty "$target"
+  local thread_id
+  local rollout_path
+  local thread_title
+  local first_user_message
+  local session_name
+
+  thread_id="$(resolve_thread_id "$target")"
+  IFS='|' read -r rollout_path thread_title first_user_message session_name <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
+  resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name"
 }
 
 send_once_via_terminal_gui() {
@@ -1463,6 +1643,8 @@ process_loops_once() {
     local failure_reason=""
     local paused=0
     local paused_reason=""
+    local stopped=0
+    local stopped_reason=""
     key="$(basename "${loop_file%.loop}")"
     paths_for_target "$key"
     source_tag="$(stat -f '%m:%z' "$loop_file" 2>/dev/null || echo missing)"
@@ -1474,6 +1656,8 @@ process_loops_once() {
       FAILURE_REASON=""
       PAUSED=""
       PAUSED_REASON=""
+      STOPPED=""
+      STOPPED_REASON=""
       load_kv_file "$LOOP_STATUS_FILE"
       if [[ "${STATE_TAG:-}" == "$source_tag" ]]; then
         if [[ "${NEXT_RUN:-}" =~ ^[0-9]+$ ]]; then
@@ -1487,7 +1671,15 @@ process_loops_once() {
           paused=1
           paused_reason="${PAUSED_REASON:-$failure_reason}"
         fi
+        if [[ "${STOPPED:-0}" == "1" ]]; then
+          stopped=1
+          stopped_reason="${STOPPED_REASON:-}"
+        fi
       fi
+    fi
+
+    if [[ "$stopped" == "1" ]]; then
+      continue
     fi
 
     if [[ "$paused" == "1" ]]; then
@@ -1505,25 +1697,13 @@ process_loops_once() {
       append_loop_log_line "$LOOP_LOG_FILE" "sent: ${send_output//$'\n'/ | }"
       sleep "$LOOP_POST_SEND_COOLDOWN_SECONDS"
       now="$(date +%s)"
-      write_kv_file "$LOOP_STATUS_FILE" \
-        STATE_TAG "$source_tag" \
-        NEXT_RUN "$(( now + interval ))" \
-        FAILURE_COUNT "0" \
-        FAILURE_REASON "" \
-        PAUSED "0" \
-        PAUSED_REASON ""
+      write_loop_status_kv "$source_tag" "$(( now + interval ))" "0" "" "0" "" "0" ""
     else
       send_status=$?
       if [[ "$send_status" -eq 2 ]]; then
         append_loop_log_line "$LOOP_LOG_FILE" "accepted: ${send_output//$'\n'/ | }"
         now="$(date +%s)"
-        write_kv_file "$LOOP_STATUS_FILE" \
-          STATE_TAG "$source_tag" \
-          NEXT_RUN "$(( now + interval ))" \
-          FAILURE_COUNT "0" \
-          FAILURE_REASON "" \
-          PAUSED "0" \
-          PAUSED_REASON ""
+        write_loop_status_kv "$source_tag" "$(( now + interval ))" "0" "" "0" "" "0" ""
       else
         current_failure_reason="$(extract_probe_field "$send_output" "reason")"
         [[ -n "$current_failure_reason" ]] || current_failure_reason="unknown_failure"
@@ -1537,21 +1717,9 @@ process_loops_once() {
         now="$(date +%s)"
         if [[ "$LOOP_FAILURE_PAUSE_THRESHOLD" =~ ^[1-9][0-9]*$ ]] && (( failure_count >= LOOP_FAILURE_PAUSE_THRESHOLD )); then
           append_loop_log_line "$LOOP_LOG_FILE" "paused: consecutive failure threshold reached count=${failure_count} reason=${current_failure_reason}"
-          write_kv_file "$LOOP_STATUS_FILE" \
-            STATE_TAG "$source_tag" \
-            NEXT_RUN "$now" \
-            FAILURE_COUNT "$failure_count" \
-            FAILURE_REASON "$current_failure_reason" \
-            PAUSED "1" \
-            PAUSED_REASON "$current_failure_reason"
+          write_loop_status_kv "$source_tag" "$now" "$failure_count" "$current_failure_reason" "1" "$current_failure_reason" "0" ""
         else
-          write_kv_file "$LOOP_STATUS_FILE" \
-            STATE_TAG "$source_tag" \
-            NEXT_RUN "$(( now + LOOP_BUSY_RETRY_SECONDS ))" \
-            FAILURE_COUNT "$failure_count" \
-            FAILURE_REASON "$current_failure_reason" \
-            PAUSED "0" \
-            PAUSED_REASON ""
+          write_loop_status_kv "$source_tag" "$(( now + LOOP_BUSY_RETRY_SECONDS ))" "$failure_count" "$current_failure_reason" "0" "" "0" ""
         fi
       fi
     fi
@@ -1626,24 +1794,52 @@ start_loop() {
   local key
   local source_tag
   local thread_id
+  local rollout_path
+  local thread_title
+  local first_user_message
+  local session_name
+  local start_detail
+  local failure_reason
 
-  ensure_loop_daemon
-  thread_id="$(resolve_thread_id "$target")"
-  if ! find_unique_tty "$target" >/dev/null 2>&1; then
-    find_unique_tty "$thread_id" >/dev/null
-  fi
   key="$(hash_target "$target")"
   paths_for_target "$key"
-  write_kv_file "$LOOP_FILE" \
-    TARGET "$target" \
-    INTERVAL "$interval" \
-    MESSAGE "$message" \
-    FORCE_SEND "$force_send"
-  touch "$LOOP_LOG_FILE" 2>/dev/null || true
-  source_tag="$(stat -f '%m:%z' "$LOOP_FILE" 2>/dev/null || echo missing)"
-  write_kv_file "$LOOP_STATUS_FILE" \
-    STATE_TAG "$source_tag" \
-    NEXT_RUN "$(date +%s)"
+  write_loop_definition "$target" "$interval" "$message" "$force_send"
+
+  if ! start_detail="$(ensure_loop_daemon 2>&1)"; then
+    failure_reason="start_failed"
+    mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$failure_reason" "loop start failed target=${target} reason=${failure_reason}${start_detail:+ detail=${start_detail//$'\n'/ | }}"
+    stop_loop_daemon_if_idle
+    printf '%s\n' "${start_detail:-failed to start loop daemon}" >&2
+    return 1
+  fi
+
+  if ! start_detail="$(resolve_thread_id "$target" 2>&1)"; then
+    failure_reason="$(classify_loop_reason "$start_detail")"
+    mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$failure_reason" "loop start failed target=${target} reason=${failure_reason} detail=${start_detail//$'\n'/ | }"
+    stop_loop_daemon_if_idle
+    printf '%s\n' "$start_detail" >&2
+    return 1
+  fi
+  thread_id="$start_detail"
+
+  if ! start_detail="$(load_target_metadata "$thread_id" 2>/dev/null)"; then
+    failure_reason="start_failed"
+    mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$failure_reason" "loop start failed target=${target} reason=${failure_reason} detail=failed_to_load_target_metadata"
+    stop_loop_daemon_if_idle
+    die "failed to load target metadata for thread '${thread_id}'"
+  fi
+  IFS='|' read -r rollout_path thread_title first_user_message session_name <<<"$start_detail"
+
+  if ! start_detail="$(resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" 2>&1)"; then
+    failure_reason="$(classify_loop_reason "$start_detail")"
+    mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$failure_reason" "loop start failed target=${target} reason=${failure_reason} detail=${start_detail//$'\n'/ | }"
+    stop_loop_daemon_if_idle
+    printf '%s\n' "$start_detail" >&2
+    return 1
+  fi
+
+  source_tag="$(loop_source_tag)"
+  write_loop_status_kv "$source_tag" "$(date +%s)" "0" "" "0" "" "0" ""
   append_loop_log_line "$LOOP_LOG_FILE" "loop started target=${target} interval=${interval}s force_send=$([[ "$force_send" == "1" ]] && echo yes || echo no) message=${message}"
 
   printf 'started loop\n'
@@ -1653,18 +1849,67 @@ start_loop() {
   printf 'log: %s\n' "$LOOP_LOG_FILE"
 }
 
+resume_loop() {
+  local target="$1"
+  local key
+  local source_tag
+  local failure_reason=""
+  local thread_id
+  local rollout_path
+  local thread_title
+  local first_user_message
+  local session_name
+  key="$(hash_target "$target")"
+  paths_for_target "$key"
+  [[ -f "$LOOP_FILE" ]] || die "no loop found for target '${target}'"
+
+  TARGET=""
+  INTERVAL=""
+  MESSAGE=""
+  FORCE_SEND="0"
+  load_kv_file "$LOOP_FILE"
+  source_tag="$(stat -f '%m:%z' "$LOOP_FILE" 2>/dev/null || echo missing)"
+
+  if [[ -f "$LOOP_STATUS_FILE" ]]; then
+    FAILURE_REASON=""
+    PAUSED_REASON=""
+    STOPPED_REASON=""
+    load_kv_file "$LOOP_STATUS_FILE"
+    failure_reason="${PAUSED_REASON:-${STOPPED_REASON:-${FAILURE_REASON:-}}}"
+  fi
+
+  thread_id="$(resolve_thread_id "$target")"
+  IFS='|' read -r rollout_path thread_title first_user_message session_name <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
+  resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" >/dev/null
+  ensure_loop_daemon
+
+  write_loop_status_kv "$source_tag" "$(date +%s)" "0" "" "0" "" "0" ""
+  append_loop_log_line "$LOOP_LOG_FILE" "loop resumed target=${target}${failure_reason:+ previous_reason=${failure_reason}}"
+
+  printf 'resumed loop\n'
+  printf 'target: %s\n' "$target"
+  if [[ -n "$failure_reason" ]]; then
+    printf 'previous_reason: %s\n' "$failure_reason"
+  fi
+  printf 'log: %s\n' "$LOOP_LOG_FILE"
+}
+
 stop_one() {
   local target="$1"
   local key
+  local source_tag
   key="$(hash_target "$target")"
   paths_for_target "$key"
-  [[ -f "$LOOP_FILE" ]] || die "no running loop found for target '${target}'"
+  [[ -f "$LOOP_FILE" ]] || die "no loop found for target '${target}'"
+  TARGET=""
+  INTERVAL=""
+  MESSAGE=""
+  FORCE_SEND="0"
+  load_kv_file "$LOOP_FILE"
+  source_tag="$(loop_source_tag)"
   append_loop_log_line "$LOOP_LOG_FILE" "loop stopped target=${target}"
-  rm -f "$LOOP_FILE"
-  rm -f "$LOOP_STATUS_FILE" 2>/dev/null || true
-  if ! compgen -G "$LOOPS_DIR/*.loop" >/dev/null; then
-    stop_user_owned_sender_daemons || true
-  fi
+  write_loop_status_kv "$source_tag" "" "0" "" "0" "" "1" "stopped_by_user"
+  stop_loop_daemon_if_idle
   printf 'stopped loop for target=%s\n' "$target"
 }
 
@@ -1672,6 +1917,8 @@ stop_all() {
   local found=0
   local loop_file
   local target
+  local key
+  local source_tag
 
   shopt -s nullglob
   for loop_file in "$LOOPS_DIR"/*.loop; do
@@ -1681,18 +1928,46 @@ stop_all() {
     target="${TARGET:-unknown}"
     key="$(basename "${loop_file%.loop}")"
     paths_for_target "$key"
+    source_tag="$(loop_source_tag)"
     append_loop_log_line "$LOOP_LOG_FILE" "loop stopped target=${target}"
-    rm -f "$loop_file"
-    rm -f "$LOOP_STATUS_FILE" 2>/dev/null || true
+    write_loop_status_kv "$source_tag" "" "0" "" "0" "" "1" "stopped_by_user"
     printf 'stopped loop for target=%s\n' "$target"
   done
   shopt -u nullglob
 
-  stop_user_owned_sender_daemons || true
+  stop_loop_daemon_if_idle
 
   if [[ "$found" -eq 0 ]]; then
-    echo "no active loops"
+    echo "no loops"
   fi
+}
+
+delete_loop() {
+  local target="$1"
+  local key
+  key="$(hash_target "$target")"
+  paths_for_target "$key"
+  [[ -f "$LOOP_FILE" ]] || die "no loop found for target '${target}'"
+  rm -f "$LOOP_FILE"
+  rm -f "$LOOP_STATUS_FILE" 2>/dev/null || true
+  rm -f "$LOOP_LOG_FILE" 2>/dev/null || true
+  stop_loop_daemon_if_idle
+  printf 'deleted loop for target=%s\n' "$target"
+}
+
+save_loop_stopped() {
+  local target="$1"
+  local interval="$2"
+  local message="$3"
+  local force_send="${4:-0}"
+  local stopped_reason="${5:-start_failed}"
+  mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$stopped_reason" "loop saved as stopped target=${target} reason=${stopped_reason}"
+  printf 'saved stopped loop\n'
+  printf 'target: %s\n' "$target"
+  printf 'interval_seconds: %s\n' "$interval"
+  printf 'force_send: %s\n' "$([[ "$force_send" == "1" ]] && echo yes || echo no)"
+  printf 'reason: %s\n' "$stopped_reason"
+  printf 'log: %s\n' "$LOOP_LOG_FILE"
 }
 
 status_one() {
@@ -1712,6 +1987,8 @@ status_one() {
   local last_log_line=""
   local paused="no"
   local pause_reason=""
+  local stopped="no"
+  local stopped_reason=""
   local failure_count="0"
   local failure_reason=""
   if [[ -f "$LOOP_STATUS_FILE" ]]; then
@@ -1721,6 +1998,8 @@ status_one() {
     FAILURE_REASON=""
     PAUSED=""
     PAUSED_REASON=""
+    STOPPED=""
+    STOPPED_REASON=""
     load_kv_file "$LOOP_STATUS_FILE"
     next_run="${NEXT_RUN:-unknown}"
     [[ "${FAILURE_COUNT:-}" =~ ^[0-9]+$ ]] && failure_count="$FAILURE_COUNT"
@@ -1728,6 +2007,10 @@ status_one() {
     if [[ "${PAUSED:-0}" == "1" ]]; then
       paused="yes"
       pause_reason="${PAUSED_REASON:-$failure_reason}"
+    fi
+    if [[ "${STOPPED:-0}" == "1" ]]; then
+      stopped="yes"
+      stopped_reason="${STOPPED_REASON:-}"
     fi
   fi
   last_log_line="$(last_nonempty_log_line "$LOOP_LOG_FILE")"
@@ -1738,10 +2021,14 @@ status_one() {
   printf 'force_send: %s\n' "$([[ "${FORCE_SEND:-0}" == "1" ]] && echo yes || echo no)"
   printf 'message: %s\n' "${MESSAGE:-unknown}"
   printf 'next_run_epoch: %s\n' "$next_run"
+  printf 'stopped: %s\n' "$stopped"
   printf 'paused: %s\n' "$paused"
   printf 'failure_count: %s\n' "$failure_count"
   if [[ -n "$failure_reason" ]]; then
     printf 'failure_reason: %s\n' "$failure_reason"
+  fi
+  if [[ -n "$stopped_reason" ]]; then
+    printf 'stopped_reason: %s\n' "$stopped_reason"
   fi
   if [[ -n "$pause_reason" ]]; then
     printf 'pause_reason: %s\n' "$pause_reason"
@@ -1767,7 +2054,7 @@ status_all() {
   shopt -u nullglob
 
   if [[ "$found" -eq 0 ]]; then
-    echo "no active loops"
+    echo "no loops"
   fi
 
   legacy_sender_warning_lines || true
@@ -1814,6 +2101,30 @@ parse_loop_args() {
   [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
 }
 
+parse_loop_save_stopped_args() {
+  TARGET=""
+  MESSAGE="$DEFAULT_MESSAGE"
+  INTERVAL="$DEFAULT_INTERVAL"
+  FORCE_SEND=0
+  LOOP_STOPPED_REASON="start_failed"
+  while getopts ":t:m:i:r:fh" opt; do
+    case "$opt" in
+      t) TARGET="$OPTARG" ;;
+      m) MESSAGE="$OPTARG" ;;
+      i) INTERVAL="$OPTARG" ;;
+      r) LOOP_STOPPED_REASON="$OPTARG" ;;
+      f) FORCE_SEND=1 ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$TARGET" ]] || die "loop-save-stopped requires -t TARGET"
+  [[ "$INTERVAL" =~ ^[1-9][0-9]*$ ]] || die "interval must be a positive integer in seconds"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
 parse_stop_args() {
   TARGET=""
   STOP_ALL=0
@@ -1840,6 +2151,21 @@ parse_stop_args() {
   if [[ "$STOP_ALL" -eq 0 && -z "$TARGET" ]]; then
     die "stop requires -t TARGET or --all"
   fi
+}
+
+parse_loop_delete_args() {
+  TARGET=""
+  while getopts ":t:h" opt; do
+    case "$opt" in
+      t) TARGET="$OPTARG" ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$TARGET" ]] || die "loop-delete requires -t TARGET"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
 }
 
 parse_status_args() {
@@ -2017,6 +2343,14 @@ main() {
         stop_one "$TARGET"
       fi
       ;;
+    loop-delete)
+      parse_loop_delete_args "$@"
+      delete_loop "$TARGET"
+      ;;
+    loop-save-stopped)
+      parse_loop_save_stopped_args "$@"
+      save_loop_stopped "$TARGET" "$INTERVAL" "$MESSAGE" "$FORCE_SEND" "$LOOP_STOPPED_REASON"
+      ;;
     status)
       parse_status_args "$@"
       if [[ -n "$TARGET" ]]; then
@@ -2028,6 +2362,10 @@ main() {
     probe)
       parse_probe_args "$@"
       probe_session_status "$TARGET"
+      ;;
+    resolve-thread-id)
+      parse_probe_args "$@"
+      resolve_thread_id "$TARGET"
       ;;
     resolve-live-tty)
       parse_probe_args "$@"
@@ -2068,6 +2406,10 @@ main() {
     loop-once)
       [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
       process_loops_once
+      ;;
+    loop-resume)
+      parse_probe_args "$@"
+      resume_loop "$TARGET"
       ;;
     loop-daemon)
       [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"

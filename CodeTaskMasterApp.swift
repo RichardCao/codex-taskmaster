@@ -316,7 +316,8 @@ final class AppFocusTracker {
     private let currentProcessID = ProcessInfo.processInfo.processIdentifier
     private var activationObserver: Any?
     private let stateLock = NSLock()
-    private var lastNonTaskMasterBundleID = ""
+    private var lastExternalBundleID = ""
+    private var lastTerminalTTY = ""
 
     private init() {}
 
@@ -344,9 +345,16 @@ final class AppFocusTracker {
 
     func preferredReturnBundleID(fallback: String) -> String {
         stateLock.lock()
-        let tracked = lastNonTaskMasterBundleID
+        let tracked = lastExternalBundleID
         stateLock.unlock()
         return tracked.isEmpty ? fallback : tracked
+    }
+
+    func preferredTerminalTTY() -> String? {
+        stateLock.lock()
+        let tracked = lastTerminalTTY
+        stateLock.unlock()
+        return tracked.isEmpty ? nil : tracked
     }
 
     private func handleActivation(_ notification: Notification) {
@@ -359,11 +367,40 @@ final class AppFocusTracker {
     private func updateTrackedAppIfNeeded(_ app: NSRunningApplication) {
         guard app.processIdentifier != currentProcessID else { return }
         guard let bundleID = app.bundleIdentifier, !bundleID.isEmpty else { return }
-        guard bundleID != "com.apple.Terminal" else { return }
 
         stateLock.lock()
-        lastNonTaskMasterBundleID = bundleID
+        lastExternalBundleID = bundleID
+        if bundleID == "com.apple.Terminal" {
+            lastTerminalTTY = currentFrontTerminalTTY()
+        }
         stateLock.unlock()
+    }
+
+    private func currentFrontTerminalTTY() -> String {
+        let process = Process()
+        let stdout = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", """
+        tell application "Terminal"
+          try
+            return tty of selected tab of front window
+          on error
+            return ""
+          end try
+        end tell
+        """]
+        process.standardOutput = stdout
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return ""
+        }
+
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 }
 
@@ -516,6 +553,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let forceSend: String
         let message: String
         let nextRunEpoch: String
+        let stopped: String
+        let stoppedReason: String
         let paused: String
         let failureCount: String
         let failureReason: String
@@ -608,6 +647,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var sessionScanTotal = 0
     private var sessionScanShouldStop = false
     private var statusSegments: [String: String] = [:]
+    private var statusSegmentColors: [String: NSColor] = [:]
     private let defaultLoopSortKey = "nextRun"
     private let defaultSessionSortKey = "updatedAt"
     private var lastValidIntervalValue = "600"
@@ -663,12 +703,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var historyDropdownScrollView: NSScrollView?
     private var historyOutsideLocalMonitor: Any?
     private var historyOutsideGlobalMonitor: Any?
+    private var lastAmbiguityAlertAtBySignature: [String: Date] = [:]
+    private var lastTargetValidationFailureReason: String?
+    private var lastTargetValidationFailureDetail = ""
 
     private lazy var sendButton = makeButton(title: "发送一次", action: #selector(sendOnce))
     private lazy var startButton = makeButton(title: "开始循环", action: #selector(startLoop))
     private lazy var refreshLoopsButton = makeButton(title: "刷新循环", action: #selector(refreshLoopsAction))
     private lazy var detectStatusButton = makeButton(title: "检测状态", action: #selector(detectStatuses))
     private lazy var stopButton = makeButton(title: "停止当前", action: #selector(stopLoop))
+    private lazy var resumeLoopButton = makeButton(title: "恢复当前", action: #selector(resumeSelectedLoop))
+    private lazy var deleteLoopButton = makeButton(title: "删除当前", action: #selector(deleteSelectedLoop))
     private lazy var stopAllButton = makeButton(title: "全部停止", action: #selector(stopAllLoops))
     private lazy var saveRenameButton = makeButton(title: "保存", action: #selector(saveSessionRename))
     private lazy var archiveSessionButton = makeButton(title: "归档", action: #selector(archiveSelectedSession))
@@ -692,6 +737,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionStatusMetaLabel.stringValue = sessionEmptyStateText()
         updateDetectStatusButtonState()
         stopButton.isEnabled = false
+        resumeLoopButton.isEnabled = false
+        deleteLoopButton.isEnabled = false
         appendOutput("Code TaskMaster is ready.")
         appendOutput("Active Loops will refresh automatically every \(Int(autoRefreshInterval)) seconds.")
         refreshLoopsSnapshot()
@@ -765,7 +812,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         formGrid.column(at: 0).width = 120
         targetInputRow.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
 
-        let buttonRow = NSStackView(views: [sendButton, startButton, refreshLoopsButton, detectStatusButton, stopButton, stopAllButton])
+        let buttonRow = NSStackView(views: [sendButton, startButton, refreshLoopsButton, detectStatusButton, stopButton, resumeLoopButton, deleteLoopButton, stopAllButton])
         buttonRow.orientation = .horizontal
         buttonRow.spacing = 8
         buttonRow.alignment = .centerY
@@ -1000,6 +1047,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func configureLoopsTable() {
         let columns: [(identifier: String, title: String, width: CGFloat)] = [
             ("state", "Status", 88),
+            ("result", "Result", 96),
+            ("reason", "Reason", 138),
             ("target", "Target", 88),
             ("interval", "Interval", 72),
             ("forceSend", "Mode", 72),
@@ -1081,6 +1130,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         switch identifier {
         case "state":
             return 84
+        case "result":
+            return 92
+        case "reason":
+            return 120
         case "target", "message":
             return 88
         case "nextRun":
@@ -1096,6 +1149,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         switch identifier {
         case "state":
             return 132
+        case "result":
+            return 150
+        case "reason":
+            return 260
         case "target":
             return 220
         case "interval", "forceSend":
@@ -1160,21 +1217,23 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func loopStateLabel(_ loop: LoopSnapshot) -> String {
-        if loop.paused == "yes" {
-            return "已暂停"
+        if loop.stopped == "yes" {
+            return "停止"
         }
-
-        let line = loop.lastLogLine.localizedLowercase
-        if line.contains("status: success") || line.contains("reason: forced_sent") || line.contains("reason: sent_when_idle") {
+        if loop.paused == "yes" {
+            return "暂停"
+        }
+        let result = loopResultLabel(loop)
+        if result == "成功" {
             return "健康"
         }
-        if line.contains("status: accepted") || line.contains("queued_pending_feedback") || line.contains("request_still_processing") {
+        if result == "已排队" || result == "待确认" {
             return "排队"
         }
-        if line.contains("deferred:") {
+        if result == "待重试" {
             return "待重试"
         }
-        if line.contains("failed") || line.contains("status=failed") {
+        if result == "TTY 失效" || result == "权限缺失" || result == "失败" {
             return "失败"
         }
         if !loop.lastLogLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1183,14 +1242,124 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return "等待"
     }
 
+    private func loopLogField(_ line: String, key: String) -> String? {
+        let pattern = "\(key): "
+        guard let range = line.range(of: pattern) else { return nil }
+        let suffix = line[range.upperBound...]
+        let value = suffix.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? nil : value
+    }
+
+    private func localizedSendReason(_ reason: String) -> String {
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        let mappings: [String: String] = [
+            "sent": "已发送",
+            "forced_sent": "强制发送成功",
+            "queued_pending_feedback": "消息已排队",
+            "verification_pending": "等待确认",
+            "request_still_processing": "请求仍在处理",
+            "request_already_inflight": "相同请求已在队列中",
+            "ambiguous_target": "目标对应多个同名 Session",
+            "tty_unavailable": "TTY 不可用",
+            "tty_focus_failed": "TTY 聚焦失败",
+            "probe_failed": "状态探测失败",
+            "not_sendable": "当前状态不可发送",
+            "send_interrupted": "发送过程被中断",
+            "send_unverified": "发送后未看到确认",
+            "send_unverified_after_tty_fallback": "TTY 回退后仍未确认",
+            "invalid_request": "请求内容无效",
+            "missing_accessibility_permission": "缺少辅助功能权限",
+            "stopped_by_user": "已手动停止",
+            "start_failed": "启动失败"
+        ]
+
+        return mappings[trimmed] ?? trimmed
+    }
+
+    private func loopResultLabel(_ loop: LoopSnapshot) -> String {
+        if loop.stopped == "yes" {
+            return "已停止"
+        }
+        if loop.paused == "yes" {
+            return "已暂停"
+        }
+
+        let line = loop.lastLogLine
+        let status = loopLogField(line, key: "status")?.localizedLowercase ?? ""
+        let reason = loopLogField(line, key: "reason")?.localizedLowercase ?? ""
+        let normalizedLine = line.localizedLowercase
+
+        if status == "success" {
+            return "成功"
+        }
+        if status == "accepted" {
+            if reason == "verification_pending" {
+                return "待确认"
+            }
+            return "已排队"
+        }
+        if reason == "tty_unavailable" || reason == "tty_focus_failed" {
+            return "TTY 失效"
+        }
+        if normalizedLine.contains("辅助功能权限") || reason == "missing_accessibility_permission" {
+            return "权限缺失"
+        }
+        if normalizedLine.hasPrefix("deferred:") {
+            return "待重试"
+        }
+        if status == "failed" || normalizedLine.contains("status=failed") {
+            return "失败"
+        }
+        if !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "未知"
+        }
+        return "等待"
+    }
+
+    private func loopResultReasonLabel(_ loop: LoopSnapshot) -> String {
+        if loop.stopped == "yes" {
+            return localizedSendReason(loop.stoppedReason)
+        }
+        if loop.paused == "yes" {
+            return localizedSendReason(loop.pauseReason.isEmpty ? loop.failureReason : loop.pauseReason)
+        }
+        if let reason = loopLogField(loop.lastLogLine, key: "reason") {
+            return localizedSendReason(reason)
+        }
+        if loop.lastLogLine.localizedCaseInsensitiveContains("辅助功能权限") {
+            return localizedSendReason("missing_accessibility_permission")
+        }
+        return ""
+    }
+
+    private func loopResultColor(_ loop: LoopSnapshot) -> NSColor {
+        switch loopResultLabel(loop) {
+        case "成功":
+            return .systemGreen
+        case "已排队", "待确认", "待重试":
+            return .systemYellow
+        case "已停止":
+            return .secondaryLabelColor
+        case "TTY 失效", "权限缺失", "已暂停", "失败":
+            return .systemRed
+        default:
+            return .secondaryLabelColor
+        }
+    }
+
     private func loopStateColor(_ loop: LoopSnapshot) -> NSColor {
         switch loopStateLabel(loop) {
         case "健康":
             return .systemGreen
         case "排队", "待重试":
             return .systemYellow
-        case "已暂停", "失败":
+        case "暂停", "失败":
             return .systemRed
+        case "停止":
+            return .secondaryLabelColor
         default:
             return .secondaryLabelColor
         }
@@ -1208,12 +1377,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return 3
         case "未知":
             return 4
-        case "已暂停":
+        case "暂停":
             return 5
-        case "失败":
+        case "停止":
             return 6
-        default:
+        case "失败":
             return 7
+        default:
+            return 8
         }
     }
 
@@ -1221,6 +1392,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         switch identifier {
         case "state":
             return "● \(loopStateLabel(loop))"
+        case "result":
+            return "● \(loopResultLabel(loop))"
+        case "reason":
+            return loopResultReasonLabel(loop)
         case "target":
             return loop.target
         case "interval":
@@ -1228,6 +1403,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         case "forceSend":
             return loop.forceSend == "yes" ? "force" : "idle"
         case "nextRun":
+            if loop.stopped == "yes" {
+                return "-"
+            }
             return formatEpoch(loop.nextRunEpoch)
         case "message":
             return loop.message
@@ -1682,25 +1860,43 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return loopSnapshots[selectedRow].target
     }
 
+    private func selectedLoopSnapshot() -> LoopSnapshot? {
+        let selectedRow = activeLoopsTableView.selectedRow
+        guard selectedRow >= 0, selectedRow < loopSnapshots.count else { return nil }
+        return loopSnapshots[selectedRow]
+    }
+
+    private func updateLoopActionButtons() {
+        guard let loop = selectedLoopSnapshot() else {
+            stopButton.isEnabled = false
+            resumeLoopButton.isEnabled = false
+            deleteLoopButton.isEnabled = false
+            return
+        }
+        stopButton.isEnabled = (loop.stopped != "yes")
+        resumeLoopButton.isEnabled = (loop.paused == "yes" || loop.stopped == "yes")
+        deleteLoopButton.isEnabled = true
+    }
+
     private func restoreLoopSelection(preferredTarget: String?) {
         let selectionTarget = preferredTarget ?? preferredLoopSelectionTarget
         guard let selectionTarget else {
             activeLoopsTableView.deselectAll(nil)
-            stopButton.isEnabled = false
+            updateLoopActionButtons()
             return
         }
 
         guard let row = loopSnapshots.firstIndex(where: { $0.target == selectionTarget }) else {
             activeLoopsTableView.deselectAll(nil)
-            stopButton.isEnabled = false
             preferredLoopSelectionTarget = nil
+            updateLoopActionButtons()
             return
         }
 
         activeLoopsTableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         activeLoopsTableView.scrollRowToVisible(row)
-        stopButton.isEnabled = true
         preferredLoopSelectionTarget = selectionTarget
+        updateLoopActionButtons()
     }
 
     private func selectedSessionThreadID() -> String? {
@@ -1778,6 +1974,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             switch key {
             case "state":
                 orderedAscending = loopStateSortRank(lhs) < loopStateSortRank(rhs)
+            case "result":
+                orderedAscending = loopResultLabel(lhs).localizedStandardCompare(loopResultLabel(rhs)) == .orderedAscending
+            case "reason":
+                orderedAscending = loopResultReasonLabel(lhs).localizedStandardCompare(loopResultReasonLabel(rhs)) == .orderedAscending
             case "target":
                 orderedAscending = lhs.target.localizedStandardCompare(rhs.target) == .orderedAscending
             case "interval":
@@ -1805,6 +2005,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         switch key {
         case "state":
             return loopStateLabel(lhs) == loopStateLabel(rhs)
+        case "result":
+            return loopResultLabel(lhs) == loopResultLabel(rhs)
+        case "reason":
+            return loopResultReasonLabel(lhs) == loopResultReasonLabel(rhs)
         case "target":
             return lhs.target == rhs.target
         case "interval":
@@ -3065,7 +3269,13 @@ conn.close()
     private func setButtonsEnabled(_ enabled: Bool) {
         [sendButton, startButton, refreshLoopsButton, stopAllButton].forEach { $0.isEnabled = enabled }
         detectStatusButton.isEnabled = enabled || isSessionScanRunning
-        stopButton.isEnabled = enabled && activeLoopsTableView.selectedRow >= 0
+        if enabled {
+            updateLoopActionButtons()
+        } else {
+            stopButton.isEnabled = false
+            resumeLoopButton.isEnabled = false
+            deleteLoopButton.isEnabled = false
+        }
     }
 
     private func updateDetectStatusButtonState() {
@@ -3113,21 +3323,38 @@ conn.close()
     }
 
     private func setStatus(_ text: String, key: String = "general") {
+        setStatus(text, key: key, color: nil)
+    }
+
+    private func setStatus(_ text: String, key: String, color: NSColor?) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             statusSegments.removeValue(forKey: key)
+            statusSegmentColors.removeValue(forKey: key)
         } else {
             statusSegments[key] = trimmed
+            statusSegmentColors[key] = color ?? .secondaryLabelColor
         }
 
-        let orderedKeys = ["scan", "action", "general"]
-        let orderedTexts = orderedKeys.compactMap { statusSegments[$0] }
-        let fallbackTexts = statusSegments
-            .filter { !orderedKeys.contains($0.key) }
-            .sorted { $0.key < $1.key }
-            .map(\.value)
-        let allTexts = orderedTexts + fallbackTexts
-        statusLabel.stringValue = allTexts.isEmpty ? "Ready" : allTexts.joined(separator: " | ")
+        let orderedKeys = ["send", "action", "scan", "general"]
+        if let winningKey = orderedKeys.first(where: { statusSegments[$0]?.isEmpty == false }),
+           let winningText = statusSegments[winningKey] {
+            statusLabel.stringValue = winningText
+            statusLabel.textColor = statusSegmentColors[winningKey] ?? .secondaryLabelColor
+            return
+        }
+
+        if let fallback = statusSegments
+            .filter({ !$0.value.isEmpty && !orderedKeys.contains($0.key) })
+            .sorted(by: { $0.key < $1.key })
+            .first {
+            statusLabel.stringValue = fallback.value
+            statusLabel.textColor = statusSegmentColors[fallback.key] ?? .secondaryLabelColor
+            return
+        }
+
+        statusLabel.stringValue = "Ready"
+        statusLabel.textColor = .secondaryLabelColor
     }
 
     private func startAutoRefresh() {
@@ -3208,6 +3435,8 @@ conn.close()
                     forceSend: current["force_send"] ?? "no",
                     message: current["message"] ?? "unknown",
                     nextRunEpoch: current["next_run_epoch"] ?? "unknown",
+                    stopped: current["stopped"] ?? "no",
+                    stoppedReason: current["stopped_reason"] ?? "",
                     paused: current["paused"] ?? "no",
                     failureCount: current["failure_count"] ?? "0",
                     failureReason: current["failure_reason"] ?? "",
@@ -3228,7 +3457,7 @@ conn.close()
                 flushCurrent()
                 continue
             }
-            if line == "no active loops" {
+            if line == "no active loops" || line == "no loops" {
                 continue
             }
             if let range = line.range(of: ": ") {
@@ -3247,6 +3476,19 @@ conn.close()
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             guard line.hasPrefix("warning: ") else { return nil }
             return line
+        }
+    }
+
+    private func maybeShowLoopAmbiguityAlerts(_ loops: [LoopSnapshot]) {
+        for loop in loops {
+            let reasons = [loop.stoppedReason, loop.pauseReason, loop.failureReason]
+            let hasAmbiguousReason = reasons.contains { $0 == "ambiguous_target" }
+            let logMentionsAmbiguous = loop.lastLogLine.contains("ambiguous_target")
+            guard hasAmbiguousReason || logMentionsAmbiguous else { continue }
+            let detail = loop.lastLogLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "target=\(loop.target) | reason=ambiguous_target"
+                : loop.lastLogLine
+            showAmbiguousTargetAlert(target: loop.target, detail: detail, actionName: "处理循环", throttled: true)
         }
     }
 
@@ -3384,6 +3626,74 @@ conn.close()
             return nil
         }
         return value
+    }
+
+    private func showAmbiguousTargetAlert(target: String, detail: String, actionName: String, throttled: Bool) {
+        let normalizedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let signature = "\(target)|\(normalizedDetail)"
+        if throttled,
+           let lastShown = lastAmbiguityAlertAtBySignature[signature],
+           Date().timeIntervalSince(lastShown) < 8 {
+            return
+        }
+        lastAmbiguityAlertAtBySignature[signature] = Date()
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "目标不唯一"
+        alert.informativeText = "存在多个同名 Session，无法直接\(actionName)。请改用 Session ID，或先为它们设置不同名称。\n\n\(normalizedDetail)"
+        alert.addButton(withTitle: "确定")
+        alert.runModal()
+    }
+
+    @discardableResult
+    private func saveStoppedLoopEntry(target: String, interval: String, message: String, forceSend: Bool, reason: String) -> Bool {
+        if loopSnapshots.contains(where: { $0.target == target && $0.stopped != "yes" }) {
+            return false
+        }
+        var arguments = ["loop-save-stopped", "-t", target, "-i", interval, "-m", message, "-r", reason]
+        if forceSend {
+            arguments.append("-f")
+        }
+        let result = runStandardHelper(arguments: arguments)
+        if result.status != 0 {
+            let detail = result.stderr.isEmpty ? result.stdout : result.stderr
+            if !detail.isEmpty {
+                appendOutput("stderr: \(detail)")
+            }
+            return false
+        }
+        return true
+    }
+
+    private func isAmbiguousTargetError(_ detail: String) -> Bool {
+        detail.contains("found multiple matching sessions for target") ||
+        detail.contains("found multiple matching thread titles for target") ||
+        detail.contains("found multiple matching Terminal ttys for target")
+    }
+
+    private func validateUniqueTarget(_ target: String, actionName: String) -> Bool {
+        lastTargetValidationFailureReason = nil
+        lastTargetValidationFailureDetail = ""
+        let result = runStandardHelper(arguments: ["resolve-thread-id", "-t", target])
+        guard result.status == 0 else {
+            let detail = result.stderr.isEmpty ? result.stdout : result.stderr
+            if isAmbiguousTargetError(detail) {
+                lastTargetValidationFailureReason = "ambiguous_target"
+                lastTargetValidationFailureDetail = detail
+                showAmbiguousTargetAlert(target: target, detail: detail, actionName: actionName, throttled: false)
+                appendOutput("已阻止\(actionName)：目标 \(target) 匹配到多个 Session。")
+                setStatus("目标不唯一", key: "general", color: .systemRed)
+                return false
+            }
+            lastTargetValidationFailureReason = "start_failed"
+            lastTargetValidationFailureDetail = detail
+            appendOutput("stderr: \(detail)")
+            setStatus("\(actionName)前校验失败", key: "general", color: .systemRed)
+            NSSound.beep()
+            return false
+        }
+        return true
     }
 
     private func validateInterval() -> String? {
@@ -3594,6 +3904,20 @@ conn.close()
         return parts.filter { !$0.isEmpty }.joined(separator: " | ")
     }
 
+    private func sendOutcomeStatusText(kind: String, target: String, reason: String) -> String {
+        let localizedReason = localizedSendReason(reason)
+        switch kind {
+        case "success":
+            return localizedReason.isEmpty ? "发送成功: \(target)" : "发送成功: \(target) | \(localizedReason)"
+        case "accepted":
+            return localizedReason.isEmpty ? "发送已受理: \(target)" : "发送已受理: \(target) | \(localizedReason)"
+        case "failed":
+            return localizedReason.isEmpty ? "发送失败: \(target)" : "发送失败: \(target) | \(localizedReason)"
+        default:
+            return "发送状态更新: \(target)"
+        }
+    }
+
     private func makeTTYFocusFailureError(target: String, initialTTY: String, resolvedTTY: String?, resolveDetail: String) -> NSError {
         var detailParts = [
             "target=\(target)",
@@ -3685,6 +4009,19 @@ conn.close()
             }
         }
 
+        func updateSendStatus(_ text: String, color: NSColor) {
+            DispatchQueue.main.async {
+                self.setStatus(text, key: "send", color: color)
+            }
+        }
+
+        func maybeShowAmbiguityAlert(target: String, reason: String, detail: String) {
+            guard reason == "ambiguous_target" else { return }
+            DispatchQueue.main.async {
+                self.showAmbiguousTargetAlert(target: target, detail: detail, actionName: "发送", throttled: true)
+            }
+        }
+
         func finish(with result: [String: Any]) {
             do {
                 try writeJSONFile(at: resultURL, object: result)
@@ -3701,6 +4038,7 @@ conn.close()
             payload = try readJSONFile(at: processingURL)
         } catch {
             logActivity("发送请求失败: status=failed reason=invalid_request detail=failed to read request: \(error.localizedDescription)")
+            updateSendStatus(sendOutcomeStatusText(kind: "failed", target: "-", reason: "invalid_request"), color: .systemRed)
             finish(with: [
                 "status": "failed",
                 "reason": "invalid_request",
@@ -3713,6 +4051,7 @@ conn.close()
               let message = payload["message"] as? String,
               let timeoutSeconds = payload["timeout_seconds"] as? NSNumber else {
             logActivity("发送请求失败: status=failed reason=invalid_request detail=request file is missing target, message, or timeout_seconds")
+            updateSendStatus(sendOutcomeStatusText(kind: "failed", target: "-", reason: "invalid_request"), color: .systemRed)
             finish(with: [
                 "status": "failed",
                 "reason": "invalid_request",
@@ -3724,13 +4063,17 @@ conn.close()
         let forceSend = payload["force_send"] as? Bool ?? false
         let initialProbe = probeResult(for: target)
         guard initialProbe.status == 0 else {
-            logActivity("发送请求失败: status=failed reason=probe_failed target=\(target) force_send=\(forceSend ? "yes" : "no") detail=\(compactProbeSummary(initialProbe))")
+            let detail = compactProbeSummary(initialProbe)
+            let failureReason = isAmbiguousTargetError(detail) ? "ambiguous_target" : "probe_failed"
+            logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") detail=\(detail)")
+            updateSendStatus(sendOutcomeStatusText(kind: "failed", target: target, reason: failureReason), color: .systemRed)
+            maybeShowAmbiguityAlert(target: target, reason: failureReason, detail: detail)
             finish(with: [
                 "status": "failed",
-                "reason": "probe_failed",
+                "reason": failureReason,
                 "target": target,
                 "force_send": forceSend,
-                "detail": compactProbeSummary(initialProbe)
+                "detail": detail
             ])
             return
         }
@@ -3745,10 +4088,13 @@ conn.close()
         let sendableByState = isSendableProbeState(probeStatus: probeStatus, terminalState: terminalState)
         guard !tty.isEmpty else {
             let detail = appendLiveTTYResolutionDetail(compactProbeSummary(activeProbe), resolution: preparedProbe.resolution)
-            logActivity("发送请求失败: status=failed reason=tty_unavailable target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
+            let failureReason = isAmbiguousTargetError(detail) ? "ambiguous_target" : "tty_unavailable"
+            logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
+            updateSendStatus(sendOutcomeStatusText(kind: "failed", target: target, reason: failureReason), color: .systemRed)
+            maybeShowAmbiguityAlert(target: target, reason: failureReason, detail: detail)
             finish(with: [
                 "status": "failed",
-                "reason": "tty_unavailable",
+                "reason": failureReason,
                 "target": target,
                 "force_send": forceSend,
                 "detail": detail,
@@ -3760,6 +4106,7 @@ conn.close()
         guard forceSend || sendableByState else {
             let detail = appendLiveTTYResolutionDetail(compactProbeSummary(activeProbe), resolution: preparedProbe.resolution)
             logActivity("发送请求失败: status=failed reason=not_sendable target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
+            updateSendStatus(sendOutcomeStatusText(kind: "failed", target: target, reason: "not_sendable"), color: .systemRed)
             finish(with: [
                 "status": "failed",
                 "reason": "not_sendable",
@@ -3785,6 +4132,7 @@ conn.close()
             let failureReason = sendFailureReason(for: error)
             let detail = appendLiveTTYResolutionDetail(error.localizedDescription, resolution: preparedProbe.resolution)
             logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
+            updateSendStatus(sendOutcomeStatusText(kind: "failed", target: target, reason: failureReason), color: .systemRed)
             finish(with: [
                 "status": "failed",
                 "reason": failureReason,
@@ -3808,6 +4156,7 @@ conn.close()
             let baseDetail = "sent message via app sender to target=\(target) tty=\(usedTTY) clear_existing_input=\(clearResidualInputBeforeSend ? "yes" : "no")"
             let detail = appendLiveTTYResolutionDetail(baseDetail, resolution: preparedProbe.resolution)
             logActivity("发送请求完成: status=success reason=\(reason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
+            updateSendStatus(sendOutcomeStatusText(kind: "success", target: target, reason: reason), color: .systemGreen)
             finish(with: [
                 "status": "success",
                 "reason": reason,
@@ -3825,6 +4174,7 @@ conn.close()
             let queuedTerminalState = verification.probe.values["terminal_state"] ?? "unknown"
             let detail = appendLiveTTYResolutionDetail(compactProbeSummary(verification.probe), resolution: preparedProbe.resolution)
             logActivity("发送请求已排队: status=accepted reason=queued_pending_feedback target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(queuedProbeStatus) terminal_state=\(queuedTerminalState) detail=\(detail)")
+            updateSendStatus(sendOutcomeStatusText(kind: "accepted", target: target, reason: "queued_pending_feedback"), color: .systemOrange)
             finish(with: [
                 "status": "accepted",
                 "reason": "queued_pending_feedback",
@@ -3839,6 +4189,7 @@ conn.close()
 
         let verificationDetail = appendLiveTTYResolutionDetail(compactProbeSummary(verification.probe), resolution: preparedProbe.resolution)
         logActivity("发送请求待确认: status=accepted reason=verification_pending target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(verification.probe.values["status"] ?? "unknown") terminal_state=\(verification.probe.values["terminal_state"] ?? "unknown") detail=\(verificationDetail)")
+        updateSendStatus(sendOutcomeStatusText(kind: "accepted", target: target, reason: "verification_pending"), color: .systemOrange)
         finish(with: [
             "status": "accepted",
             "reason": "verification_pending",
@@ -3992,17 +4343,17 @@ conn.close()
         usleep(220_000)
     }
 
-    private func restoreFocusAfterTerminalSend(previousAppBundleID: String?) {
+    private func restoreFocusAfterTerminalSend(previousAppBundleID: String?, previousTerminalTTY: String?, targetTTY: String) {
         let currentAppBundleID = Bundle.main.bundleIdentifier ?? ""
         let immediatePreviousBundleID: String
-        if let previousAppBundleID,
-           !previousAppBundleID.isEmpty,
-           previousAppBundleID != "com.apple.Terminal" {
+        if let previousAppBundleID, !previousAppBundleID.isEmpty {
             immediatePreviousBundleID = previousAppBundleID
         } else {
             immediatePreviousBundleID = currentAppBundleID
         }
         let preferredBundleID = AppFocusTracker.shared.preferredReturnBundleID(fallback: immediatePreviousBundleID)
+        let preferredTerminalTTY = normalizedTTY(previousTerminalTTY ?? "")
+        let normalizedTargetTTY = normalizedTTY(targetTTY)
 
         let process = Process()
         let stdout = Pipe()
@@ -4012,16 +4363,67 @@ conn.close()
         process.arguments = [
             "-",
             preferredBundleID,
-            currentAppBundleID
+            currentAppBundleID,
+            preferredTerminalTTY,
+            normalizedTargetTTY
         ]
         process.standardOutput = stdout
         process.standardError = stderr
         process.standardInput = stdin
 
         let script = """
+        on activateRunningApp(bundleID)
+          if bundleID is "" then
+            return false
+          end if
+          tell application "System Events"
+            set matches to application processes whose bundle identifier is bundleID
+            if (count of matches) is 0 then
+              return false
+            end if
+          end tell
+          try
+            tell application id bundleID to activate
+            return true
+          on error
+            return false
+          end try
+        end activateRunningApp
+
+        on restorePreviousTerminalTTY(preferredTTY, currentTargetTTY)
+          if preferredTTY is "" then
+            return false
+          end if
+          if preferredTTY is equal to currentTargetTTY then
+            return false
+          end if
+          try
+            tell application "Terminal" to activate
+            delay 0.05
+            tell application "Terminal"
+              repeat with w in windows
+                try
+                  repeat with t in tabs of w
+                    if (tty of t) is equal to preferredTTY then
+                      set selected tab of w to t
+                      set index of w to 1
+                      return true
+                    end if
+                  end repeat
+                end try
+              end repeat
+            end tell
+          on error
+            return false
+          end try
+          return false
+        end restorePreviousTerminalTTY
+
         on run argv
           set preferredBundleID to item 1 of argv
           set fallbackBundleID to item 2 of argv
+          set preferredTerminalTTY to item 3 of argv
+          set targetTTY to item 4 of argv
 
           repeat with attempt from 1 to 6
             tell application "System Events"
@@ -4032,6 +4434,12 @@ conn.close()
               end try
             end tell
 
+            if preferredBundleID is equal to "com.apple.Terminal" then
+              if my restorePreviousTerminalTTY(preferredTerminalTTY, targetTTY) then
+                return "preferred_terminal_tty"
+              end if
+            end if
+
             if frontAppName is equal to "Terminal" then
               try
                 tell application "Terminal" to hide
@@ -4039,13 +4447,11 @@ conn.close()
               delay 0.05
             end if
 
-            if preferredBundleID is not "" then
-              try
-                tell application id preferredBundleID to activate
-              end try
+            if preferredBundleID is not "" and preferredBundleID is not "com.apple.Terminal" then
+              if my activateRunningApp(preferredBundleID) then
+                delay 0.05
+              end if
             end if
-
-            delay 0.05
 
             tell application "System Events"
               try
@@ -4066,7 +4472,9 @@ conn.close()
 
           if fallbackBundleID is not "" then
             try
-              tell application id fallbackBundleID to activate
+              if my activateRunningApp(fallbackBundleID) then
+                return "fallback"
+              end if
               return "fallback"
             end try
           end if
@@ -4102,9 +4510,14 @@ conn.close()
         let previousFrontAppBundleID = AppFocusTracker.shared.preferredReturnBundleID(
             fallback: NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? currentAppBundleID
         )
+        let previousTerminalTTY = AppFocusTracker.shared.preferredTerminalTTY()
         try focusTerminalWindow(for: ttyPath)
         defer {
-            restoreFocusAfterTerminalSend(previousAppBundleID: previousFrontAppBundleID)
+            restoreFocusAfterTerminalSend(
+                previousAppBundleID: previousFrontAppBundleID,
+                previousTerminalTTY: previousTerminalTTY,
+                targetTTY: ttyPath
+            )
         }
 
         if clearExistingInput {
@@ -4130,6 +4543,7 @@ conn.close()
 
     private func runHelper(arguments: [String], actionName: String) {
         persistDefaults()
+        setStatus("", key: "send")
         setButtonsEnabled(false)
         setStatus("\(actionName)执行中…", key: "action")
         appendOutput("执行 \(actionName): \(arguments.joined(separator: " "))")
@@ -4138,7 +4552,7 @@ conn.close()
             let result = self.runStandardHelper(arguments: arguments)
 
             DispatchQueue.main.async {
-                let accepted = result.status == 2
+                let accepted = (actionName == "发送一次") && result.status == 2
                 if !result.stdout.isEmpty {
                     self.appendOutput(result.stdout)
                 }
@@ -4152,7 +4566,11 @@ conn.close()
                     }
                     self.setStatus(accepted ? "\(actionName)已受理" : "\(actionName)完成", key: "action")
                 } else {
-                    self.setStatus("\(actionName)失败", key: "action")
+                    let detail = result.stderr.isEmpty ? result.stdout : result.stderr
+                    if self.isAmbiguousTargetError(detail) {
+                        self.showAmbiguousTargetAlert(target: self.currentTarget(), detail: detail, actionName: actionName, throttled: false)
+                    }
+                    self.setStatus("\(actionName)失败", key: "action", color: .systemRed)
                 }
                 self.setButtonsEnabled(true)
                 self.refreshLoopsSnapshot()
@@ -4226,10 +4644,10 @@ conn.close()
 
         if let session = sessionSnapshots.first(where: { sessionPossibleTargets($0).contains(trimmedTarget) }) {
             let targets = Set(loopTargetsAffectingSession(session))
-            return loopSnapshots.filter { targets.contains($0.target) }
+            return loopSnapshots.filter { targets.contains($0.target) && $0.stopped != "yes" }
         }
 
-        return loopSnapshots.filter { $0.target == trimmedTarget }
+        return loopSnapshots.filter { $0.target == trimmedTarget && $0.stopped != "yes" }
     }
 
     private func promptToReplaceExistingLoops(conflicts: [LoopSnapshot], target: String) -> Bool {
@@ -4295,11 +4713,21 @@ conn.close()
                 if !startResult.stderr.isEmpty {
                     self.appendOutput("stderr: \(startResult.stderr)")
                 }
+                if startResult.status != 0, failureText != nil {
+                    _ = self.saveStoppedLoopEntry(target: target, interval: interval, message: message, forceSend: forceSend, reason: "start_failed")
+                    self.appendOutput("已将开始失败的循环保留为停止状态。")
+                }
+                if startResult.status != 0 {
+                    let detail = startResult.stderr.isEmpty ? startResult.stdout : startResult.stderr
+                    if self.isAmbiguousTargetError(detail) {
+                        self.showAmbiguousTargetAlert(target: target, detail: detail, actionName: "开始循环", throttled: false)
+                    }
+                }
                 if startResult.status == 0 {
                     self.recordCurrentInputsInHistory()
                     self.setStatus("开始循环完成", key: "action")
                 } else {
-                    self.setStatus("开始循环失败", key: "action")
+                    self.setStatus("开始循环失败", key: "action", color: .systemRed)
                 }
                 self.setButtonsEnabled(true)
                 self.refreshLoopsSnapshot()
@@ -4357,6 +4785,8 @@ conn.close()
                     self.activeLoopsMetaLabel.stringValue = self.loopWarnings.first ?? "Failed to load active loops."
                     self.activeLoopsTableView.reloadData()
                     self.stopButton.isEnabled = false
+                    self.resumeLoopButton.isEnabled = false
+                    self.deleteLoopButton.isEnabled = false
                 }
                 return
             }
@@ -4372,11 +4802,12 @@ conn.close()
                     self.loopWarnings = self.parseWarnings(from: outText)
                     self.applyLoopSorting()
                     if self.loopSnapshots.isEmpty {
-                        self.activeLoopsMetaLabel.stringValue = self.loopWarnings.first ?? "No active loops."
+                        self.activeLoopsMetaLabel.stringValue = self.loopWarnings.first ?? "No loops."
                     } else {
                         let warningSuffix = self.loopWarnings.isEmpty ? "" : " | warnings: \(self.loopWarnings.count)"
                         self.activeLoopsMetaLabel.stringValue = "Loops: \(self.loopSnapshots.count)\(warningSuffix)"
                     }
+                    self.maybeShowLoopAmbiguityAlerts(self.loopSnapshots)
                 } else {
                     self.loopSnapshots = []
                     self.loopWarnings = [errText.isEmpty ? "Failed to load active loops." : errText]
@@ -4386,11 +4817,13 @@ conn.close()
                 self.adjustTableColumnWidths(self.activeLoopsTableView)
                 self.restoreLoopSelection(preferredTarget: selectedTarget)
                 self.refreshTableWrapping(self.activeLoopsTableView)
+                self.updateLoopActionButtons()
             }
         }
     }
 
     private func refreshSessionStatuses() {
+        setStatus("", key: "send")
         if isSessionScanRunning {
             stopSessionStatusScan()
             return
@@ -4575,9 +5008,13 @@ conn.close()
             }
             return
         }
+        guard validateUniqueTarget(target, actionName: "发送") else {
+            NSSound.beep()
+            return
+        }
         guard ensureAccessibilityTrust(prompt: true) else {
             appendOutput("Code TaskMaster 缺少辅助功能权限，无法发送按键。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
-            setStatus("缺少辅助功能权限")
+            setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
             NSSound.beep()
             return
         }
@@ -4598,9 +5035,20 @@ conn.close()
             }
             return
         }
+        guard validateUniqueTarget(target, actionName: "开始循环") else {
+            let reason = lastTargetValidationFailureReason ?? "start_failed"
+            _ = saveStoppedLoopEntry(target: target, interval: interval, message: currentMessage(), forceSend: isForceSendEnabled(), reason: reason)
+            setStatus("开始循环失败", key: "action", color: .systemRed)
+            refreshLoopsSnapshot()
+            NSSound.beep()
+            return
+        }
         guard ensureAccessibilityTrust(prompt: true) else {
             appendOutput("Code TaskMaster 缺少辅助功能权限，无法处理循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
-            setStatus("缺少辅助功能权限")
+            setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
+            _ = saveStoppedLoopEntry(target: target, interval: interval, message: currentMessage(), forceSend: isForceSendEnabled(), reason: "missing_accessibility_permission")
+            setStatus("开始循环失败", key: "action", color: .systemRed)
+            refreshLoopsSnapshot()
             NSSound.beep()
             return
         }
@@ -4663,21 +5111,72 @@ conn.close()
 
     @objc
     private func stopLoop() {
-        let selectedRow = activeLoopsTableView.selectedRow
-        guard selectedRow >= 0, selectedRow < loopSnapshots.count else {
+        guard let loop = selectedLoopSnapshot() else {
             appendOutput("请先在 Active Loops 中选择一条循环任务。")
             setStatus("请选择一个循环任务")
             NSSound.beep()
             return
         }
-        let target = loopSnapshots[selectedRow].target
-        targetField.stringValue = target
-        runHelper(arguments: ["stop", "-t", target], actionName: "停止当前")
+        guard loop.stopped != "yes" else {
+            appendOutput("当前选中的循环已经是停止状态。")
+            setStatus("当前循环已停止", key: "action")
+            NSSound.beep()
+            return
+        }
+        targetField.stringValue = loop.target
+        runHelper(arguments: ["stop", "-t", loop.target], actionName: "停止当前")
     }
 
     @objc
     private func stopAllLoops() {
         runHelper(arguments: ["stop", "--all"], actionName: "全部停止")
+    }
+
+    @objc
+    private func resumeSelectedLoop() {
+        guard let loop = selectedLoopSnapshot() else {
+            appendOutput("请先在 Active Loops 中选择一条循环任务。")
+            setStatus("请选择一个循环任务")
+            NSSound.beep()
+            return
+        }
+        guard loop.paused == "yes" || loop.stopped == "yes" else {
+            appendOutput("当前选中的循环既不是暂停状态，也不是停止状态。")
+            setStatus("当前循环不可恢复", key: "action")
+            NSSound.beep()
+            return
+        }
+
+        guard validateUniqueTarget(loop.target, actionName: "恢复当前") else {
+            setStatus("恢复当前失败", key: "action", color: .systemRed)
+            refreshLoopsSnapshot()
+            NSSound.beep()
+            return
+        }
+
+        guard ensureAccessibilityTrust(prompt: true) else {
+            appendOutput("Code TaskMaster 缺少辅助功能权限，无法恢复循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
+            setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
+            setStatus("恢复当前失败", key: "action", color: .systemRed)
+            NSSound.beep()
+            return
+        }
+
+        targetField.stringValue = loop.target
+        runHelper(arguments: ["loop-resume", "-t", loop.target], actionName: "恢复当前")
+    }
+
+    @objc
+    private func deleteSelectedLoop() {
+        guard let loop = selectedLoopSnapshot() else {
+            appendOutput("请先在 Active Loops 中选择一条循环任务。")
+            setStatus("请选择一个循环任务")
+            NSSound.beep()
+            return
+        }
+
+        targetField.stringValue = loop.target
+        runHelper(arguments: ["loop-delete", "-t", loop.target], actionName: "删除当前")
     }
 
     @objc
@@ -5077,6 +5576,8 @@ conn.close()
             textField.stringValue = stringValueForLoopColumn(columnID, loop: loop)
             if columnID == "state" {
                 textField.textColor = loopStateColor(loop)
+            } else if columnID == "result" {
+                textField.textColor = loopResultColor(loop)
             }
             textField.toolTip = textField.stringValue
             return cellView
@@ -5103,10 +5604,8 @@ conn.close()
                 let selectedTarget = loopSnapshots[selectedRow].target
                 preferredLoopSelectionTarget = selectedTarget
                 targetField.stringValue = selectedTarget
-                stopButton.isEnabled = true
-            } else {
-                stopButton.isEnabled = false
             }
+            updateLoopActionButtons()
             refreshTableWrapping(activeLoopsTableView)
             return
         }

@@ -143,6 +143,8 @@ cat >"$SESSION_INDEX" <<'EOF'
 {"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","thread_name":"alpha","updated_at":"2026-03-31T10:00:02Z"}
 {"id":"dddddddd-dddd-dddd-dddd-dddddddddddd","thread_name":"delta","updated_at":"2026-03-31T13:00:02Z"}
 {"id":"cccccccc-cccc-cccc-cccc-cccccccccccc","thread_name":"gamma","updated_at":"2026-03-31T12:00:02Z"}
+{"id":"cccccccc-cccc-cccc-cccc-cccccccccccc","thread_name":"duplicate","updated_at":"2026-03-31T12:00:03Z"}
+{"id":"dddddddd-dddd-dddd-dddd-dddddddddddd","thread_name":"duplicate","updated_at":"2026-03-31T13:00:03Z"}
 EOF
 
 export HOME="$HOME_DIR"
@@ -183,6 +185,13 @@ assert_contains "$probe_unnamed" "thread_id: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb
 assert_contains "$probe_unnamed" "name: "
 assert_contains "$probe_unnamed" "target: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 
+set +e
+ambiguous_target_output="$("$HELPER" resolve-thread-id -t duplicate 2>&1)"
+ambiguous_target_status=$?
+set -e
+[[ "$ambiguous_target_status" -ne 0 ]]
+assert_contains "$ambiguous_target_output" "found multiple matching sessions for target 'duplicate'"
+
 probe_all="$("$HELPER" probe-all -l 2 -o 0)"
 assert_contains "$probe_all" "name: alpha"
 assert_contains "$probe_all" "target: alpha"
@@ -209,10 +218,18 @@ resolved_tty_by_id="$(
 )"
 assert_equals "$resolved_tty_by_id" "ttys202"
 
+resolved_tty_alpha_by_thread_id="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_FIXTURE" \
+  "$HELPER" resolve-live-tty -t aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+)"
+assert_equals "$resolved_tty_alpha_by_thread_id" "ttys101"
+
 TTY_AMBIGUOUS_FIXTURE="${TEST_TMP}/tty-ps-ambiguous.txt"
 cat >"$TTY_AMBIGUOUS_FIXTURE" <<'EOF'
 ttys301 codex resume alpha
 ttys302 codex resume alpha
+ttys401 codex resume duplicate
+ttys402 codex resume duplicate
 EOF
 
 set +e
@@ -224,6 +241,16 @@ ambiguous_status=$?
 set -e
 [[ "$ambiguous_status" -ne 0 ]]
 assert_contains "$ambiguous_output" "found multiple matching Terminal ttys for target 'alpha'"
+
+set +e
+ambiguous_duplicate_tty_output="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_AMBIGUOUS_FIXTURE" \
+  "$HELPER" resolve-live-tty -t cccccccc-cccc-cccc-cccc-cccccccccccc 2>&1
+)"
+ambiguous_duplicate_tty_status=$?
+set -e
+[[ "$ambiguous_duplicate_tty_status" -ne 0 ]]
+assert_contains "$ambiguous_duplicate_tty_output" "found multiple matching Terminal ttys for target 'duplicate'"
 
 loop_key="$(printf 'alpha' | shasum -a 256 | awk '{print $1}')"
 mkdir -p "${STATE_DIR}/loops" "${STATE_DIR}/runtime/user-loop-state" "${STATE_DIR}/runtime/loop-logs"
@@ -290,10 +317,42 @@ CODEX_TASKMASTER_LOOP_FAILURE_PAUSE_THRESHOLD=3 \
 paused_counter_after="$(cat "$LOOP_SEND_COUNTER")"
 assert_equals "$paused_counter_after" "$paused_counter_before"
 
+stop_output="$("$HELPER" stop -t alpha)"
+assert_contains "$stop_output" "stopped loop for target=alpha"
+stopped_status="$("$HELPER" status -t alpha)"
+assert_contains "$stopped_status" "stopped: yes"
+assert_contains "$stopped_status" "stopped_reason: stopped_by_user"
+assert_contains "$stopped_status" "message: test-message"
+
+status_all_with_stopped="$("$HELPER" status)"
+assert_contains "$status_all_with_stopped" "target: alpha"
+assert_contains "$status_all_with_stopped" "stopped: yes"
+
+"$HELPER" loop-save-stopped -t alpha -i 45 -m start-failure -r tty_unavailable >/dev/null
+start_failed_loop_status="$("$HELPER" status -t alpha)"
+assert_contains "$start_failed_loop_status" "stopped: yes"
+assert_contains "$start_failed_loop_status" "stopped_reason: tty_unavailable"
+assert_contains "$start_failed_loop_status" "interval_seconds: 45"
+assert_contains "$start_failed_loop_status" "message: start-failure"
+
+"$HELPER" loop-save-stopped -t duplicate -i 50 -m duplicate-message -r stopped_by_user >/dev/null
+set +e
+duplicate_resume_output="$("$HELPER" loop-resume -t duplicate 2>&1)"
+duplicate_resume_status=$?
+set -e
+[[ "$duplicate_resume_status" -ne 0 ]]
+assert_contains "$duplicate_resume_output" "found multiple matching sessions for target 'duplicate'"
+
+delete_loop_output="$("$HELPER" loop-delete -t alpha)"
+assert_contains "$delete_loop_output" "deleted loop for target=alpha"
+"$HELPER" loop-delete -t duplicate >/dev/null
+status_after_loop_delete="$("$HELPER" status)"
+assert_contains "$status_after_loop_delete" "no loops"
+
 delete_output="$("$HELPER" thread-delete -t dddddddd-dddd-dddd-dddd-dddddddddddd)"
 assert_contains "$delete_output" "deleted: yes"
 assert_contains "$delete_output" "rollout_removed: yes"
-assert_contains "$delete_output" "session_index_removed: 1"
+assert_contains "$delete_output" "session_index_removed: 2"
 
 assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from threads where id = 'dddddddd-dddd-dddd-dddd-dddddddddddd';")" "0"
 assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from thread_dynamic_tools where thread_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd';")" "0"
@@ -307,7 +366,7 @@ assert_not_contains "$(cat "$SESSION_INDEX")" "dddddddd-dddd-dddd-dddd-ddddddddd
 delete_archived_output="$("$HELPER" thread-delete -t cccccccc-cccc-cccc-cccc-cccccccccccc)"
 assert_contains "$delete_archived_output" "deleted: yes"
 assert_contains "$delete_archived_output" "rollout_removed: yes"
-assert_contains "$delete_archived_output" "session_index_removed: 1"
+assert_contains "$delete_archived_output" "session_index_removed: 2"
 
 assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from threads where id = 'cccccccc-cccc-cccc-cccc-cccccccccccc';")" "0"
 assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from logs where thread_id = 'cccccccc-cccc-cccc-cccc-cccccccccccc';")" "0"
