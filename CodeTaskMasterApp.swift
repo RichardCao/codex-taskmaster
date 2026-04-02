@@ -590,6 +590,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var sessionSnapshots: [SessionSnapshot] = []
     private var allSessionSnapshots: [SessionSnapshot] = []
     private var loopWarnings: [String] = []
+    private var preferredLoopSelectionTarget: String?
     private var targetHistory: [String] = []
     private var messageHistory: [String] = []
     private var isSessionScanRunning = false
@@ -1393,21 +1394,24 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func restoreLoopSelection(preferredTarget: String?) {
-        guard let preferredTarget else {
+        let selectionTarget = preferredTarget ?? preferredLoopSelectionTarget
+        guard let selectionTarget else {
             activeLoopsTableView.deselectAll(nil)
             stopButton.isEnabled = false
             return
         }
 
-        guard let row = loopSnapshots.firstIndex(where: { $0.target == preferredTarget }) else {
+        guard let row = loopSnapshots.firstIndex(where: { $0.target == selectionTarget }) else {
             activeLoopsTableView.deselectAll(nil)
             stopButton.isEnabled = false
+            preferredLoopSelectionTarget = nil
             return
         }
 
         activeLoopsTableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         activeLoopsTableView.scrollRowToVisible(row)
         stopButton.isEnabled = true
+        preferredLoopSelectionTarget = selectionTarget
     }
 
     private func selectedSessionThreadID() -> String? {
@@ -4748,7 +4752,9 @@ conn.close()
         if tableView == activeLoopsTableView {
             let selectedRow = tableView.selectedRow
             if selectedRow >= 0, selectedRow < loopSnapshots.count {
-                targetField.stringValue = loopSnapshots[selectedRow].target
+                let selectedTarget = loopSnapshots[selectedRow].target
+                preferredLoopSelectionTarget = selectedTarget
+                targetField.stringValue = selectedTarget
                 stopButton.isEnabled = true
             } else {
                 stopButton.isEnabled = false
