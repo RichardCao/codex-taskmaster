@@ -191,6 +191,40 @@ assert_contains "$probe_all" "target: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 assert_not_contains "$probe_all" "cccccccc-cccc-cccc-cccc-cccccccccccc"
 assert_not_contains "$probe_all" "gamma"
 
+TTY_FIXTURE="${TEST_TMP}/tty-ps.txt"
+cat >"$TTY_FIXTURE" <<'EOF'
+ttys101 codex resume alpha
+ttys202 codex resume bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+EOF
+
+resolved_tty="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_FIXTURE" \
+  "$HELPER" resolve-live-tty -t alpha
+)"
+assert_equals "$resolved_tty" "ttys101"
+
+resolved_tty_by_id="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_FIXTURE" \
+  "$HELPER" resolve-live-tty -t bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+)"
+assert_equals "$resolved_tty_by_id" "ttys202"
+
+TTY_AMBIGUOUS_FIXTURE="${TEST_TMP}/tty-ps-ambiguous.txt"
+cat >"$TTY_AMBIGUOUS_FIXTURE" <<'EOF'
+ttys301 codex resume alpha
+ttys302 codex resume alpha
+EOF
+
+set +e
+ambiguous_output="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_AMBIGUOUS_FIXTURE" \
+  "$HELPER" resolve-live-tty -t alpha 2>&1
+)"
+ambiguous_status=$?
+set -e
+[[ "$ambiguous_status" -ne 0 ]]
+assert_contains "$ambiguous_output" "found multiple matching Terminal ttys for target 'alpha'"
+
 loop_key="$(printf 'alpha' | shasum -a 256 | awk '{print $1}')"
 mkdir -p "${STATE_DIR}/loops" "${STATE_DIR}/runtime/user-loop-state" "${STATE_DIR}/runtime/loop-logs"
 cat >"${STATE_DIR}/loops/${loop_key}.loop" <<'EOF'

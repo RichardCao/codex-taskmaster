@@ -3194,6 +3194,128 @@ conn.close()
         return reason == "turn is complete, but queued messages are still visible in Terminal"
     }
 
+    private func normalizedTTY(_ tty: String) -> String {
+        let trimmed = tty.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == "-" {
+            return ""
+        }
+        if trimmed.hasPrefix("/dev/") {
+            return String(trimmed.dropFirst("/dev/".count))
+        }
+        return trimmed
+    }
+
+    private func ttyPath(from tty: String) -> String {
+        let normalized = normalizedTTY(tty)
+        return normalized.hasPrefix("/dev/") ? normalized : "/dev/\(normalized)"
+    }
+
+    private func isTTYFocusFailure(_ error: Error) -> Bool {
+        let message = error.localizedDescription
+        return message.contains("could not focus Terminal window for ")
+    }
+
+    private func sendFailureReason(for error: Error) -> String {
+        let nsError = error as NSError
+        if let reason = nsError.userInfo["sendReason"] as? String, !reason.isEmpty {
+            return reason
+        }
+        return "send_interrupted"
+    }
+
+    private func resolveLiveTTY(target: String) -> (tty: String?, detail: String) {
+        let result = runStandardHelper(arguments: ["resolve-live-tty", "-t", target])
+        let detail = [result.stderr, result.stdout]
+            .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "failed to resolve live tty"
+        guard result.status == 0 else {
+            return (nil, detail)
+        }
+        let tty = normalizedTTY(result.stdout)
+        return (tty.isEmpty ? nil : tty, detail)
+    }
+
+    private func makeTTYFocusFailureError(target: String, initialTTY: String, resolvedTTY: String?, resolveDetail: String) -> NSError {
+        var detailParts = [
+            "target=\(target)",
+            "initial_tty=\(initialTTY.isEmpty ? "-" : initialTTY)"
+        ]
+        if let resolvedTTY, !resolvedTTY.isEmpty {
+            detailParts.append("resolved_live_tty=\(resolvedTTY)")
+        } else {
+            detailParts.append("resolved_live_tty=-")
+        }
+        if !resolveDetail.isEmpty {
+            detailParts.append("resolve_detail=\(resolveDetail)")
+        }
+        return NSError(
+            domain: "CodeTaskMaster",
+            code: 6,
+            userInfo: [
+                NSLocalizedDescriptionKey: detailParts.joined(separator: " | "),
+                "sendReason": "tty_focus_failed"
+            ]
+        )
+    }
+
+    private func sendViaResolvedTTY(target: String, initialTTY: String, message: String, clearExistingInput: Bool) throws -> String {
+        let startingTTY = normalizedTTY(initialTTY)
+        try terminalAutomationQueue.sync {
+            try self.sendViaAppKeystrokes(
+                ttyPath: self.ttyPath(from: startingTTY),
+                message: message,
+                clearExistingInput: clearExistingInput
+            )
+        }
+        return startingTTY
+    }
+
+    private func sendWithLiveTTYRetry(target: String, initialTTY: String, message: String, clearExistingInput: Bool) throws -> String {
+        let startingTTY = normalizedTTY(initialTTY)
+
+        do {
+            return try sendViaResolvedTTY(
+                target: target,
+                initialTTY: startingTTY,
+                message: message,
+                clearExistingInput: clearExistingInput
+            )
+        } catch {
+            guard isTTYFocusFailure(error) else {
+                throw error
+            }
+
+            let resolved = resolveLiveTTY(target: target)
+            guard let liveTTY = resolved.tty, !liveTTY.isEmpty, liveTTY != startingTTY else {
+                throw makeTTYFocusFailureError(
+                    target: target,
+                    initialTTY: startingTTY,
+                    resolvedTTY: resolved.tty,
+                    resolveDetail: resolved.detail
+                )
+            }
+
+            do {
+                return try sendViaResolvedTTY(
+                    target: target,
+                    initialTTY: liveTTY,
+                    message: message,
+                    clearExistingInput: clearExistingInput
+                )
+            } catch {
+                if isTTYFocusFailure(error) {
+                    throw makeTTYFocusFailureError(
+                        target: target,
+                        initialTTY: startingTTY,
+                        resolvedTTY: liveTTY,
+                        resolveDetail: resolved.detail
+                    )
+                }
+                throw error
+            }
+        }
+    }
+
     private func handleQueuedSendRequest(at processingURL: URL) {
         let resultURL = URL(fileURLWithPath: resultRequestDirectoryPath, isDirectory: true)
             .appendingPathComponent(processingURL.deletingPathExtension().deletingPathExtension().lastPathComponent + ".result.json")
@@ -3288,21 +3410,21 @@ conn.close()
             return
         }
 
-        let ttyPath = tty.hasPrefix("/dev/") ? tty : "/dev/\(tty)"
+        let usedTTY: String
 
         do {
-            try terminalAutomationQueue.sync {
-                try self.sendViaAppKeystrokes(
-                    ttyPath: ttyPath,
-                    message: message,
-                    clearExistingInput: clearResidualInputBeforeSend
-                )
-            }
+            usedTTY = try sendWithLiveTTYRetry(
+                target: target,
+                initialTTY: tty,
+                message: message,
+                clearExistingInput: clearResidualInputBeforeSend
+            )
         } catch {
-            logActivity("发送请求失败: status=failed reason=send_interrupted target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(error.localizedDescription)")
+            let failureReason = sendFailureReason(for: error)
+            logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(error.localizedDescription)")
             finish(with: [
                 "status": "failed",
-                "reason": "send_interrupted",
+                "reason": failureReason,
                 "target": target,
                 "force_send": forceSend,
                 "detail": error.localizedDescription,
@@ -3320,7 +3442,7 @@ conn.close()
 
         if verification.success {
             let reason = forceSend ? "forced_sent" : "sent"
-            let detail = "sent message via app sender to target=\(target) tty=\(tty) clear_existing_input=\(clearResidualInputBeforeSend ? "yes" : "no")"
+            let detail = "sent message via app sender to target=\(target) tty=\(usedTTY) clear_existing_input=\(clearResidualInputBeforeSend ? "yes" : "no")"
             logActivity("发送请求完成: status=success reason=\(reason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
             finish(with: [
                 "status": "success",

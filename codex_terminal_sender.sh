@@ -40,6 +40,7 @@ Usage:
   codex_terminal_sender.sh stop        [-t TARGET | --all]
   codex_terminal_sender.sh status      [-t TARGET]
   codex_terminal_sender.sh probe       -t TARGET
+  codex_terminal_sender.sh resolve-live-tty -t TARGET
   codex_terminal_sender.sh probe-all   [-l LIMIT] [-o OFFSET]
   codex_terminal_sender.sh session-count
   codex_terminal_sender.sh thread-name-set -t THREAD_ID -n NAME
@@ -56,6 +57,8 @@ Commands:
   stop        Stop one loop by target, or all loops with --all
   status      Show one loop status by target, or all loop statuses
   probe       Inspect the local Codex rollout/log state for one target
+  resolve-live-tty
+              Resolve the current live Terminal TTY for one target
   probe-all   Inspect known Codex sessions and summarize their statuses
   session-count
               Print the total number of non-archived Codex sessions
@@ -1331,7 +1334,11 @@ find_unique_tty() {
   local tty_list
 
   tty_list="$(
-    ps -axo tty=,command= | awk -v target="$target" '
+    if [[ -n "${CODEX_TASKMASTER_TTY_PS_FIXTURE:-}" ]]; then
+      cat "$CODEX_TASKMASTER_TTY_PS_FIXTURE"
+    else
+      ps -axo tty=,command=
+    fi | awk -v target="$target" '
       {
         needle = "codex resume " target
         pos = index($0, needle)
@@ -1361,6 +1368,11 @@ find_unique_tty() {
       return 1
       ;;
   esac
+}
+
+resolve_live_tty() {
+  local target="$1"
+  find_unique_tty "$target"
 }
 
 send_once_via_terminal_gui() {
@@ -1933,6 +1945,10 @@ main() {
     probe)
       parse_probe_args "$@"
       probe_session_status "$TARGET"
+      ;;
+    resolve-live-tty)
+      parse_probe_args "$@"
+      resolve_live_tty "$TARGET"
       ;;
     probe-all)
       parse_probe_all_args "$@"
