@@ -13,6 +13,7 @@ SEND_STABLE_IDLE_SECONDS="${CODEX_TASKMASTER_SEND_STABLE_IDLE_SECONDS:-2}"
 SEND_IDLE_TIMEOUT_SECONDS="${CODEX_TASKMASTER_SEND_IDLE_TIMEOUT_SECONDS:-20}"
 LOOP_IDLE_TIMEOUT_SECONDS="${CODEX_TASKMASTER_LOOP_IDLE_TIMEOUT_SECONDS:-12}"
 LOOP_BUSY_RETRY_SECONDS="${CODEX_TASKMASTER_LOOP_BUSY_RETRY_SECONDS:-5}"
+LOOP_FAILURE_PAUSE_THRESHOLD="${CODEX_TASKMASTER_LOOP_FAILURE_PAUSE_THRESHOLD:-5}"
 
 STATE_DIR="${CODEX_TASKMASTER_STATE_DIR:-${HOME}/.codex-terminal-sender}"
 REQUESTS_DIR="${STATE_DIR}/requests"
@@ -49,6 +50,7 @@ Usage:
   codex_terminal_sender.sh thread-delete -t THREAD_ID
   codex_terminal_sender.sh thread-list [--archived]
   codex_terminal_sender.sh wait-idle   -t TARGET [-s SECONDS] [-w SECONDS]
+  codex_terminal_sender.sh loop-once
   codex_terminal_sender.sh loop-daemon
 
 Commands:
@@ -73,6 +75,7 @@ Commands:
   thread-list
               List Codex sessions via the native app-server API
   wait-idle   Wait until the target appears stably idle
+  loop-once   Internal command: run one loop scheduling tick
   loop-daemon Internal command: user-owned background loop runner
 EOF
 }
@@ -1308,6 +1311,10 @@ send_message_when_ready() {
   local stable_seconds="${3:-$SEND_STABLE_IDLE_SECONDS}"
   local timeout_seconds="${4:-$SEND_IDLE_TIMEOUT_SECONDS}"
   local force_send="${5:-0}"
+  if [[ -n "${CODEX_TASKMASTER_SEND_STUB:-}" ]]; then
+    "$CODEX_TASKMASTER_SEND_STUB" "$target" "$message" "$stable_seconds" "$timeout_seconds" "$force_send"
+    return $?
+  fi
   local inflight_request=""
   inflight_request="$(find_matching_inflight_request "$target" "$message" 2>/dev/null || true)"
   if [[ -n "$inflight_request" ]]; then
@@ -1452,6 +1459,10 @@ process_loops_once() {
     local key
     local source_tag
     local next_run=0
+    local failure_count=0
+    local failure_reason=""
+    local paused=0
+    local paused_reason=""
     key="$(basename "${loop_file%.loop}")"
     paths_for_target "$key"
     source_tag="$(stat -f '%m:%z' "$loop_file" 2>/dev/null || echo missing)"
@@ -1459,10 +1470,28 @@ process_loops_once() {
     if [[ -f "$LOOP_STATUS_FILE" ]]; then
       STATE_TAG=""
       NEXT_RUN=""
+      FAILURE_COUNT=""
+      FAILURE_REASON=""
+      PAUSED=""
+      PAUSED_REASON=""
       load_kv_file "$LOOP_STATUS_FILE"
-      if [[ "${STATE_TAG:-}" == "$source_tag" && "${NEXT_RUN:-}" =~ ^[0-9]+$ ]]; then
-        next_run="$NEXT_RUN"
+      if [[ "${STATE_TAG:-}" == "$source_tag" ]]; then
+        if [[ "${NEXT_RUN:-}" =~ ^[0-9]+$ ]]; then
+          next_run="$NEXT_RUN"
+        fi
+        if [[ "${FAILURE_COUNT:-}" =~ ^[0-9]+$ ]]; then
+          failure_count="$FAILURE_COUNT"
+        fi
+        failure_reason="${FAILURE_REASON:-}"
+        if [[ "${PAUSED:-0}" == "1" ]]; then
+          paused=1
+          paused_reason="${PAUSED_REASON:-$failure_reason}"
+        fi
       fi
+    fi
+
+    if [[ "$paused" == "1" ]]; then
+      continue
     fi
 
     if [[ "$next_run" =~ ^[0-9]+$ ]] && (( now < next_run )); then
@@ -1471,13 +1500,18 @@ process_loops_once() {
 
     local send_output
     local send_status
+    local current_failure_reason
     if send_output="$(send_message_when_ready "$target" "$message" "$SEND_STABLE_IDLE_SECONDS" "$LOOP_IDLE_TIMEOUT_SECONDS" "$force_send" 2>&1)"; then
       append_loop_log_line "$LOOP_LOG_FILE" "sent: ${send_output//$'\n'/ | }"
       sleep "$LOOP_POST_SEND_COOLDOWN_SECONDS"
       now="$(date +%s)"
       write_kv_file "$LOOP_STATUS_FILE" \
         STATE_TAG "$source_tag" \
-        NEXT_RUN "$(( now + interval ))"
+        NEXT_RUN "$(( now + interval ))" \
+        FAILURE_COUNT "0" \
+        FAILURE_REASON "" \
+        PAUSED "0" \
+        PAUSED_REASON ""
     else
       send_status=$?
       if [[ "$send_status" -eq 2 ]]; then
@@ -1485,13 +1519,40 @@ process_loops_once() {
         now="$(date +%s)"
         write_kv_file "$LOOP_STATUS_FILE" \
           STATE_TAG "$source_tag" \
-          NEXT_RUN "$(( now + interval ))"
+          NEXT_RUN "$(( now + interval ))" \
+          FAILURE_COUNT "0" \
+          FAILURE_REASON "" \
+          PAUSED "0" \
+          PAUSED_REASON ""
       else
+        current_failure_reason="$(extract_probe_field "$send_output" "reason")"
+        [[ -n "$current_failure_reason" ]] || current_failure_reason="unknown_failure"
+        if [[ "$failure_reason" == "$current_failure_reason" ]]; then
+          failure_count="$(( failure_count + 1 ))"
+        else
+          failure_count=1
+        fi
+
         append_loop_log_line "$LOOP_LOG_FILE" "deferred: ${send_output//$'\n'/ | }"
         now="$(date +%s)"
-        write_kv_file "$LOOP_STATUS_FILE" \
-          STATE_TAG "$source_tag" \
-          NEXT_RUN "$(( now + LOOP_BUSY_RETRY_SECONDS ))"
+        if [[ "$LOOP_FAILURE_PAUSE_THRESHOLD" =~ ^[1-9][0-9]*$ ]] && (( failure_count >= LOOP_FAILURE_PAUSE_THRESHOLD )); then
+          append_loop_log_line "$LOOP_LOG_FILE" "paused: consecutive failure threshold reached count=${failure_count} reason=${current_failure_reason}"
+          write_kv_file "$LOOP_STATUS_FILE" \
+            STATE_TAG "$source_tag" \
+            NEXT_RUN "$now" \
+            FAILURE_COUNT "$failure_count" \
+            FAILURE_REASON "$current_failure_reason" \
+            PAUSED "1" \
+            PAUSED_REASON "$current_failure_reason"
+        else
+          write_kv_file "$LOOP_STATUS_FILE" \
+            STATE_TAG "$source_tag" \
+            NEXT_RUN "$(( now + LOOP_BUSY_RETRY_SECONDS ))" \
+            FAILURE_COUNT "$failure_count" \
+            FAILURE_REASON "$current_failure_reason" \
+            PAUSED "0" \
+            PAUSED_REASON ""
+        fi
       fi
     fi
   done
@@ -1649,11 +1710,25 @@ status_one() {
 
   local next_run="unknown"
   local last_log_line=""
+  local paused="no"
+  local pause_reason=""
+  local failure_count="0"
+  local failure_reason=""
   if [[ -f "$LOOP_STATUS_FILE" ]]; then
     STATE_TAG=""
     NEXT_RUN=""
+    FAILURE_COUNT=""
+    FAILURE_REASON=""
+    PAUSED=""
+    PAUSED_REASON=""
     load_kv_file "$LOOP_STATUS_FILE"
     next_run="${NEXT_RUN:-unknown}"
+    [[ "${FAILURE_COUNT:-}" =~ ^[0-9]+$ ]] && failure_count="$FAILURE_COUNT"
+    failure_reason="${FAILURE_REASON:-}"
+    if [[ "${PAUSED:-0}" == "1" ]]; then
+      paused="yes"
+      pause_reason="${PAUSED_REASON:-$failure_reason}"
+    fi
   fi
   last_log_line="$(last_nonempty_log_line "$LOOP_LOG_FILE")"
 
@@ -1663,6 +1738,14 @@ status_one() {
   printf 'force_send: %s\n' "$([[ "${FORCE_SEND:-0}" == "1" ]] && echo yes || echo no)"
   printf 'message: %s\n' "${MESSAGE:-unknown}"
   printf 'next_run_epoch: %s\n' "$next_run"
+  printf 'paused: %s\n' "$paused"
+  printf 'failure_count: %s\n' "$failure_count"
+  if [[ -n "$failure_reason" ]]; then
+    printf 'failure_reason: %s\n' "$failure_reason"
+  fi
+  if [[ -n "$pause_reason" ]]; then
+    printf 'pause_reason: %s\n' "$pause_reason"
+  fi
   printf 'log: %s\n' "$LOOP_LOG_FILE"
   if [[ -n "$last_log_line" ]]; then
     printf 'last_log_line: %s\n' "$last_log_line"
@@ -1981,6 +2064,10 @@ main() {
     wait-idle)
       parse_wait_idle_args "$@"
       wait_until_idle "$TARGET" "$STABLE_SECONDS" "$TIMEOUT_SECONDS"
+      ;;
+    loop-once)
+      [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+      process_loops_once
       ;;
     loop-daemon)
       [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"

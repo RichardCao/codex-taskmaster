@@ -10,10 +10,10 @@
 
 ## 当前队列
 
-1. `in_progress` `tty_focus_failed` 分类与 live tty 自动重定位
+1. `done` `tty_focus_failed` 分类与 live tty 自动重定位
    目标：把 Terminal 聚焦失败从普通发送中断里单独分离，并在失败后自动重探当前 live tty 再重试一次。
 
-2. `pending` loop 熔断 / 暂停机制
+2. `done` loop 熔断 / 暂停机制
    目标：连续同类失败时暂停 loop，而不是长期无意义重试。
 
 3. `pending` 自动重定位 live tty 的常态化兜底

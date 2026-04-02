@@ -243,6 +243,53 @@ status_output="$("$HELPER" status -t alpha)"
 assert_contains "$status_output" "force_send: yes"
 assert_contains "$status_output" "message: test-message"
 
+LOOP_SEND_STUB="${TEST_TMP}/loop-send-stub.sh"
+LOOP_SEND_COUNTER="${TEST_TMP}/loop-send-counter.txt"
+cat >"$LOOP_SEND_STUB" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+counter_file="${CODEX_TASKMASTER_TEST_COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+count="$((count + 1))"
+printf '%s' "$count" >"$counter_file"
+printf 'status: failed\n'
+printf 'reason: tty_focus_failed\n'
+printf 'detail: simulated tty focus failure\n'
+exit 1
+EOF
+chmod +x "$LOOP_SEND_STUB"
+
+rm -f "${STATE_DIR}/runtime/user-loop-state/${loop_key}.state"
+echo > "${STATE_DIR}/runtime/loop-logs/${loop_key}.log"
+
+for _ in 1 2 3; do
+  CODEX_TASKMASTER_SEND_STUB="$LOOP_SEND_STUB" \
+  CODEX_TASKMASTER_TEST_COUNTER_FILE="$LOOP_SEND_COUNTER" \
+  CODEX_TASKMASTER_LOOP_BUSY_RETRY_SECONDS=0 \
+  CODEX_TASKMASTER_LOOP_FAILURE_PAUSE_THRESHOLD=3 \
+  "$HELPER" loop-once
+done
+
+paused_status="$("$HELPER" status -t alpha)"
+assert_contains "$paused_status" "paused: yes"
+assert_contains "$paused_status" "failure_count: 3"
+assert_contains "$paused_status" "failure_reason: tty_focus_failed"
+assert_contains "$paused_status" "pause_reason: tty_focus_failed"
+paused_log="$(cat "${STATE_DIR}/runtime/loop-logs/${loop_key}.log")"
+assert_contains "$paused_log" "paused: consecutive failure threshold reached count=3 reason=tty_focus_failed"
+
+paused_counter_before="$(cat "$LOOP_SEND_COUNTER")"
+CODEX_TASKMASTER_SEND_STUB="$LOOP_SEND_STUB" \
+CODEX_TASKMASTER_TEST_COUNTER_FILE="$LOOP_SEND_COUNTER" \
+CODEX_TASKMASTER_LOOP_BUSY_RETRY_SECONDS=0 \
+CODEX_TASKMASTER_LOOP_FAILURE_PAUSE_THRESHOLD=3 \
+"$HELPER" loop-once
+paused_counter_after="$(cat "$LOOP_SEND_COUNTER")"
+assert_equals "$paused_counter_after" "$paused_counter_before"
+
 delete_output="$("$HELPER" thread-delete -t dddddddd-dddd-dddd-dddd-dddddddddddd)"
 assert_contains "$delete_output" "deleted: yes"
 assert_contains "$delete_output" "rollout_removed: yes"
