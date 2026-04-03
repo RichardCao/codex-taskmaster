@@ -32,9 +32,10 @@
 ## 阅读顺序
 
 1. [docs/ARCHITECTURE.md](/Users/create/codex-terminal-app/docs/ARCHITECTURE.md)
-2. [docs/PLATFORM_API.md](/Users/create/codex-terminal-app/docs/PLATFORM_API.md)
-3. [docs/LINUX_PORTING.md](/Users/create/codex-terminal-app/docs/LINUX_PORTING.md)
-4. [docs/LINUX_HANDOFF.md](/Users/create/codex-terminal-app/docs/LINUX_HANDOFF.md)
+2. [docs/LINUX_EXECUTION_PLAN.md](/Users/create/codex-terminal-app/docs/LINUX_EXECUTION_PLAN.md)
+3. [docs/PLATFORM_API.md](/Users/create/codex-terminal-app/docs/PLATFORM_API.md)
+4. [docs/LINUX_PORTING.md](/Users/create/codex-terminal-app/docs/LINUX_PORTING.md)
+5. [docs/LINUX_HANDOFF.md](/Users/create/codex-terminal-app/docs/LINUX_HANDOFF.md)
 
 ## 第一阶段只做这 6 件事
 

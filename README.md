@@ -123,8 +123,13 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 
 ## 工作方式
 
-项目主要由两部分组成：
+项目主要由四部分组成：
 
+- `TaskMasterCore.swift`
+  - 共享语义雏形
+  - session / loop 快照模型
+  - probe/thread 解析
+  - 状态与 reason 映射
 - `CodeTaskMasterApp.swift`
   - 桌面界面
   - session 状态扫描
@@ -248,6 +253,7 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 ## 仓库结构
 
 - `CodeTaskMasterApp.swift`：主应用
+- `TaskMasterCore.swift`：共享语义与解析逻辑
 - `TaskMasterSendRuntime.swift`：请求队列与平台发送运行时
 - `main.swift`：应用启动入口
 - `codex_terminal_sender.sh`：helper CLI 与循环引擎
@@ -258,6 +264,7 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 - `scripts/ui_smoke_test.sh`：独立 UI 启动烟雾测试
 - `tests/test_helper_smoke.sh`：helper 冒烟测试
 - `docs/ARCHITECTURE.md`：架构边界与分层建议
+- `docs/LINUX_EXECUTION_PLAN.md`：Linux 详细移植计划
 - `docs/LINUX_PORTING.md`：Linux 迁移方案
 - `docs/PLATFORM_API.md`：平台适配接口约定
 - `docs/LINUX_HANDOFF.md`：迁移到 Linux 时的交接清单

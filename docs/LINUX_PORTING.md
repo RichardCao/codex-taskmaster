@@ -30,6 +30,7 @@
 
 - 架构边界看 [docs/ARCHITECTURE.md](/Users/create/codex-terminal-app/docs/ARCHITECTURE.md)
 - 平台接口看 [docs/PLATFORM_API.md](/Users/create/codex-terminal-app/docs/PLATFORM_API.md)
+- 详细执行计划看 [docs/LINUX_EXECUTION_PLAN.md](/Users/create/codex-terminal-app/docs/LINUX_EXECUTION_PLAN.md)
 - 交接清单看 [docs/LINUX_HANDOFF.md](/Users/create/codex-terminal-app/docs/LINUX_HANDOFF.md)
 - 行动说明书看 [docs/LINUX_NEXT_STEPS.md](/Users/create/codex-terminal-app/docs/LINUX_NEXT_STEPS.md)
 

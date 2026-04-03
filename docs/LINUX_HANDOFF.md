@@ -41,6 +41,7 @@
 - [README.md](/Users/create/codex-terminal-app/README.md)
 - [docs/ARCHITECTURE.md](/Users/create/codex-terminal-app/docs/ARCHITECTURE.md)
 - [docs/LINUX_PORTING.md](/Users/create/codex-terminal-app/docs/LINUX_PORTING.md)
+- [docs/LINUX_EXECUTION_PLAN.md](/Users/create/codex-terminal-app/docs/LINUX_EXECUTION_PLAN.md)
 - [docs/PLATFORM_API.md](/Users/create/codex-terminal-app/docs/PLATFORM_API.md)
 - [docs/LINUX_HANDOFF.md](/Users/create/codex-terminal-app/docs/LINUX_HANDOFF.md)
 - [docs/LINUX_NEXT_STEPS.md](/Users/create/codex-terminal-app/docs/LINUX_NEXT_STEPS.md)
@@ -130,6 +131,7 @@ scripts/
 
 1. [README.md](/Users/create/codex-terminal-app/README.md)
 2. [docs/ARCHITECTURE.md](/Users/create/codex-terminal-app/docs/ARCHITECTURE.md)
-3. [docs/PLATFORM_API.md](/Users/create/codex-terminal-app/docs/PLATFORM_API.md)
-4. [docs/LINUX_PORTING.md](/Users/create/codex-terminal-app/docs/LINUX_PORTING.md)
-5. [docs/LINUX_NEXT_STEPS.md](/Users/create/codex-terminal-app/docs/LINUX_NEXT_STEPS.md)
+3. [docs/LINUX_EXECUTION_PLAN.md](/Users/create/codex-terminal-app/docs/LINUX_EXECUTION_PLAN.md)
+4. [docs/PLATFORM_API.md](/Users/create/codex-terminal-app/docs/PLATFORM_API.md)
+5. [docs/LINUX_PORTING.md](/Users/create/codex-terminal-app/docs/LINUX_PORTING.md)
+6. [docs/LINUX_NEXT_STEPS.md](/Users/create/codex-terminal-app/docs/LINUX_NEXT_STEPS.md)

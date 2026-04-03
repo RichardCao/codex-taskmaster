@@ -5,6 +5,7 @@
 当前实现事实：
 
 - 仓库仍是单仓结构，但关键边界已经开始形成
+- 共享语义雏形已经抽到 [TaskMasterCore.swift](/Users/create/codex-terminal-app/TaskMasterCore.swift)
 - macOS UI 主入口是 [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
 - 发送请求排队、平台发送适配、发送后验证主路径已经拆到 [TaskMasterSendRuntime.swift](/Users/create/codex-terminal-app/TaskMasterSendRuntime.swift)
 - helper CLI、loop daemon、session 扫描与 session 操作主逻辑仍主要在 [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh)
@@ -28,6 +29,9 @@
 
 当前主要分布：
 
+- [TaskMasterCore.swift](/Users/create/codex-terminal-app/TaskMasterCore.swift)
+  - Session / Loop 模型
+  - 解析与本地化语义
 - [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh)
   - loop 状态与日志目录
   - `probe_session_status`
@@ -177,6 +181,8 @@ UI 职责：
 - rename / archive / unarchive / delete
 - loop 文件读写与状态语义
 
+更具体的执行拆分见 [docs/LINUX_EXECUTION_PLAN.md](/Users/create/codex-terminal-app/docs/LINUX_EXECUTION_PLAN.md)。
+
 ### 第二步：只支持一个宿主
 
 建议第一优先级只支持 `tmux`：
@@ -235,6 +241,7 @@ docs/
   ARCHITECTURE.md
   PLATFORM_API.md
   LINUX_PORTING.md
+  LINUX_EXECUTION_PLAN.md
   LINUX_HANDOFF.md
   LINUX_NEXT_STEPS.md
 

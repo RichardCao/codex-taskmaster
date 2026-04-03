@@ -13,6 +13,7 @@ ICON_ICNS="${RES_DIR}/AppIcon.icns"
 HELPER_SRC="${ROOT}/codex_terminal_sender.sh"
 HELPER_DST="${RES_DIR}/codex_terminal_sender.sh"
 APP_SWIFT_SOURCES=(
+  "${ROOT}/TaskMasterCore.swift"
   "${ROOT}/CodeTaskMasterApp.swift"
   "${ROOT}/TaskMasterSendRuntime.swift"
   "${ROOT}/main.swift"

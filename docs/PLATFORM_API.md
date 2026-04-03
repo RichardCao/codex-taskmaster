@@ -2,6 +2,8 @@
 
 本文档定义未来 macOS / Linux / Windows 共用的发送能力边界，目标是让 UI、loop daemon 和 CLI 共享同一套发送主路径，而不是各自拼装平台细节。
 
+更具体的 Linux 阶段拆分见 [docs/LINUX_EXECUTION_PLAN.md](/Users/create/codex-terminal-app/docs/LINUX_EXECUTION_PLAN.md)。
+
 ## 目标
 
 - 上层不再关心具体是 `Terminal.app`、`tmux` 还是别的宿主

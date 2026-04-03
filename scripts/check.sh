@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_SWIFT_SOURCES=(
+  "${ROOT}/TaskMasterCore.swift"
   "${ROOT}/CodeTaskMasterApp.swift"
   "${ROOT}/TaskMasterSendRuntime.swift"
   "${ROOT}/main.swift"
