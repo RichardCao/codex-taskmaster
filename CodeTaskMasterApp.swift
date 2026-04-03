@@ -1028,7 +1028,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionPromptSearchCheckbox.setContentCompressionResistancePriority(.required, for: .horizontal)
         sessionSearchField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         sessionSearchField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        sessionSearchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 210).isActive = true
+        sessionSearchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
 
         sessionDetailScrollView.borderType = .bezelBorder
         sessionDetailScrollView.hasVerticalScroller = true
@@ -1114,8 +1114,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         clearLogButton.toolTip = "清空当前日志显示"
         saveLogButton.toolTip = "保存当前日志到文件"
         let logPanel = makePanel(title: "Activity Log", metaLabel: activityLogMetaLabel, contentView: outputScrollView, headerAccessoryView: logFilterControls)
-        let activeLoopsPane = makeSplitPane(contentView: activeLoopsPanel, minWidth: 260, minHeight: 100)
-        let sessionStatusPane = makeSplitPane(contentView: sessionStatusPanel, minWidth: 220, minHeight: 100)
+        let activeLoopsPane = makeSplitPane(contentView: activeLoopsPanel, minWidth: 220, minHeight: 100)
+        let sessionStatusPane = makeSplitPane(contentView: sessionStatusPanel, minWidth: 180, minHeight: 100)
         let topContentPane = makeSplitPane(contentView: topSplitView, minHeight: LayoutMetrics.topPaneMinHeight)
         let logPane = makeSplitPane(contentView: logPanel, minHeight: LayoutMetrics.bottomPaneMinHeight)
         topSplitView.isVertical = true
@@ -5750,8 +5750,8 @@ conn.close()
         if splitView == topSplitView {
             let availableWidth = splitView.bounds.width - splitView.dividerThickness
             guard availableWidth > 0 else { return proposedPosition }
-            let minLeading: CGFloat = 260
-            let minTrailing: CGFloat = 220
+            let minLeading: CGFloat = 220
+            let minTrailing: CGFloat = 180
             return min(max(proposedPosition, minLeading), availableWidth - minTrailing)
         }
 
