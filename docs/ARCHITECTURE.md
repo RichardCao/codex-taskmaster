@@ -1,151 +1,185 @@
 # 架构说明
 
-本文档用于把 `Code TaskMaster` 从“单个 macOS App 工程”梳理成“可移植的核心逻辑 + 平台适配层”。
+本文档把当前仓库梳理成一套更稳定的分层视角，目标不是“立刻重写”，而是让后续 macOS 继续演进、Linux 迁移、Windows 评估时都沿着同一套边界做事。
 
-当前项目的实现事实：
+当前实现事实：
 
-- UI、发送、session 扫描、循环、日志、session 管理都还在同一仓库内
-- App 端主入口是 [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
-- 请求队列与平台发送运行时已拆到 [TaskMasterSendRuntime.swift](/Users/create/codex-terminal-app/TaskMasterSendRuntime.swift)
-- helper CLI 与循环引擎是 [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh)
-- 当前发送链路默认面向 macOS `Terminal.app`
+- 仓库仍是单仓结构，但关键边界已经开始形成
+- macOS UI 主入口是 [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
+- 发送请求排队、平台发送适配、发送后验证主路径已经拆到 [TaskMasterSendRuntime.swift](/Users/create/codex-terminal-app/TaskMasterSendRuntime.swift)
+- helper CLI、loop daemon、session 扫描与 session 操作主逻辑仍主要在 [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh)
+- 当前平台实现默认面向 macOS `Terminal.app`
 
-## 目标分层
+## 推荐分层
 
-建议按下面 4 层重构。
+建议稳定成下面 4 层。
 
 ### 1. Core
 
-平台无关，未来 Linux / Windows / macOS 都应共享。
+平台无关，Linux / Windows / macOS 理论上都应共享同一套语义。
 
 职责：
 
 - 读取 Codex 本地 session 元数据
-- 解析 `probe` / `probe-all` / `thread-list` 结果
-- 维护 session 名称语义
-- 维护循环任务状态文件
-- 维护 loop 互斥与重试退避语义
-- 维护日志输出格式
-- 统一错误码、状态码、原因文本
+- 解析 `thread-list`、`probe`、`probe-all`
+- 维护 name / target / canonical session 语义
+- 维护 loop 配置、状态文件、日志与互斥约束
+- 维护发送结果分类、错误码、原因文本
 
-当前对应的主要代码：
+当前主要分布：
 
-- [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh) 中：
-  - loop 状态文件与日志目录常量
-  - `append_loop_log_line`
-  - `find_conflicting_running_loop_target`
-  - `accepted_retry_delay_seconds`
-  - `failure_retry_delay_seconds`
+- [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh)
+  - loop 状态与日志目录
   - `probe_session_status`
-  - `thread_archive`
-  - `thread_unarchive`
-  - `thread_delete`
   - `probe_all_sessions`
+  - `find_conflicting_running_loop_target`
+  - 重试退避相关逻辑
+  - `thread_archive` / `thread_unarchive` / `thread_delete`
   - `start_loop` / `stop_loop` / `status_loop`
-- [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift) 中：
+- [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
   - `SessionSnapshot`
   - `parseProbeAllOutput`
   - `parseThreadListOutput`
   - `mergeSessionSnapshots`
-  - `localizedSessionStatusLabel`
-  - `localizedTerminalState`
-  - `localizedSessionReason`
+  - 本地化状态 / terminal / reason 映射
+
+后续原则：
+
+- Core 不依赖具体窗口聚焦、剪贴板、按键注入
+- 同一 canonical session / thread id 只允许一个运行态 loop 的规则放在 Core
+- `accepted`、`send_unverified` 这类中间态的重试语义也应放在 Core
 
 ### 2. Platform Adapter
 
-平台相关能力层。重点是“定位 session 所在终端”和“向目标终端注入输入”。
+平台相关能力层，负责“把消息交给正确宿主”。
 
 职责：
 
-- 找到目标 session 对应的终端宿主
-- 聚焦目标宿主
-- 清空残留输入
-- 发送消息
-- 发送后验证是否推进
-- 枚举运行中的 session 终端
+- 解析 target 到具体终端宿主
+- 探测宿主当前输入状态
+- 必要时清理残留输入
+- 发送消息并提交
+- 参与发送后验证
+- 向上层暴露统一的 `success / accepted / failed` 结果
 
-当前 macOS 实现：
+当前 macOS 相关实现：
 
 - [TaskMasterSendRuntime.swift](/Users/create/codex-terminal-app/TaskMasterSendRuntime.swift)
   - `PlatformSendAdapter`
   - `MacOSTerminalSendAdapter`
   - `SendRequestCoordinator`
 - [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh)
-  - `find_unique_tty`
-  - `send_message_via_terminal_gui`
+  - TTY 解析
   - AppleScript / `osascript` / `System Events`
 
-Linux 迁移时，这一层应改为新的适配器，不要直接复用 macOS 逻辑。
+后续原则：
 
-补充约束：
+- 平台层只做“发送到哪里、怎么发、发完怎么验”
+- 不负责 loop 并发互斥
+- 如果借助系统剪贴板，必须自带恢复逻辑
+- 平台自动化不应长期阻塞 GUI 主线程
 
-- 平台层需要支持三类发送结果：`success`、`accepted`、`failed`
-- `accepted` 表示平台已经接手请求，但最终交付还在验证中
-- 平台层如果需要借助系统剪贴板，必须自带恢复逻辑
-- 平台自动化不应把 GUI 主线程长期卡住
-- 平台层不负责决定同一 canonical session 是否允许多个运行态 loop，这个约束应放在 Core
+### 3. Queue / Orchestration
 
-### 3. Desktop UI
-
-图形界面层，不应该再直接承载平台发送逻辑。
+这是发送编排层，逻辑上应独立于平台层与 UI 层。
 
 职责：
 
-- 表单输入
-- 列表呈现
-- 排序 / 筛选 / 搜索
-- 触发动作
-- 展示日志
-- 展示 Session 详情、最近发送统计、相关 Loop
-- 提供 Activity Log 的关键词筛选、失败过滤、当前 Session 过滤与导出
+- 串行消费发送请求
+- 先 probe，再决定默认模式是否允许发送
+- 调用平台适配器执行真实发送
+- 做发送后验证与结果归类
+- 产出统一结果给 UI、loop daemon、日志系统
 
-当前实现：
+当前主要实现在：
+
+- [TaskMasterSendRuntime.swift](/Users/create/codex-terminal-app/TaskMasterSendRuntime.swift)
+
+后续原则：
+
+- 单次发送与 loop 发送共用同一条发送主路径
+- UI 不应该直接拼接平台细节
+- Linux 版本即使先做 CLI，也应复用这层语义，而不是重新定义一套状态
+
+### 4. UI / Packaging
+
+负责交互、展示、构建与打包。
+
+UI 职责：
+
+- 表单输入
+- 列表、排序、筛选、搜索
+- Session 详情
+- Activity Log 展示与导出
+- 告警与状态提示
+
+当前主要实现在：
 
 - [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
-  - UI、状态文案、本地交互
-- [TaskMasterSendRuntime.swift](/Users/create/codex-terminal-app/TaskMasterSendRuntime.swift)
-  - UI 调用的发送运行时桥接层
 
-Linux 如果继续做 GUI，建议改成：
-
-- Qt
-- Tauri
-- Electron
-- 或先不做 GUI，只保留 CLI
-
-### 4. Packaging / Tooling
-
-构建、打包、图标、CI。
-
-当前 macOS 绑定点：
+打包与工具链当前主要在：
 
 - [build_code_taskmaster_app.sh](/Users/create/codex-terminal-app/build_code_taskmaster_app.sh)
 - [generate_icon.swift](/Users/create/codex-terminal-app/generate_icon.swift)
-- `.app` bundle
-- `sips`
-- `iconutil`
-- macOS SDK / AppKit
+- [scripts/check.sh](/Users/create/codex-terminal-app/scripts/check.sh)
+- [scripts/regression_check.sh](/Users/create/codex-terminal-app/scripts/regression_check.sh)
 
-Linux 上这部分需要重建，不能沿用。
+后续原则：
 
-## 推荐的 Linux 迁移顺序
+- UI 不直接承载平台自动化细节
+- Linux 如果先做 CLI，可以暂时没有 UI
+- macOS `.app` 打包链路不应直接迁移到 Linux
 
-### 第一步：先只移植 Core
+## 对 Linux 迁移最重要的边界
 
-先确保下面能力在 Linux 能无 GUI 地运行：
+如果只看 Linux，最该稳定的不是界面，而是下面 3 个边界。
+
+### A. Session 数据边界
+
+要明确哪些逻辑属于共享语义：
+
+- 读 `thread-list`
+- 读 `probe-all`
+- 合并 session 快照
+- 解释真正的 `name`
+- 维护 `target` 与 canonical session 的对应关系
+
+### B. Send Engine 边界
+
+建议统一成下面这条主路径：
+
+- `resolveTarget`
+- `probeTarget`
+- `sendMessage`
+- `verifyDelivery`
+
+这样单次发送、loop daemon、未来 Linux GUI 才能复用。
+
+### C. Session Mutation 边界
+
+要单独稳定：
+
+- rename
+- archive
+- unarchive
+- delete
+
+这样 macOS UI、Linux CLI、未来其他平台都能复用一套行为定义。
+
+## Linux 推荐迁移顺序
+
+### 第一步：先移植共享语义
+
+先让下面能力在 Linux CLI 下跑通：
 
 - session 扫描
 - status 推断
-- thread rename / archive / unarchive / delete
-- loop 状态读写
+- rename / archive / unarchive / delete
+- loop 文件读写与状态语义
 
-这一步不要求发送消息。
+### 第二步：只支持一个宿主
 
-### 第二步：做 Linux 发送适配层
-
-建议优先限定一个终端宿主，而不是直接支持所有终端。
-
-推荐顺序：
+建议第一优先级只支持 `tmux`：
 
 1. `tmux`
 2. `screen`
@@ -157,88 +191,52 @@ Linux 上这部分需要重建，不能沿用。
 - 任意 shell
 - 任意窗口管理器
 
-### 第三步：再决定是否需要 Linux GUI
-
-如果 Linux 侧只是自己使用，先做 CLI 往往更稳。
+### 第三步：最后再决定 UI
 
 推荐顺序：
 
-1. `core + linux helper`
-2. CLI 验证
-3. 再补 GUI
+1. `core + linux adapter + CLI`
+2. 用真实工作流验证
+3. 再决定是否需要 Linux GUI
 
-## 当前最应该拆出的边界
+## Linux 第一版建议目标
 
-最值得优先抽离的边界有 3 个。
+建议 Linux 第一版只追求：
 
-### A. Session 数据源边界
-
-需要从 UI 和发送逻辑里分离出来的能力：
-
-- 读取 `thread-list`
-- 读取 `probe-all`
-- 合并 session 快照
-- 解释真正的 `Name`
-
-### B. Send Engine 边界
-
-建议统一成单一接口：
-
-- `probeTarget`
-- `locateTarget`
-- `sendMessage`
-- `verifyDelivery`
-
-这样 GUI、loop daemon、单次发送就都能复用同一套发送管线。
-
-### C. Session Mutation 边界
-
-抽出：
-
-- rename
-- archive
-- unarchive
-- delete
-
-保证未来 Linux CLI 和 GUI 都共用同一行为。
-
-## Linux 端建议的最小版本目标
-
-建议 Linux 第一版只追求下面能力：
-
-- 支持读取本机 `~/.codex`
-- 支持列出 session
-- 支持状态探测
-- 支持 rename / archive / unarchive / delete
-- 支持 `tmux` 中运行的 Codex session 单次发送
+- 读取本机 `~/.codex`
+- 列出 session
+- 做状态探测
+- rename / archive / unarchive / delete
+- 向 `tmux` 中运行的 Codex session 单次发送
 - 支持 loop daemon
 
-不建议 Linux 第一版就追求：
+第一版不建议追求：
 
 - 任意 GUI terminal 自动聚焦
-- 桌面级 GUI 自动化按键
+- 桌面级按键自动化
 - 多终端通用兼容
-- 和 macOS 图形界面完全一致
+- 与 macOS UI 完全一致
 
-## 当前不建议直接移植的文件
+## 当前不建议直接移植的内容
 
-下面这些文件是强绑定 macOS 的，应视为参考，不应直接作为 Linux 版本主实现：
+下面这些仍是强绑定 macOS 的，Linux 应视为参考，而不是直接复用：
 
 - [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
 - [build_code_taskmaster_app.sh](/Users/create/codex-terminal-app/build_code_taskmaster_app.sh)
 - [generate_icon.swift](/Users/create/codex-terminal-app/generate_icon.swift)
 - [scripts/ui_smoke_test.sh](/Users/create/codex-terminal-app/scripts/ui_smoke_test.sh)
 
-## 建议的新目录结构
+## 建议目录演进方向
 
-Linux 迁移时建议逐步演进成：
+后续如果继续拆分，建议逐步演进成：
 
 ```text
 docs/
   ARCHITECTURE.md
-  LINUX_PORTING.md
   PLATFORM_API.md
+  LINUX_PORTING.md
   LINUX_HANDOFF.md
+  LINUX_NEXT_STEPS.md
 
 core/
   session_model.*
@@ -250,9 +248,11 @@ platform/
   macos/
   linux/
 
+queue/
+
 ui/
   macos/
   linux/
 ```
 
-这里的 `*` 只是占位，语言可以后续再定。
+这里的 `*` 只是占位，具体语言后续再定。

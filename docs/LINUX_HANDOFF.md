@@ -1,8 +1,6 @@
 # Linux 开发交接清单
 
-本文档只回答一个问题：
-
-把当前项目迁移到 Linux 开发时，应该带哪些内容过去。
+本文档只回答一个问题：切到 Linux 机器继续开发时，到底要把什么带过去，以及先看什么。
 
 ## 建议直接复制到 Linux 的内容
 
@@ -24,18 +22,13 @@
 
 - [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh)
 - [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
+- [TaskMasterSendRuntime.swift](/Users/create/codex-terminal-app/TaskMasterSendRuntime.swift)
 
 说明：
 
-- 前者是 helper / loop / session 操作的主要参考实现
-- 后者虽然是 macOS UI，但里面有大量 session 解析、状态映射、结果解释逻辑
-- 最近还补了 6 个和 Linux 迁移语义相关的点：
-  - 发送结果新增“已受理待确认”中间态
-  - 发送后焦点恢复
-  - 避免发送链路卡住 UI 主线程
-  - 发送前后恢复剪贴板，避免污染用户环境
-  - 同一真实 Session 的 loop 互斥与保守重试退避
-  - Activity Log 的失败过滤、按当前 Session 过滤、单 Session 导出
+- `codex_terminal_sender.sh` 是 helper / loop / session 操作的主要参考实现
+- `CodeTaskMasterApp.swift` 虽然是 macOS UI，但里面仍有大量 session 解析、状态映射、结果解释与展示语义
+- `TaskMasterSendRuntime.swift` 承载了请求队列、平台适配接口和发送结果分类，Linux 迁移时必须参考
 
 ### 构建与测试参考
 
@@ -50,6 +43,7 @@
 - [docs/LINUX_PORTING.md](/Users/create/codex-terminal-app/docs/LINUX_PORTING.md)
 - [docs/PLATFORM_API.md](/Users/create/codex-terminal-app/docs/PLATFORM_API.md)
 - [docs/LINUX_HANDOFF.md](/Users/create/codex-terminal-app/docs/LINUX_HANDOFF.md)
+- [docs/LINUX_NEXT_STEPS.md](/Users/create/codex-terminal-app/docs/LINUX_NEXT_STEPS.md)
 
 ### 许可证与仓库元信息
 
@@ -67,7 +61,7 @@
 - [generate_icon.swift](/Users/create/codex-terminal-app/generate_icon.swift)
 - [scripts/ui_smoke_test.sh](/Users/create/codex-terminal-app/scripts/ui_smoke_test.sh)
 
-这些可以保留在仓库里，但 Linux 侧不用围绕它们开发。
+这些内容可以留在仓库里，但 Linux 侧不需要围绕它们展开开发。
 
 ## Linux 端第一批应该新建的文件
 
@@ -104,7 +98,7 @@ scripts/
 
 ## Linux 端启动开发前的确认项
 
-先确认：
+先确认下面 5 件事：
 
 1. Linux 上 `codex` 已可正常运行
 2. `~/.codex` 目录存在
@@ -112,7 +106,7 @@ scripts/
 4. 目标环境里有 `tmux`
 5. 你打算优先支持的发送宿主就是 `tmux`
 
-## Linux 端的第一批开发任务
+## Linux 端第一批开发任务
 
 建议按这个顺序做：
 
@@ -129,5 +123,13 @@ scripts/
 
 1. 直接把整个仓库推到 GitHub
 2. 在 Linux 上 `git clone`
-3. 以 `docs/LINUX_PORTING.md` 和 `docs/PLATFORM_API.md` 为开发入口
+3. 以 [docs/LINUX_PORTING.md](/Users/create/codex-terminal-app/docs/LINUX_PORTING.md) 和 [docs/PLATFORM_API.md](/Users/create/codex-terminal-app/docs/PLATFORM_API.md) 为开发入口
 4. 先无视 macOS `.app` 构建链路
+
+## 到 Linux 后推荐的阅读顺序
+
+1. [README.md](/Users/create/codex-terminal-app/README.md)
+2. [docs/ARCHITECTURE.md](/Users/create/codex-terminal-app/docs/ARCHITECTURE.md)
+3. [docs/PLATFORM_API.md](/Users/create/codex-terminal-app/docs/PLATFORM_API.md)
+4. [docs/LINUX_PORTING.md](/Users/create/codex-terminal-app/docs/LINUX_PORTING.md)
+5. [docs/LINUX_NEXT_STEPS.md](/Users/create/codex-terminal-app/docs/LINUX_NEXT_STEPS.md)

@@ -1,8 +1,8 @@
 # 平台适配接口
 
-本文档定义未来 macOS / Linux / Windows 共用的能力边界。
+本文档定义未来 macOS / Linux / Windows 共用的发送能力边界，目标是让 UI、loop daemon 和 CLI 共享同一套发送主路径，而不是各自拼装平台细节。
 
-目标：
+## 目标
 
 - 上层不再关心具体是 `Terminal.app`、`tmux` 还是别的宿主
 - GUI 与 loop daemon 使用同一组语义
@@ -13,6 +13,7 @@
 - `thread_id`：Codex session 的唯一 thread id
 - `name`：真正 rename 后的名称
 - `target`：用户可输入的目标值，用于 resume / 发送匹配
+- `canonical session`：同一真实 session 的稳定标识，通常就是 `thread_id`
 - `terminal endpoint`：平台侧真正的发送目标，例如 macOS TTY、Linux tmux pane
 
 ## 核心数据结构
@@ -69,9 +70,9 @@ detail
 
 补充约束：
 
-- `status` 不应只允许 `success` / `failed`
-- 还应允许表示“平台已接手，但暂时还没验证到最终成功”的中间态，例如 `accepted`
-- 平台层只返回发送与验证结果，不负责决定 loop 的并发占用策略
+- `status` 至少支持 `success`、`accepted`、`failed`
+- `accepted` 表示平台或队列已接手请求，但暂时还没验证到最终成功
+- 平台层只返回发送与验证结果，不负责决定 loop 并发占用策略
 
 ## 平台必须实现的能力
 
@@ -110,6 +111,7 @@ resolve_target(target) -> endpoint or error
 - 找不到时返回明确错误
 - 多匹配时返回明确错误
 - 不允许模糊误发
+- 如果平台能解析到 canonical session，也应一并返回
 
 ### 3. 探测 endpoint 当前输入状态
 
@@ -154,6 +156,7 @@ send_to_endpoint(endpoint_id, message, submit=true)
 - `submit=true` 时必须真正触发提交
 - 返回平台侧执行结果
 - 如果平台已确认“输入已提交到宿主，但最终是否被 Codex 接收还需稍后验证”，必须能返回中间态，而不是直接伪装成失败
+- 如果平台发送依赖系统焦点或剪贴板，必须保证恢复逻辑是平台实现的一部分，而不是让 UI 层补洞
 
 ### 6. 发送后验证
 
@@ -165,7 +168,7 @@ verify_delivery(target, previous_timestamp, timeout_seconds) -> SendResult
 
 这层不一定完全平台相关，但平台通常会参与。
 
-## 请求队列层建议
+## 请求队列层
 
 平台执行层之上，建议单独保留一个请求队列编排层，例如：
 
@@ -184,6 +187,12 @@ SendRequestCoordinator
 - 把结果写回 result queue
 
 这个层不应直接依赖某个平台的窗口聚焦、剪贴板或按键实现。
+
+建议额外约束：
+
+- 单次发送与 loop 发送都必须走这层
+- “可发送 / 不可发送 / 已受理待确认”的判定口径要一致
+- 日志 reason 与 UI 展示 reason 应由这层或 Core 统一，不要各平台自己发明一套
 
 ## Core 必须实现的能力
 
@@ -220,6 +229,7 @@ SendRequestCoordinator
 - 同一 canonical session / thread id 只允许一个运行态 loop
 - 可以保留多个停止态 loop 历史配置
 - 对 `accepted`、`send_unverified` 等中间态或忙碌失败，需要支持更保守的重试退避
+- target 与 canonical session 的绑定策略
 
 ## Linux `tmux` 适配器建议
 
@@ -236,6 +246,7 @@ platform/linux/tmux_adapter.*
 - `tmux send-keys -l`
 - `tmux send-keys Enter`
 - `tmux display-message`
+- 必要时解析 pane tty、pane title、pane 当前命令
 
 ## 错误语义要求
 
@@ -258,11 +269,12 @@ platform/linux/tmux_adapter.*
 detail
 ```
 
-## 上层调用原则
+## 不应由平台层决定的事情
 
-- 单次发送和循环发送必须走同一发送主路径
-- GUI 不直接拼平台命令
-- 平台适配器不负责 UI 展示文案
-- 文案本地化放在 UI 或展示层
-- 平台自动化如果可能阻塞较久，不应长期占用 GUI 主线程
-- 如果平台实现需要临时借用系统剪贴板，必须负责恢复，避免污染用户当前剪贴板
+下面这些不应塞回平台层：
+
+- loop 是否互斥
+- 某个 target 是否已经有运行态 loop
+- 是否要因为连续失败而暂停 loop
+- Activity Log 如何展示
+- UI 是否弹窗
