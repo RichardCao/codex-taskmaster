@@ -753,6 +753,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var lastTargetValidationFailureDetail = ""
     private var isFilteringActivityLogBySelectedSession = false
     private var isProgrammaticLoopSelectionChange = false
+    private var didAutoSizeActiveLoopsColumns = false
+    private var didAutoSizeSessionColumns = false
 
     private lazy var sendButton = makeButton(title: "发送一次", action: #selector(sendOnce))
     private lazy var startButton = makeButton(title: "开始循环", action: #selector(startLoop))
@@ -1167,9 +1169,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func configureTextView(_ textView: NSTextView, inset: NSSize) {
-        textView.frame = NSRect(x: 0, y: 0, width: 700, height: 160)
+        textView.frame = NSRect(x: 0, y: 0, width: 0, height: 0)
         textView.minSize = NSSize(width: 0, height: 0)
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.maxSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
@@ -1180,8 +1182,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         textView.isSelectable = true
         textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         textView.textContainerInset = inset
+        textView.textContainer?.lineBreakMode = .byWordWrapping
+        textView.textContainer?.lineFragmentPadding = 0
         textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
     }
 
     private func configureLoopsTable() {
@@ -1268,20 +1272,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func loopColumnMinimumWidth(_ identifier: String) -> CGFloat {
         switch identifier {
-        case "state":
-            return 84
-        case "result":
-            return 92
-        case "reason":
-            return 120
-        case "target", "message":
-            return 88
-        case "nextRun":
-            return 110
-        case "lastLog":
-            return 180
+        case "state", "result", "interval", "forceSend", "reason", "target", "message", "nextRun", "lastLog":
+            return 2.5
         default:
-            return 68
+            return 2.5
         }
     }
 
@@ -1310,20 +1304,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func sessionColumnMinimumWidth(_ identifier: String) -> CGFloat {
         switch identifier {
-        case "name", "status":
-            return 88
-        case "threadID":
-            return 140
-        case "terminalState":
-            return 90
-        case "tty":
-            return 68
-        case "updatedAt":
-            return 108
-        case "reason":
-            return 180
+        case "name", "status", "terminalState", "tty", "threadID", "updatedAt", "reason":
+            return 2.5
         default:
-            return 80
+            return 2.5
         }
     }
 
@@ -1773,6 +1757,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
+    private func autoSizeActiveLoopsColumnsIfNeeded() {
+        guard !didAutoSizeActiveLoopsColumns,
+              !loopSnapshots.isEmpty else { return }
+        adjustTableColumnWidths(activeLoopsTableView)
+        didAutoSizeActiveLoopsColumns = true
+    }
+
+    private func autoSizeSessionColumnsIfNeeded() {
+        guard !didAutoSizeSessionColumns,
+              !sessionSnapshots.isEmpty else { return }
+        adjustTableColumnWidths(sessionStatusTableView)
+        didAutoSizeSessionColumns = true
+    }
+
     private func measuredWrappedHeight(for text: String, width: CGFloat) -> CGFloat {
         guard width > 0 else { return tableBaseRowHeight }
         let attributes: [NSAttributedString.Key: Any] = [.font: tableCellFont]
@@ -2076,7 +2074,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         applySessionSorting()
         sessionStatusTableView.reloadData()
-        adjustTableColumnWidths(sessionStatusTableView)
+        autoSizeSessionColumnsIfNeeded()
         restoreSessionSelection(preferredThreadID: preserveSelectionThreadID)
         refreshTableWrapping(sessionStatusTableView)
         updateSessionStatusMetaLabel()
@@ -4880,7 +4878,7 @@ conn.close()
                     self.activeLoopsMetaLabel.stringValue = self.loopWarnings.first ?? "Failed to load active loops."
                 }
                 self.activeLoopsTableView.reloadData()
-                self.adjustTableColumnWidths(self.activeLoopsTableView)
+                self.autoSizeActiveLoopsColumnsIfNeeded()
                 self.restoreLoopSelection(preferredTarget: nil)
                 self.refreshTableWrapping(self.activeLoopsTableView)
                 self.updateLoopActionButtons()
@@ -5705,6 +5703,7 @@ conn.close()
             applyLoopSorting()
             activeLoopsTableView.reloadData()
             adjustTableColumnWidths(activeLoopsTableView)
+            didAutoSizeActiveLoopsColumns = true
             refreshTableWrapping(activeLoopsTableView)
             return
         }
@@ -5712,6 +5711,7 @@ conn.close()
             applySessionSorting()
             sessionStatusTableView.reloadData()
             adjustTableColumnWidths(sessionStatusTableView)
+            didAutoSizeSessionColumns = true
             refreshTableWrapping(sessionStatusTableView)
             updateSessionDetailView()
         }
