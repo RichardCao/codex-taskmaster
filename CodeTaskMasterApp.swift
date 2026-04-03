@@ -696,6 +696,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var lastValidIntervalValue = "600"
     private var topSplitRatio: CGFloat = 0.5
     private var didApplyInitialTopSplitRatio = false
+    private var didForceInitialTopSplitRatioAfterAppear = false
     private var lastTopSplitWidth: CGFloat = 0
     private var isApplyingTopSplitRatio = false
     private var sessionStatusSplitRatio: CGFloat = 0.62
@@ -862,6 +863,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         preserveTopSplitRatioOnResizeIfNeeded()
         preserveSessionStatusSplitRatioOnResizeIfNeeded()
         preserveContentSplitRatioOnResizeIfNeeded()
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        forceInitialTopSplitRatioAfterAppearIfNeeded()
     }
 
     deinit {
@@ -2929,6 +2935,25 @@ conn.close()
             didApplyInitialContentSplitRatio = true
             lastContentSplitHeight = contentSplitView.bounds.height
         }
+    }
+
+    private func forceInitialTopSplitRatioAfterAppearIfNeeded() {
+        guard !didForceInitialTopSplitRatioAfterAppear else { return }
+        didForceInitialTopSplitRatioAfterAppear = true
+
+        let applyHalfWidth: () -> Void = { [weak self] in
+            guard let self else { return }
+            guard self.topSplitView.subviews.count == 2,
+                  self.topSplitView.bounds.width > self.topSplitView.dividerThickness else {
+                return
+            }
+            self.setTopSplitRatio(0.5)
+            self.didApplyInitialTopSplitRatio = true
+            self.lastTopSplitWidth = self.topSplitView.bounds.width
+        }
+
+        DispatchQueue.main.async(execute: applyHalfWidth)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: applyHalfWidth)
     }
 
     private func preserveTopSplitRatioOnResizeIfNeeded() {
