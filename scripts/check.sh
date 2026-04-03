@@ -2,6 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+APP_SWIFT_SOURCES=(
+  "${ROOT}/CodeTaskMasterApp.swift"
+  "${ROOT}/TaskMasterSendRuntime.swift"
+  "${ROOT}/main.swift"
+)
 
 printf '==> shell syntax\n'
 bash -n "${ROOT}/codex_terminal_sender.sh"
@@ -28,9 +33,9 @@ if [[ -z "$SDK_PATH" ]]; then
 fi
 
 if [[ -n "$SDK_PATH" ]]; then
-  swiftc -sdk "$SDK_PATH" -warnings-as-errors -typecheck "${ROOT}/CodeTaskMasterApp.swift"
+  swiftc -sdk "$SDK_PATH" -warnings-as-errors -typecheck "${APP_SWIFT_SOURCES[@]}"
 else
-  swiftc -warnings-as-errors -typecheck "${ROOT}/CodeTaskMasterApp.swift"
+  swiftc -warnings-as-errors -typecheck "${APP_SWIFT_SOURCES[@]}"
 fi
 
 printf '==> build app\n'

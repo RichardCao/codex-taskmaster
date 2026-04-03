@@ -12,6 +12,11 @@ ICON_PNG="${ROOT}/CodeTaskMaster-1024.png"
 ICON_ICNS="${RES_DIR}/AppIcon.icns"
 HELPER_SRC="${ROOT}/codex_terminal_sender.sh"
 HELPER_DST="${RES_DIR}/codex_terminal_sender.sh"
+APP_SWIFT_SOURCES=(
+  "${ROOT}/CodeTaskMasterApp.swift"
+  "${ROOT}/TaskMasterSendRuntime.swift"
+  "${ROOT}/main.swift"
+)
 
 mkdir -p "$BIN_DIR" "$RES_DIR"
 
@@ -78,7 +83,7 @@ swiftc \
   -sdk "$SDK_PATH" \
   -framework AppKit \
   -o "$BIN_PATH" \
-  "$ROOT/CodeTaskMasterApp.swift"
+  "${APP_SWIFT_SOURCES[@]}"
 
 cat >"${APP_DIR}/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

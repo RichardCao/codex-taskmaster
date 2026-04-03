@@ -31,7 +31,7 @@
 7. `done` 日志查看能力增强
    目标：支持按 target / session 过滤，只看失败，导出单条 session 相关日志。
 
-8. `pending` 平台发送层继续抽象
+8. `done` 平台发送层继续抽象
    目标：把平台相关发送能力从 macOS UI 里进一步剥离，为 Linux 适配打基础。
 
 9. `pending` 单 loop + 多策略模型

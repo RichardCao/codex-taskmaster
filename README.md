@@ -128,8 +128,11 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 - `CodeTaskMasterApp.swift`
   - 桌面界面
   - session 状态扫描
+  - 表格、详情区、日志区和用户交互
+- `TaskMasterSendRuntime.swift`
   - 发送请求排队与结果回收
-  - 通过辅助功能把内容发到 Terminal
+  - 发送编排、probe、live tty recovery、结果归类
+  - `PlatformSendAdapter` 与当前的 macOS 默认实现
 - `codex_terminal_sender.sh`
   - helper CLI
   - session 探测
@@ -245,6 +248,8 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 ## 仓库结构
 
 - `CodeTaskMasterApp.swift`：主应用
+- `TaskMasterSendRuntime.swift`：请求队列与平台发送运行时
+- `main.swift`：应用启动入口
 - `codex_terminal_sender.sh`：helper CLI 与循环引擎
 - `build_code_taskmaster_app.sh`：构建脚本
 - `generate_icon.swift`：图标生成脚本

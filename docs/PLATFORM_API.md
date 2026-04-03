@@ -6,6 +6,7 @@
 
 - 上层不再关心具体是 `Terminal.app`、`tmux` 还是别的宿主
 - GUI 与 loop daemon 使用同一组语义
+- 请求队列编排层与平台执行层解耦
 
 ## 术语
 
@@ -163,6 +164,26 @@ verify_delivery(target, previous_timestamp, timeout_seconds) -> SendResult
 ```
 
 这层不一定完全平台相关，但平台通常会参与。
+
+## 请求队列层建议
+
+平台执行层之上，建议单独保留一个请求队列编排层，例如：
+
+```text
+SendRequestCoordinator
+```
+
+职责：
+
+- 从 pending queue 取请求
+- 串行处理，避免并发误发
+- 先 probe，再决定是否发送
+- 调用平台适配器执行真实发送
+- 做发送后验证
+- 统一产出 `success` / `accepted` / `failed`
+- 把结果写回 result queue
+
+这个层不应直接依赖某个平台的窗口聚焦、剪贴板或按键实现。
 
 ## Core 必须实现的能力
 
