@@ -15,6 +15,7 @@ protocol PlatformSendAdapter {
 private struct FrontmostAppContext {
     let bundleID: String
     let terminalTTY: String?
+    let capturedAt: Date?
 }
 
 private struct PasteboardSnapshot {
@@ -48,7 +49,15 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
 
         let currentAppBundleID = Bundle.main.bundleIdentifier ?? ""
         let previousContext = captureFrontmostContext(currentAppBundleID: currentAppBundleID)
-        logger?("focus-debug: send-begin target_tty=\(normalizedTTY(ttyPath)) previous_bundle=\(previousContext.bundleID.isEmpty ? "-" : previousContext.bundleID) previous_terminal_tty=\(normalizedTTY(previousContext.terminalTTY ?? "").isEmpty ? "-" : normalizedTTY(previousContext.terminalTTY ?? ""))")
+        let contextAgeSeconds: String
+        if let capturedAt = previousContext.capturedAt {
+            contextAgeSeconds = String(Int(max(0, Date().timeIntervalSince(capturedAt))))
+        } else {
+            contextAgeSeconds = "-"
+        }
+        logger?(
+            "focus-debug: send-begin target_tty=\(normalizedTTY(ttyPath)) previous_bundle=\(previousContext.bundleID.isEmpty ? "-" : previousContext.bundleID) previous_terminal_tty=\(normalizedTTY(previousContext.terminalTTY ?? "").isEmpty ? "-" : normalizedTTY(previousContext.terminalTTY ?? "")) previous_context_age_seconds=\(contextAgeSeconds)"
+        )
         try focusTerminalWindow(for: ttyPath)
         defer {
             restoreFocusAfterTerminalSend(
@@ -248,13 +257,19 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
     private func captureFrontmostContext(currentAppBundleID: String) -> FrontmostAppContext {
         let frontBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? currentAppBundleID
         if frontBundleID == currentAppBundleID {
-            let preferredBundleID = AppFocusTracker.shared.preferredReturnBundleID(fallback: currentAppBundleID)
-            let preferredTerminalTTY = AppFocusTracker.shared.preferredTerminalTTY()
-            return FrontmostAppContext(bundleID: preferredBundleID, terminalTTY: preferredTerminalTTY)
+            let preferredContext = AppFocusTracker.shared.preferredReturnContext(
+                fallbackBundleID: currentAppBundleID,
+                maxAge: 60
+            )
+            return FrontmostAppContext(
+                bundleID: preferredContext.bundleID,
+                terminalTTY: preferredContext.terminalTTY,
+                capturedAt: preferredContext.capturedAt
+            )
         }
 
         let frontTerminalTTY = frontBundleID == "com.apple.Terminal" ? currentFrontTerminalTTY() : nil
-        return FrontmostAppContext(bundleID: frontBundleID, terminalTTY: frontTerminalTTY)
+        return FrontmostAppContext(bundleID: frontBundleID, terminalTTY: frontTerminalTTY, capturedAt: Date())
     }
 
     private func currentFrontTerminalTTY() -> String? {
@@ -296,6 +311,13 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
         NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     }
 
+    private func runOnMainSync<T>(_ block: () -> T) -> T {
+        if Thread.isMainThread {
+            return block()
+        }
+        return DispatchQueue.main.sync(execute: block)
+    }
+
     @discardableResult
     private func hideTerminal() -> Bool {
         let process = Process()
@@ -321,13 +343,48 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
 
     private func activateBundleID(_ bundleID: String) -> Bool {
         guard !bundleID.isEmpty else { return false }
-        let runningApps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
-            .filter { !$0.isTerminated }
-        guard let app = runningApps.first else { return false }
-
-        app.activate(options: [.activateAllWindows])
+        let activated = runOnMainSync { () -> Bool in
+            let runningApps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+                .filter { !$0.isTerminated }
+            guard let app = runningApps.first else { return false }
+            return app.activate(options: [.activateAllWindows])
+        }
+        guard activated else { return false }
         usleep(180_000)
         return currentFrontmostBundleID() == bundleID
+    }
+
+    private func activateTaskMasterApp() -> Bool {
+        let currentBundleID = Bundle.main.bundleIdentifier ?? ""
+        let activated = runOnMainSync { () -> Bool in
+            let runningApps = NSRunningApplication.runningApplications(withBundleIdentifier: currentBundleID)
+                .filter { !$0.isTerminated }
+            let runningApp = runningApps.first ?? NSRunningApplication.current
+
+            let visibleWindows = NSApp.windows.filter { $0.isVisible }
+            if let keyCandidate = visibleWindows.first {
+                keyCandidate.makeKeyAndOrderFront(nil)
+                keyCandidate.orderFrontRegardless()
+            } else {
+                NSApp.windows.first?.makeKeyAndOrderFront(nil)
+                NSApp.windows.first?.orderFrontRegardless()
+            }
+
+            let activatedApp = runningApp.activate(options: [.activateAllWindows])
+            NSApp.activate(ignoringOtherApps: true)
+            if let keyWindow = NSApp.keyWindow {
+                keyWindow.makeKeyAndOrderFront(nil)
+                keyWindow.orderFrontRegardless()
+            } else if let firstVisibleWindow = visibleWindows.first {
+                firstVisibleWindow.makeKeyAndOrderFront(nil)
+                firstVisibleWindow.orderFrontRegardless()
+            }
+            return activatedApp
+        }
+
+        guard activated else { return false }
+        usleep(220_000)
+        return currentFrontmostBundleID() == currentBundleID
     }
 
     private func restorePreviousTerminalTTY(_ preferredTTY: String, targetTTY: String) -> String? {
@@ -417,13 +474,13 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
             let hideResult = hideTerminal()
             focusDebugLog(logger, "hide-terminal success=\(hideResult ? "yes" : "no") frontmost=\(currentFrontmostBundleID() ?? "-")")
 
-            if activateBundleID(currentAppBundleID) {
+            if activateTaskMasterApp() {
                 focusDebugLog(logger, "restore-result mode=taskmaster_fallback_after_terminal_failure success=yes bundle=\(currentAppBundleID) frontmost=\(currentFrontmostBundleID() ?? "-")")
                 return
             }
 
             focusDebugLog(logger, "restore-result mode=taskmaster_fallback_after_terminal_failure success=no bundle=\(currentAppBundleID) frontmost=\(currentFrontmostBundleID() ?? "-")")
-            NSApp.activate(ignoringOtherApps: true)
+            _ = activateTaskMasterApp()
             focusDebugLog(logger, "restore-result mode=taskmaster_force_activate_after_terminal_failure frontmost=\(currentFrontmostBundleID() ?? "-")")
             return
         }
@@ -440,13 +497,13 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
             focusDebugLog(logger, "restore-result mode=preferred_bundle success=no bundle=\(preferredBundleID) frontmost=\(currentFrontmostBundleID() ?? "-")")
         }
 
-        if activateBundleID(currentAppBundleID) {
+        if activateTaskMasterApp() {
             focusDebugLog(logger, "restore-result mode=taskmaster_fallback success=yes bundle=\(currentAppBundleID) frontmost=\(currentFrontmostBundleID() ?? "-")")
             return
         }
 
         focusDebugLog(logger, "restore-result mode=taskmaster_fallback success=no bundle=\(currentAppBundleID) frontmost=\(currentFrontmostBundleID() ?? "-")")
-        NSApp.activate(ignoringOtherApps: true)
+        _ = activateTaskMasterApp()
         focusDebugLog(logger, "restore-result mode=taskmaster_force_activate frontmost=\(currentFrontmostBundleID() ?? "-")")
     }
 

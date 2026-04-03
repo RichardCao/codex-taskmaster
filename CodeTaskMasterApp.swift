@@ -305,6 +305,12 @@ final class HistoryDropdownListView: NSView {
     override var isFlipped: Bool { true }
 }
 
+struct AppFocusReturnContext {
+    let bundleID: String
+    let terminalTTY: String?
+    let capturedAt: Date?
+}
+
 final class AppFocusTracker {
     static let shared = AppFocusTracker()
 
@@ -313,6 +319,7 @@ final class AppFocusTracker {
     private let stateLock = NSLock()
     private var lastExternalBundleID = ""
     private var lastTerminalTTY = ""
+    private var lastExternalCapturedAt: Date?
 
     private init() {}
 
@@ -338,18 +345,35 @@ final class AppFocusTracker {
         }
     }
 
-    func preferredReturnBundleID(fallback: String) -> String {
-        stateLock.lock()
-        let tracked = lastExternalBundleID
-        stateLock.unlock()
-        return tracked.isEmpty ? fallback : tracked
-    }
-
     func preferredTerminalTTY() -> String? {
         stateLock.lock()
         let tracked = lastTerminalTTY
         stateLock.unlock()
         return tracked.isEmpty ? nil : tracked
+    }
+
+    func preferredReturnContext(fallbackBundleID: String, maxAge: TimeInterval) -> AppFocusReturnContext {
+        stateLock.lock()
+        let trackedBundleID = lastExternalBundleID
+        let trackedTerminalTTY = lastTerminalTTY
+        let trackedCapturedAt = lastExternalCapturedAt
+        stateLock.unlock()
+
+        if let trackedCapturedAt,
+           !trackedBundleID.isEmpty,
+           Date().timeIntervalSince(trackedCapturedAt) <= maxAge {
+            return AppFocusReturnContext(
+                bundleID: trackedBundleID,
+                terminalTTY: trackedTerminalTTY.isEmpty ? nil : trackedTerminalTTY,
+                capturedAt: trackedCapturedAt
+            )
+        }
+
+        return AppFocusReturnContext(
+            bundleID: fallbackBundleID,
+            terminalTTY: nil,
+            capturedAt: nil
+        )
     }
 
     private func handleActivation(_ notification: Notification) {
@@ -365,8 +389,11 @@ final class AppFocusTracker {
 
         stateLock.lock()
         lastExternalBundleID = bundleID
+        lastExternalCapturedAt = Date()
         if bundleID == "com.apple.Terminal" {
             lastTerminalTTY = currentFrontTerminalTTY()
+        } else {
+            lastTerminalTTY = ""
         }
         stateLock.unlock()
     }
