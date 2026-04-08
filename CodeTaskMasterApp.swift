@@ -3268,14 +3268,46 @@ conn.close()
         return view.bounds.contains(point)
     }
 
+    private func anyViewContainsWindowPoint(_ views: [NSView], windowPoint: NSPoint) -> Bool {
+        views.contains { viewContainsWindowPoint($0, windowPoint: windowPoint) }
+    }
+
     private func handleTableSelectionMouseDown(_ event: NSEvent) {
         guard let window = view.window, event.window == window else { return }
 
         let windowPoint = event.locationInWindow
         let activeScrollView = activeLoopsTableView.enclosingScrollView
         let sessionScrollView = sessionStatusTableView.enclosingScrollView
+        let isInActiveLoopActionArea = anyViewContainsWindowPoint(
+            [stopButton, resumeLoopButton, deleteLoopButton],
+            windowPoint: windowPoint
+        )
+        let isInSessionActionArea = anyViewContainsWindowPoint(
+            [saveRenameButton, archiveSessionButton, restoreSessionButton, deleteSessionButton, exportSessionLogButton],
+            windowPoint: windowPoint
+        )
         let isInActiveLoopsArea = viewContainsWindowPoint(activeScrollView, windowPoint: windowPoint) || viewContainsWindowPoint(activeLoopsTableView.headerView, windowPoint: windowPoint)
         let isInSessionStatusArea = viewContainsWindowPoint(sessionScrollView, windowPoint: windowPoint) || viewContainsWindowPoint(sessionStatusTableView.headerView, windowPoint: windowPoint)
+
+        if isInActiveLoopActionArea {
+            if sessionStatusTableView.selectedRow >= 0 {
+                sessionStatusTableView.deselectAll(nil)
+                updateSessionDetailView()
+            }
+            return
+        }
+
+        if isInSessionActionArea {
+            if activeLoopsTableView.selectedRow >= 0 {
+                preferredLoopSelectionTarget = nil
+                isProgrammaticLoopSelectionChange = true
+                activeLoopsTableView.deselectAll(nil)
+                isProgrammaticLoopSelectionChange = false
+                updateLoopActionButtons()
+                refreshTableWrapping(activeLoopsTableView)
+            }
+            return
+        }
 
         if isInActiveLoopsArea {
             if sessionStatusTableView.selectedRow >= 0 {
