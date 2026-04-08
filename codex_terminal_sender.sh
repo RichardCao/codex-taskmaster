@@ -185,7 +185,7 @@ classify_loop_reason() {
   local detail="$1"
   if [[ "$detail" == *"found multiple matching sessions for target"* ]] || [[ "$detail" == *"found multiple matching thread titles for target"* ]] || [[ "$detail" == *"found multiple matching Terminal ttys for target"* ]]; then
     printf 'ambiguous_target\n'
-  elif [[ "$detail" == *"tty not found"* ]] || [[ "$detail" == *"could not find a running 'codex resume"* ]] || [[ "$detail" == *"tty unavailable"* ]]; then
+  elif [[ "$detail" == *"tty not found"* ]] || [[ "$detail" == *"could not find a running 'codex resume"* ]] || [[ "$detail" == *"could not find a running non-resume 'codex' process"* ]] || [[ "$detail" == *"has no cwd metadata"* ]] || [[ "$detail" == *"tty unavailable"* ]]; then
     printf 'tty_unavailable\n'
   else
     printf 'start_failed\n'
@@ -696,7 +696,7 @@ if os.path.exists(session_index_path):
 conn = sqlite3.connect(db_path)
 cur = conn.cursor()
 row = cur.execute(
-    "select rollout_path, title, first_user_message from threads where id = ? limit 1",
+    "select rollout_path, title, first_user_message, cwd from threads where id = ? limit 1",
     (thread_id,),
 ).fetchone()
 conn.close()
@@ -713,9 +713,13 @@ resolve_target_tty() {
   local thread_title="$3"
   local first_user_message="$4"
   local session_name="$5"
+  local target_cwd="$6"
+  local rollout_path="$7"
   local tty_name=""
   local tty_error=""
   local attempt_status=1
+  local fallback_ambiguous=0
+  local fallback_ambiguous_error=""
 
   try_candidate() {
     local candidate="$1"
@@ -765,9 +769,48 @@ resolve_target_tty() {
     fi
   fi
 
+  if [[ -z "$tty_name" && -n "${target_cwd:-}" ]]; then
+    local cwd_match_output=""
+    set +e
+    cwd_match_output="$(find_terminal_tty_by_process_cwd "$target" "$target_cwd" 2>&1)"
+    attempt_status=$?
+    set -e
+    if [[ "$attempt_status" -eq 0 ]]; then
+      tty_name="$cwd_match_output"
+    else
+      tty_error="$cwd_match_output"
+      if [[ "$attempt_status" -eq 2 ]]; then
+        fallback_ambiguous=1
+        fallback_ambiguous_error="$cwd_match_output"
+      fi
+    fi
+  fi
+
+  if [[ -z "$tty_name" && -n "${rollout_path:-}" && -f "${rollout_path:-}" ]]; then
+    local content_match_output=""
+    set +e
+    content_match_output="$(find_terminal_tty_by_session_content "$target" "$thread_id" "$session_name" "$thread_title" "$first_user_message" "$rollout_path" 2>&1)"
+    attempt_status=$?
+    set -e
+    if [[ "$attempt_status" -eq 0 ]]; then
+      tty_name="$content_match_output"
+    else
+      tty_error="$content_match_output"
+      if [[ "$attempt_status" -eq 2 ]]; then
+        printf '%s\n' "$tty_error" >&2
+        return 2
+      fi
+    fi
+  fi
+
   if [[ -n "$tty_name" ]]; then
     printf '%s\n' "$tty_name"
     return 0
+  fi
+
+  if [[ "$fallback_ambiguous" -eq 1 && -n "$fallback_ambiguous_error" ]]; then
+    printf '%s\n' "$fallback_ambiguous_error" >&2
+    return 2
   fi
 
   [[ -n "$tty_error" ]] && printf '%s\n' "$tty_error" >&2
@@ -787,10 +830,11 @@ probe_session_status() {
   require_cmd sqlite3
 
   thread_id="$(resolve_thread_id "$target")"
-  IFS='|' read -r rollout_path thread_title first_user_message session_name <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
+  local target_cwd
+  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
 
   [[ -n "${rollout_path:-}" && -f "${rollout_path:-}" ]] || die "could not find rollout path for target '$target'"
-  tty_name="$(resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" 2>/dev/null || true)"
+  tty_name="$(resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path" 2>/dev/null || true)"
 
   python3 - "$thread_id" "$thread_title" "$session_name" "$rollout_path" "$tty_name" "$CODEX_LOGS_DB_PATH" "$PROBE_RECENT_LOG_WINDOW_SECONDS" <<'PY'
 import json
@@ -1639,6 +1683,309 @@ find_unique_tty() {
   esac
 }
 
+find_terminal_tty_by_process_cwd() {
+  local target="$1"
+  local target_cwd="$2"
+
+  python3 - "$target" "$target_cwd" "${CODEX_TASKMASTER_TTY_PROCESS_FIXTURE:-}" "${CODEX_TASKMASTER_TTY_CWD_FIXTURE:-}" <<'PY'
+import os
+import subprocess
+import sys
+
+target, target_cwd, process_fixture, cwd_fixture = sys.argv[1:]
+
+def normalized_path(value: str) -> str:
+    if not value:
+        return ""
+    return os.path.realpath(os.path.expanduser(value.strip()))
+
+def parse_process_lines(raw: str):
+    results = []
+    for raw_line in raw.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        pid, tty, command = parts
+        if tty in {"", "-", "??"}:
+            continue
+        if "codex" not in command:
+            continue
+        if " resume " in command or command.endswith(" resume") or " fork " in command or command.endswith(" fork"):
+            continue
+        results.append((pid, tty, command))
+    return results
+
+def load_processes():
+    if process_fixture:
+        with open(process_fixture, "r", encoding="utf-8") as fh:
+            return parse_process_lines(fh.read())
+    proc = subprocess.run(
+        ["ps", "-axo", "pid=,tty=,command="],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return parse_process_lines(proc.stdout)
+
+def load_cwd_fixture(path: str):
+    mapping = {}
+    if not path:
+        return mapping
+    with open(path, "r", encoding="utf-8") as fh:
+        for raw_line in fh:
+            line = raw_line.strip()
+            if not line:
+                continue
+            parts = line.split(None, 1)
+            if len(parts) != 2:
+                continue
+            mapping[parts[0]] = normalized_path(parts[1])
+    return mapping
+
+fixture_cwds = load_cwd_fixture(cwd_fixture)
+
+def resolve_process_cwd(pid: str) -> str:
+    if pid in fixture_cwds:
+        return fixture_cwds[pid]
+    proc = subprocess.run(
+        ["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return ""
+    for raw_line in proc.stdout.splitlines():
+        if raw_line.startswith("n"):
+            return normalized_path(raw_line[1:])
+    return ""
+
+target_cwd = normalized_path(target_cwd)
+if not target_cwd:
+    print(f"target '{target}' has no cwd metadata to resolve a live non-resume TTY", file=sys.stderr)
+    raise SystemExit(1)
+
+matches = []
+seen_ttys = set()
+for pid, tty, _command in load_processes():
+    process_cwd = resolve_process_cwd(pid)
+    if process_cwd != target_cwd:
+        continue
+    if tty in seen_ttys:
+        continue
+    seen_ttys.add(tty)
+    matches.append(tty)
+
+if not matches:
+    print(
+        f"could not find a running non-resume 'codex' process with cwd '{target_cwd}' for target '{target}'",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+if len(matches) > 1:
+    print(
+        f"found multiple matching Terminal ttys for target '{target}': {' '.join(matches)}",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
+print(matches[0])
+PY
+}
+
+find_terminal_tty_by_session_content() {
+  local target="$1"
+  local thread_id="$2"
+  local session_name="$3"
+  local thread_title="$4"
+  local first_user_message="$5"
+  local rollout_path="$6"
+
+  python3 - "$target" "$thread_id" "$session_name" "$thread_title" "$first_user_message" "$rollout_path" "${CODEX_TASKMASTER_TTY_PROCESS_FIXTURE:-}" "${CODEX_TASKMASTER_TTY_PS_FIXTURE:-}" <<'PY'
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+target, thread_id, session_name, thread_title, first_user_message, rollout_path, process_fixture, tty_ps_fixture = sys.argv[1:]
+
+def normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip()).lower()
+
+def add_candidate(candidates, seen, text: str, weight: int, label: str):
+    value = normalize(text)
+    if not value:
+        return
+    if len(value) > 140:
+        value = value[:140].rstrip()
+    key = (value, label)
+    if key in seen:
+        return
+    seen.add(key)
+    candidates.append((value, weight, label))
+
+def iter_process_lines():
+    if process_fixture:
+        return Path(process_fixture).read_text().splitlines()
+    if tty_ps_fixture:
+        return Path(tty_ps_fixture).read_text().splitlines()
+    proc = subprocess.run(
+        ["ps", "-axo", "pid=,tty=,command="],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return proc.stdout.splitlines()
+
+bare_codex_ttys = set()
+try:
+    for raw_line in iter_process_lines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 2)
+        if len(parts) >= 3:
+            _, tty, command = parts[0], parts[1], parts[2]
+        elif len(parts) == 2:
+            tty, command = parts
+        else:
+            continue
+        if tty in {"??", "-", ""}:
+            continue
+        if "codex" not in command:
+            continue
+        if " resume " in command or command.endswith(" resume") or " fork " in command or command.endswith(" fork"):
+            continue
+        bare_codex_ttys.add(tty)
+except Exception:
+    bare_codex_ttys = set()
+
+if not bare_codex_ttys:
+    print(f"could not find a running non-resume 'codex' process for target '{target}'", file=sys.stderr)
+    raise SystemExit(1)
+
+record_separator = "<<<CTM_TAB>>>"
+field_separator = "<<<CTM_FIELD>>>"
+applescript = f'''
+set recordSeparator to "{record_separator}"
+set fieldSeparator to "{field_separator}"
+set outputLines to {{}}
+tell application "Terminal"
+  repeat with w in windows
+    repeat with t in tabs of w
+      try
+        set ttyValue to tty of t
+        if ttyValue is not "" then
+          set processText to ""
+          try
+            set processText to (processes of t as text)
+          end try
+          if processText contains "codex" then
+            set contentText to ""
+            try
+              set contentText to contents of t
+            end try
+            set end of outputLines to ttyValue & fieldSeparator & processText & fieldSeparator & contentText
+          end if
+        end if
+      end try
+    end repeat
+  end repeat
+end tell
+set AppleScript's text item delimiters to recordSeparator
+return outputLines as text
+'''
+
+try:
+    proc = subprocess.run(
+        ["osascript", "-"],
+        input=applescript,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    raw = proc.stdout
+except Exception as exc:
+    print(f"failed to inspect Terminal tabs for target '{target}': {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+candidates = []
+seen = set()
+add_candidate(candidates, seen, target, 20, "target")
+add_candidate(candidates, seen, session_name, 40, "session_name")
+add_candidate(candidates, seen, thread_id, 10, "thread_id")
+add_candidate(candidates, seen, thread_title, 90, "thread_title")
+add_candidate(candidates, seen, first_user_message, 90, "first_user_message")
+
+rollout_candidates = []
+try:
+    for raw_line in Path(rollout_path).read_text().splitlines():
+        try:
+            obj = json.loads(raw_line)
+        except Exception:
+            continue
+        if obj.get("type") != "event_msg":
+            continue
+        payload = obj.get("payload", {})
+        if payload.get("type") != "user_message":
+            continue
+        message = payload.get("message") or ""
+        if message.strip():
+            rollout_candidates.append(message)
+except Exception:
+    rollout_candidates = []
+
+for index, message in enumerate(reversed(rollout_candidates[-3:])):
+    add_candidate(candidates, seen, message, 130 - (index * 10), f"recent_user_{index + 1}")
+
+best_matches = []
+for record in raw.split(record_separator):
+    if not record.strip():
+        continue
+    parts = record.split(field_separator, 2)
+    if len(parts) != 3:
+        continue
+    tty_value, process_text, contents = parts
+    tty_value = tty_value.strip()
+    if tty_value.startswith("/dev/"):
+        tty_value = tty_value[5:]
+    if tty_value not in bare_codex_ttys:
+        continue
+
+    normalized_contents = normalize(contents)
+    score = 0
+    matched_labels = []
+    for candidate_text, weight, label in candidates:
+        if candidate_text and candidate_text in normalized_contents:
+            score += weight
+            matched_labels.append(label)
+    if score <= 0:
+        continue
+    best_matches.append((score, tty_value, ",".join(matched_labels)))
+
+if not best_matches:
+    tty_list = " ".join(sorted(bare_codex_ttys))
+    print(f"could not match a running non-resume 'codex' Terminal tab for target '{target}' among ttys: {tty_list}", file=sys.stderr)
+    raise SystemExit(1)
+
+best_matches.sort(key=lambda item: (-item[0], item[1]))
+top_score = best_matches[0][0]
+top = [item for item in best_matches if item[0] == top_score]
+
+if len(top) > 1:
+    details = " ".join(f"{tty}({labels})" for _, tty, labels in top)
+    print(f"found multiple matching non-resume Terminal ttys for target '{target}': {details}", file=sys.stderr)
+    raise SystemExit(2)
+
+print(top[0][1])
+PY
+}
+
 resolve_live_tty() {
   local target="$1"
   local thread_id
@@ -1648,8 +1995,9 @@ resolve_live_tty() {
   local session_name
 
   thread_id="$(resolve_thread_id "$target")"
-  IFS='|' read -r rollout_path thread_title first_user_message session_name <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
-  resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name"
+  local target_cwd
+  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
+  resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path"
 }
 
 send_once_via_terminal_gui() {
@@ -1659,7 +2007,7 @@ send_once_via_terminal_gui() {
   local tty_path
 
   require_cmd osascript
-  tty_name="$(find_unique_tty "$target")"
+  tty_name="$(resolve_live_tty "$target")"
   tty_path="$tty_name"
   [[ "$tty_path" == /dev/* ]] || tty_path="/dev/${tty_path}"
 
@@ -1937,9 +2285,10 @@ start_loop() {
     stop_loop_daemon_if_idle
     die "failed to load target metadata for thread '${thread_id}'"
   fi
-  IFS='|' read -r rollout_path thread_title first_user_message session_name <<<"$start_detail"
+  local target_cwd
+  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name <<<"$start_detail"
 
-  if ! start_detail="$(resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" 2>&1)"; then
+  if ! start_detail="$(resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path" 2>&1)"; then
     failure_reason="$(classify_loop_reason "$start_detail")"
     mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$failure_reason" "loop start failed target=${target} reason=${failure_reason} detail=${start_detail//$'\n'/ | }" "$thread_id"
     stop_loop_daemon_if_idle
@@ -2000,8 +2349,9 @@ resume_loop() {
   thread_id="$(resolve_thread_id "$target")"
   conflicting_target="$(find_conflicting_running_loop_target "$thread_id" "$key" 2>/dev/null || true)"
   [[ -z "$conflicting_target" ]] || die "another active loop already targets this session: ${conflicting_target}"
-  IFS='|' read -r rollout_path thread_title first_user_message session_name <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
-  resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" >/dev/null
+  local target_cwd
+  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
+  resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path" >/dev/null
   ensure_loop_daemon
   write_loop_definition "$target" "${INTERVAL:-$DEFAULT_INTERVAL}" "${MESSAGE:-$DEFAULT_MESSAGE}" "${FORCE_SEND:-0}" "$thread_id"
 

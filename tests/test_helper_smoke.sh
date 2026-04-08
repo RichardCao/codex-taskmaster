@@ -74,6 +74,7 @@ create table threads (
   id text primary key,
   rollout_path text not null,
   updated_at integer not null,
+  cwd text not null,
   title text not null,
   first_user_message text not null default '',
   archived integer not null default 0
@@ -108,11 +109,11 @@ create table logs (
   process_uuid text,
   estimated_bytes integer not null default 0
 );
-insert into threads(id, rollout_path, updated_at, title, first_user_message, archived) values
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '$ROLLOUT_A', 200, 'First prompt', 'First prompt', 0),
-  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '$ROLLOUT_B', 100, 'Second prompt', 'Second prompt', 0),
-  ('cccccccc-cccc-cccc-cccc-cccccccccccc', '$ROLLOUT_C', 90, 'Archived prompt', 'Archived prompt', 1),
-  ('dddddddd-dddd-dddd-dddd-dddddddddddd', '$ROLLOUT_D', 80, 'Delete prompt', 'Delete prompt', 0);
+insert into threads(id, rollout_path, updated_at, cwd, title, first_user_message, archived) values
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '$ROLLOUT_A', 200, '/tmp/alpha-cwd', 'First prompt', 'First prompt', 0),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '$ROLLOUT_B', 100, '/tmp/beta-cwd', 'Second prompt', 'Second prompt', 0),
+  ('cccccccc-cccc-cccc-cccc-cccccccccccc', '$ROLLOUT_C', 90, '/tmp/archived-cwd', 'Archived prompt', 'Archived prompt', 1),
+  ('dddddddd-dddd-dddd-dddd-dddddddddddd', '$ROLLOUT_D', 80, '/tmp/delta-cwd', 'Delete prompt', 'Delete prompt', 0);
 insert into thread_dynamic_tools(thread_id, position, name, description, input_schema, defer_loading) values
   ('dddddddd-dddd-dddd-dddd-dddddddddddd', 0, 'tool-a', 'desc', '{}', 0);
 insert into stage1_outputs(thread_id, source_updated_at, raw_memory, rollout_summary, generated_at) values
@@ -160,7 +161,7 @@ insert into logs(ts, level, target, message, thread_id, estimated_bytes) values
 EOF
 
 count_output="$("$HELPER" session-count)"
-[[ "$count_output" == "2" ]]
+[[ "$count_output" == "3" ]]
 
 probe_named="$("$HELPER" probe -t alpha)"
 assert_contains "$probe_named" "thread_id: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
@@ -251,6 +252,54 @@ ambiguous_duplicate_tty_status=$?
 set -e
 [[ "$ambiguous_duplicate_tty_status" -ne 0 ]]
 assert_contains "$ambiguous_duplicate_tty_output" "found multiple matching Terminal ttys for target 'duplicate'"
+
+TTY_PROCESS_FIXTURE="${TEST_TMP}/tty-processes.txt"
+TTY_CWD_FIXTURE="${TEST_TMP}/tty-cwds.txt"
+TTY_EMPTY_FIXTURE="${TEST_TMP}/tty-empty.txt"
+: >"$TTY_EMPTY_FIXTURE"
+cat >"$TTY_PROCESS_FIXTURE" <<'EOF'
+5101 ttys501 codex
+5102 ttys501 /path/to/vendor/codex
+5201 ttys502 codex
+5202 ttys502 /path/to/vendor/codex
+EOF
+cat >"$TTY_CWD_FIXTURE" <<'EOF'
+5101 /tmp/alpha-cwd
+5102 /tmp/alpha-cwd
+5201 /tmp/beta-cwd
+5202 /tmp/beta-cwd
+EOF
+
+resolved_tty_by_cwd="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_EMPTY_FIXTURE" \
+  CODEX_TASKMASTER_TTY_PROCESS_FIXTURE="$TTY_PROCESS_FIXTURE" \
+  CODEX_TASKMASTER_TTY_CWD_FIXTURE="$TTY_CWD_FIXTURE" \
+  "$HELPER" resolve-live-tty -t alpha
+)"
+assert_equals "$resolved_tty_by_cwd" "ttys501"
+
+TTY_PROCESS_AMBIGUOUS_FIXTURE="${TEST_TMP}/tty-processes-ambiguous.txt"
+TTY_CWD_AMBIGUOUS_FIXTURE="${TEST_TMP}/tty-cwds-ambiguous.txt"
+cat >"$TTY_PROCESS_AMBIGUOUS_FIXTURE" <<'EOF'
+6101 ttys601 codex
+6102 ttys602 codex
+EOF
+cat >"$TTY_CWD_AMBIGUOUS_FIXTURE" <<'EOF'
+6101 /tmp/alpha-cwd
+6102 /tmp/alpha-cwd
+EOF
+
+set +e
+ambiguous_cwd_output="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_EMPTY_FIXTURE" \
+  CODEX_TASKMASTER_TTY_PROCESS_FIXTURE="$TTY_PROCESS_AMBIGUOUS_FIXTURE" \
+  CODEX_TASKMASTER_TTY_CWD_FIXTURE="$TTY_CWD_AMBIGUOUS_FIXTURE" \
+  "$HELPER" resolve-live-tty -t alpha 2>&1
+)"
+ambiguous_cwd_status=$?
+set -e
+[[ "$ambiguous_cwd_status" -ne 0 ]]
+assert_contains "$ambiguous_cwd_output" "found multiple matching Terminal ttys for target 'alpha'"
 
 loop_key="$(printf 'alpha' | shasum -a 256 | awk '{print $1}')"
 mkdir -p "${STATE_DIR}/loops" "${STATE_DIR}/runtime/user-loop-state" "${STATE_DIR}/runtime/loop-logs"

@@ -192,7 +192,7 @@ func localizedSessionStatusLabel(_ session: SessionSnapshot) -> String {
     if session.isArchived {
         return "已归档"
     }
-    if session.terminalState == "unavailable" {
+    if session.terminalState == "unavailable" && shouldCollapseUnavailableTerminalIntoDisconnectedStatus(session) {
         return "断联"
     }
 
@@ -221,6 +221,18 @@ func localizedSessionStatusLabel(_ session: SessionSnapshot) -> String {
         return "未知"
     default:
         return session.status
+    }
+}
+
+func shouldCollapseUnavailableTerminalIntoDisconnectedStatus(_ session: SessionSnapshot) -> Bool {
+    guard session.terminalState == "unavailable" else { return false }
+    switch session.status {
+    case let status where status.hasPrefix("active"):
+        return false
+    case "busy_turn_open", "post_finalizing", "busy_with_stream_issue", "interrupted_or_aborting":
+        return false
+    default:
+        return true
     }
 }
 
