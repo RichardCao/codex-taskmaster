@@ -8,7 +8,7 @@ if let lastSentinel = rawArguments.lastIndex(of: "--"),
 } else {
     scriptArguments = []
 }
-let outputPath = scriptArguments.first ?? "CodeTaskMaster-1024.png"
+let outputPath = scriptArguments.first ?? "CodexTaskmaster-1024.png"
 let canvas = NSSize(width: 1024, height: 1024)
 let image = NSImage(size: canvas)
 

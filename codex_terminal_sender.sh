@@ -1377,8 +1377,52 @@ thread_name_set() {
   printf 'name: %s\n' "$name"
 }
 
+thread_action_guard_live_session() {
+  local thread_id="$1"
+  local action="$2"
+  local metadata=""
+  local rollout_path=""
+  local thread_title=""
+  local first_user_message=""
+  local target_cwd=""
+  local session_name=""
+  local live_tty_output=""
+  local live_tty_status=1
+
+  metadata="$(load_target_metadata "$thread_id" 2>/dev/null || true)"
+  [[ -n "$metadata" ]] || return 0
+  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name <<<"$metadata"
+
+  set +e
+  live_tty_output="$(resolve_target_tty "$thread_id" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path" 2>&1)"
+  live_tty_status=$?
+  set -e
+
+  case "$live_tty_status" in
+    0)
+      printf 'status: failed\n' >&2
+      printf 'reason: session_%s_live\n' "$action" >&2
+      printf 'thread_id: %s\n' "$thread_id" >&2
+      printf 'tty: %s\n' "$live_tty_output" >&2
+      printf 'detail: session is still live on Terminal tty=%s; close that Codex session before this %s operation\n' "$live_tty_output" "$action" >&2
+      return 1
+      ;;
+    2)
+      printf 'status: failed\n' >&2
+      printf 'reason: session_%s_live_ambiguous\n' "$action" >&2
+      printf 'thread_id: %s\n' "$thread_id" >&2
+      printf 'detail: session still appears live but maps to multiple Terminal targets; close the duplicate running sessions first before this %s operation | %s\n' "$action" "$live_tty_output" >&2
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 thread_archive() {
   local thread_id="$1"
+  thread_action_guard_live_session "$thread_id" "archive"
   codex_app_server_thread_rpc "archive" "$thread_id" >/dev/null
   printf 'thread_id: %s\n' "$thread_id"
   printf 'archived: yes\n'
@@ -1395,6 +1439,7 @@ thread_delete() {
   local thread_id="$1"
   require_cmd python3
   is_uuid_like "$thread_id" || die "thread id must be a UUID"
+  thread_action_guard_live_session "$thread_id" "delete"
 
   python3 - "$CODEX_STATE_DB_PATH" "$CODEX_LOGS_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "$thread_id" <<'PY'
 import json

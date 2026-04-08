@@ -1,6 +1,6 @@
-# Code TaskMaster
+# Codex Taskmaster
 
-`Code TaskMaster` 是一个原生 macOS 工具，用来向 Terminal 里运行的 Codex session 发送消息。它支持单次发送、循环发送、session 状态扫描、提示词历史查看，以及 session 的改名、归档、恢复和本地彻底删除。
+`Codex Taskmaster` 是一个原生 macOS 工具，用来向 Terminal 里运行的 Codex session 发送消息。它支持单次发送、循环发送、session 状态扫描、提示词历史查看，以及 session 的改名、归档、恢复和本地彻底删除。
 
 这个项目面向本地 Codex CLI 工作流，核心目标有三点：
 
@@ -42,7 +42,7 @@
 这个脚本会完成：
 
 - 用 `generate_icon.swift` 生成图标
-- 构建 `Code TaskMaster.app`
+- 构建 `Codex Taskmaster.app`
 - 把 `codex_terminal_sender.sh` 打包进应用资源
 
 如果你只想单独更新图标，不要直接裸跑 `swift generate_icon.swift`，请改用：
@@ -73,7 +73,7 @@ MACOS_SDK_PATH=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk ./build_c
 构建完成后可直接打开：
 
 ```bash
-open -na "./Code TaskMaster.app"
+open -na "./Codex Taskmaster.app"
 ```
 
 也可以在 Finder 里双击打开。
@@ -112,7 +112,7 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 
 这个 UI smoke test 会：
 
-- 启动 `Code TaskMaster.app`
+- 启动 `Codex Taskmaster.app`
 - 等待主窗口出现
 - 通过 `System Events` 验证应用进程和窗口可见
 

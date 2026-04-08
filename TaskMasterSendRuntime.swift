@@ -38,10 +38,10 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
     func sendMessage(toTTYPath ttyPath: String, message: String, clearExistingInput: Bool, logger: ((String) -> Void)?) throws {
         guard ensurePermission(prompt: true) else {
             throw NSError(
-                domain: "CodeTaskMaster",
+                domain: "CodexTaskmaster",
                 code: 5,
                 userInfo: [
-                    NSLocalizedDescriptionKey: "Code TaskMaster 没有辅助功能权限，无法发送按键",
+                    NSLocalizedDescriptionKey: "Codex Taskmaster 没有辅助功能权限，无法发送按键",
                     "sendReason": "missing_accessibility_permission"
                 ]
             )
@@ -95,7 +95,7 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
     private func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags = []) throws {
         guard let source = CGEventSource(stateID: .combinedSessionState) else {
             throw NSError(
-                domain: "CodeTaskMaster",
+                domain: "CodexTaskmaster",
                 code: 1,
                 userInfo: [
                     NSLocalizedDescriptionKey: "无法创建键盘事件源",
@@ -106,7 +106,7 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
         guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
             throw NSError(
-                domain: "CodeTaskMaster",
+                domain: "CodexTaskmaster",
                 code: 2,
                 userInfo: [
                     NSLocalizedDescriptionKey: "无法创建键盘事件",
@@ -216,7 +216,7 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
             try process.run()
         } catch {
             throw NSError(
-                domain: "CodeTaskMaster",
+                domain: "CodexTaskmaster",
                 code: 3,
                 userInfo: [
                     NSLocalizedDescriptionKey: "启动 Terminal 聚焦脚本失败: \(error.localizedDescription)",
@@ -236,7 +236,7 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
             let errData = stderr.fileHandleForReading.readDataToEndOfFile()
             let errText = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "聚焦 Terminal 失败"
             throw NSError(
-                domain: "CodeTaskMaster",
+                domain: "CodexTaskmaster",
                 code: 4,
                 userInfo: [
                     NSLocalizedDescriptionKey: errText,
@@ -825,7 +825,7 @@ final class SendRequestCoordinator {
             detailParts.append("resolve_detail=\(resolveDetail)")
         }
         return NSError(
-            domain: "CodeTaskMaster",
+            domain: "CodexTaskmaster",
             code: 6,
             userInfo: [
                 NSLocalizedDescriptionKey: detailParts.joined(separator: " | "),

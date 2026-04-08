@@ -55,9 +55,9 @@
 
 下面这些是 macOS 构建或产物，不是 Linux 迁移首要材料。
 
-- `Code TaskMaster.app`
-- `CodeTaskMaster-1024.png`
-- `CodeTaskMaster.iconset/`
+- `Codex Taskmaster.app`
+- `CodexTaskmaster-1024.png`
+- `CodexTaskmaster.iconset/`
 - [build_code_taskmaster_app.sh](/Users/create/codex-terminal-app/build_code_taskmaster_app.sh)
 - [generate_icon.swift](/Users/create/codex-terminal-app/generate_icon.swift)
 - [scripts/ui_smoke_test.sh](/Users/create/codex-terminal-app/scripts/ui_smoke_test.sh)

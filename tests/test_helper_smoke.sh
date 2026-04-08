@@ -517,6 +517,30 @@ assert_contains "$delete_loop_output" "deleted loop for target=alpha"
 status_after_loop_delete="$("$HELPER" status)"
 assert_contains "$status_after_loop_delete" "no loops"
 
+set +e
+live_archive_output="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_FIXTURE" \
+  "$HELPER" thread-archive -t aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa 2>&1
+)"
+live_archive_status=$?
+set -e
+[[ "$live_archive_status" -ne 0 ]]
+assert_contains "$live_archive_output" "reason: session_archive_live"
+assert_contains "$live_archive_output" "tty: ttys101"
+assert_equals "$(sqlite3 "$STATE_DB" "select archived from threads where id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';")" "0"
+
+set +e
+live_delete_output="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_FIXTURE" \
+  "$HELPER" thread-delete -t aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa 2>&1
+)"
+live_delete_status=$?
+set -e
+[[ "$live_delete_status" -ne 0 ]]
+assert_contains "$live_delete_output" "reason: session_delete_live"
+assert_contains "$live_delete_output" "tty: ttys101"
+assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from threads where id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';")" "1"
+
 delete_output="$("$HELPER" thread-delete -t dddddddd-dddd-dddd-dddd-dddddddddddd)"
 assert_contains "$delete_output" "deleted: yes"
 assert_contains "$delete_output" "rollout_removed: yes"

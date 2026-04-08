@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUTPUT_PATH="${1:-${ROOT}/CodeTaskMaster-1024.png}"
+OUTPUT_PATH="${1:-${ROOT}/CodexTaskmaster-1024.png}"
 
 resolve_sdk_path() {
   if [[ -n "${MACOS_SDK_PATH:-}" ]]; then

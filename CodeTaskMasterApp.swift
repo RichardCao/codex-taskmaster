@@ -475,7 +475,7 @@ final class CodeTaskMasterApp: NSObject, NSApplicationDelegate {
 
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Quit Code TaskMaster", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit Codex Taskmaster", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
 
@@ -505,7 +505,7 @@ final class MainWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Code TaskMaster"
+        window.title = "Codex Taskmaster"
         window.minSize = NSSize(width: 760, height: 560)
         window.contentMinSize = NSSize(width: 760, height: 560)
         window.contentMaxSize = NSSize(width: 10_000, height: 10_000)
@@ -810,7 +810,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         resumeLoopButton.isEnabled = false
         deleteLoopButton.isEnabled = false
         installTableSelectionOutsideMonitor()
-        appendOutput("Code TaskMaster is ready.")
+        appendOutput("Codex Taskmaster is ready.")
         appendOutput("Active Loops will refresh automatically every \(Int(autoRefreshInterval)) seconds.")
         refreshLoopsSnapshot()
         startAutoRefresh()
@@ -4339,6 +4339,14 @@ conn.close()
     }
 
     private func parseStructuredSendHelperResult(_ text: String) -> [String: String]? {
+        guard let fields = parseStructuredHelperFields(text),
+              fields["target"] != nil else {
+            return nil
+        }
+        return fields
+    }
+
+    private func parseStructuredHelperFields(_ text: String) -> [String: String]? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
@@ -4351,10 +4359,30 @@ conn.close()
             fields[key] = value
         }
 
-        guard fields["status"] != nil, fields["reason"] != nil, fields["target"] != nil else {
+        guard fields["status"] != nil, fields["reason"] != nil else {
             return nil
         }
         return fields
+    }
+
+    private func showSessionActionBlockedAlert(actionLabel: String, session: SessionSnapshot, detail: String, ambiguous: Bool) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = ambiguous ? "无法\(actionLabel)目标不唯一的活跃 Session" : "无法\(actionLabel)仍在运行的 Session"
+        let sessionName = sessionActualName(session)
+        let nameLine = sessionName.isEmpty ? "-" : sessionName
+        let cleanedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let defaultDetail = ambiguous
+            ? "这个 session 仍然对应多个活跃 Terminal/Codex 目标，当前无法安全\(actionLabel)。请先关闭重复打开的 session，再重试。"
+            : "这个 session 仍然有活跃的 Terminal/Codex 进程，当前不允许\(actionLabel)。请先关闭对应 Terminal 标签页或结束该 session，再重试。"
+        alert.informativeText = """
+        Session ID: \(session.threadID)
+        Name: \(nameLine)
+
+        \(cleanedDetail.isEmpty ? defaultDetail : cleanedDetail)
+        """
+        alert.addButton(withTitle: "知道了")
+        alert.runModal()
     }
 
     private func runHelper(arguments: [String], actionName: String) {
@@ -4829,7 +4857,7 @@ conn.close()
             return
         }
         guard sendRequestCoordinator.ensurePermission(prompt: true) else {
-            appendOutput("Code TaskMaster 缺少辅助功能权限，无法发送按键。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
+            appendOutput("Codex Taskmaster 缺少辅助功能权限，无法发送按键。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
             setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
             NSSound.beep()
             return
@@ -4860,7 +4888,7 @@ conn.close()
             return
         }
         guard sendRequestCoordinator.ensurePermission(prompt: true) else {
-            appendOutput("Code TaskMaster 缺少辅助功能权限，无法处理循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
+            appendOutput("Codex Taskmaster 缺少辅助功能权限，无法处理循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
             setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
             _ = saveStoppedLoopEntry(target: target, interval: interval, message: currentMessage(), forceSend: isForceSendEnabled(), reason: "missing_accessibility_permission")
             setStatus("开始循环失败", key: "action", color: .systemRed)
@@ -4971,7 +4999,7 @@ conn.close()
         }
 
         guard sendRequestCoordinator.ensurePermission(prompt: true) else {
-            appendOutput("Code TaskMaster 缺少辅助功能权限，无法恢复循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
+            appendOutput("Codex Taskmaster 缺少辅助功能权限，无法恢复循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
             setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
             setStatus("恢复当前失败", key: "action", color: .systemRed)
             NSSound.beep()
@@ -5156,6 +5184,13 @@ conn.close()
                     self.appendOutput("已归档 session: \(session.threadID)")
                     self.refreshLoopsSnapshot()
                 } else {
+                    if let fields = self.parseStructuredHelperFields(result.error) {
+                        let reason = fields["reason"] ?? ""
+                        if reason == "session_archive_live" || reason == "session_archive_live_ambiguous" {
+                            let detail = fields["detail"] ?? result.error
+                            self.showSessionActionBlockedAlert(actionLabel: "归档", session: session, detail: detail, ambiguous: reason == "session_archive_live_ambiguous")
+                        }
+                    }
                     self.renameField.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.saveRenameButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.archiveSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
@@ -5323,6 +5358,13 @@ conn.close()
                     self.appendOutput(result.detail.isEmpty ? "已彻底删除 session: \(session.threadID)" : result.detail)
                     self.refreshLoopsSnapshot()
                 } else {
+                    if let fields = self.parseStructuredHelperFields(result.detail) {
+                        let reason = fields["reason"] ?? ""
+                        if reason == "session_delete_live" || reason == "session_delete_live_ambiguous" {
+                            let detail = fields["detail"] ?? result.detail
+                            self.showSessionActionBlockedAlert(actionLabel: "删除", session: session, detail: detail, ambiguous: reason == "session_delete_live_ambiguous")
+                        }
+                    }
                     self.updateSessionDetailView()
                     self.setStatus("彻底删除失败", key: "action")
                     self.appendOutput("stderr: \(result.detail)")

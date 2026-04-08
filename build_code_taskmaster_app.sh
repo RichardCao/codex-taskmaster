@@ -2,13 +2,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="Code TaskMaster"
+APP_NAME="Codex Taskmaster"
 APP_DIR="${ROOT}/${APP_NAME}.app"
 BIN_DIR="${APP_DIR}/Contents/MacOS"
 RES_DIR="${APP_DIR}/Contents/Resources"
-BIN_PATH="${BIN_DIR}/CodeTaskMaster"
-ICONSET_DIR="${ROOT}/CodeTaskMaster.iconset"
-ICON_PNG="${ROOT}/CodeTaskMaster-1024.png"
+BIN_PATH="${BIN_DIR}/CodexTaskmaster"
+ICONSET_DIR="${ROOT}/CodexTaskmaster.iconset"
+ICON_PNG="${ROOT}/CodexTaskmaster-1024.png"
 ICON_ICNS="${RES_DIR}/AppIcon.icns"
 HELPER_SRC="${ROOT}/codex_terminal_sender.sh"
 HELPER_DST="${RES_DIR}/codex_terminal_sender.sh"
@@ -94,15 +94,15 @@ cat >"${APP_DIR}/Contents/Info.plist" <<'PLIST'
   <key>CFBundleDevelopmentRegion</key>
   <string>zh_CN</string>
   <key>CFBundleDisplayName</key>
-  <string>Code TaskMaster</string>
+  <string>Codex Taskmaster</string>
   <key>CFBundleExecutable</key>
-  <string>CodeTaskMaster</string>
+  <string>CodexTaskmaster</string>
   <key>CFBundleIdentifier</key>
   <string>io.github.codex-taskmaster</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>Code TaskMaster</string>
+  <string>Codex Taskmaster</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
