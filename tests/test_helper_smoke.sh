@@ -355,7 +355,7 @@ assert_contains "$paused_status" "failure_count: 3"
 assert_contains "$paused_status" "failure_reason: tty_focus_failed"
 assert_contains "$paused_status" "pause_reason: tty_focus_failed"
 paused_log="$(cat "${STATE_DIR}/runtime/loop-logs/${loop_key}.log")"
-assert_contains "$paused_log" "paused: consecutive failure threshold reached count=3 reason=tty_focus_failed"
+assert_contains "$paused_log" "paused: consecutive forced-send failure threshold reached count=3 reason=tty_focus_failed"
 
 paused_counter_before="$(cat "$LOOP_SEND_COUNTER")"
 CODEX_TASKMASTER_SEND_STUB="$LOOP_SEND_STUB" \
@@ -365,6 +365,33 @@ CODEX_TASKMASTER_LOOP_FAILURE_PAUSE_THRESHOLD=3 \
 "$HELPER" loop-once
 paused_counter_after="$(cat "$LOOP_SEND_COUNTER")"
 assert_equals "$paused_counter_after" "$paused_counter_before"
+
+nonforce_target="nonforce-loop"
+nonforce_key="$(printf '%s' "$nonforce_target" | shasum -a 256 | awk '{print $1}')"
+cat >"${STATE_DIR}/loops/${nonforce_key}.loop" <<EOF
+TARGET=${nonforce_target}
+INTERVAL=9
+MESSAGE=nonforce-message
+FORCE_SEND=0
+THREAD_ID=nonforce-thread
+EOF
+: > "${STATE_DIR}/runtime/loop-logs/${nonforce_key}.log"
+
+for _ in 1 2 3 4; do
+  CODEX_TASKMASTER_SEND_STUB="$LOOP_SEND_STUB" \
+  CODEX_TASKMASTER_TEST_COUNTER_FILE="$LOOP_SEND_COUNTER" \
+  CODEX_TASKMASTER_LOOP_BUSY_RETRY_SECONDS=0 \
+  CODEX_TASKMASTER_LOOP_FAILURE_PAUSE_THRESHOLD=3 \
+  "$HELPER" loop-once
+done
+
+nonforce_status="$("$HELPER" status -t "$nonforce_target")"
+assert_contains "$nonforce_status" "paused: no"
+assert_contains "$nonforce_status" "failure_count: 0"
+assert_contains "$nonforce_status" "failure_reason: tty_focus_failed"
+assert_not_contains "$nonforce_status" "pause_reason:"
+nonforce_log="$(cat "${STATE_DIR}/runtime/loop-logs/${nonforce_key}.log")"
+assert_not_contains "$nonforce_log" "paused: consecutive forced-send failure threshold reached"
 
 CONFLICT_SEND_STUB="${TEST_TMP}/loop-send-success-stub.sh"
 CONFLICT_SEND_COUNTER="${TEST_TMP}/loop-send-success-counter.txt"

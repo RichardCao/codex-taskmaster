@@ -2206,16 +2206,21 @@ process_loops_once() {
         local retry_delay
         current_failure_reason="$(extract_probe_field "$send_output" "reason")"
         [[ -n "$current_failure_reason" ]] || current_failure_reason="unknown_failure"
-        if [[ "$failure_reason" == "$current_failure_reason" ]]; then
-          failure_count="$(( failure_count + 1 ))"
-        else
-          failure_count=1
-        fi
 
         append_loop_log_line "$LOOP_LOG_FILE" "deferred: ${send_output//$'\n'/ | }"
         now="$(date +%s)"
-        if [[ "$LOOP_FAILURE_PAUSE_THRESHOLD" =~ ^[1-9][0-9]*$ ]] && (( failure_count >= LOOP_FAILURE_PAUSE_THRESHOLD )); then
-          append_loop_log_line "$LOOP_LOG_FILE" "paused: consecutive failure threshold reached count=${failure_count} reason=${current_failure_reason}"
+        if [[ "$force_send" == "1" ]]; then
+          if [[ "$failure_reason" == "$current_failure_reason" ]]; then
+            failure_count="$(( failure_count + 1 ))"
+          else
+            failure_count=1
+          fi
+        else
+          failure_count=0
+        fi
+
+        if [[ "$force_send" == "1" ]] && [[ "$LOOP_FAILURE_PAUSE_THRESHOLD" =~ ^[1-9][0-9]*$ ]] && (( failure_count >= LOOP_FAILURE_PAUSE_THRESHOLD )); then
+          append_loop_log_line "$LOOP_LOG_FILE" "paused: consecutive forced-send failure threshold reached count=${failure_count} reason=${current_failure_reason}"
           write_loop_status_kv "$source_tag" "$now" "$failure_count" "$current_failure_reason" "1" "$current_failure_reason" "0" ""
         else
           retry_delay="$(failure_retry_delay_seconds "$LOOP_BUSY_RETRY_SECONDS" "$current_failure_reason" "$force_send")"
