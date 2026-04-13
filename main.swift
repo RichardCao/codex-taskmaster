@@ -1,6 +1,6 @@
 import AppKit
 
 let app = NSApplication.shared
-let delegate = CodeTaskMasterApp()
+let delegate = CodexTaskmasterApp()
 app.delegate = delegate
 app.run()

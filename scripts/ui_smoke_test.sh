@@ -24,7 +24,7 @@ require_cmd osascript
 
 if [[ ! -d "$APP_PATH" ]]; then
   printf 'App bundle not found, building first: %s\n' "$APP_PATH"
-  "${ROOT}/build_code_taskmaster_app.sh"
+  "${ROOT}/build_codex_taskmaster_app.sh"
 fi
 
 trap cleanup EXIT

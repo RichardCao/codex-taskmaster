@@ -38,7 +38,7 @@
 在项目根目录执行：
 
 ```bash
-./build_code_taskmaster_app.sh
+./build_codex_taskmaster_app.sh
 ```
 
 这个脚本会完成：
@@ -67,7 +67,7 @@ SDK 选择策略：
 例如：
 
 ```bash
-MACOS_SDK_PATH=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk ./build_code_taskmaster_app.sh
+MACOS_SDK_PATH=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk ./build_codex_taskmaster_app.sh
 ```
 
 ## 启动
@@ -133,7 +133,7 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
   - probe/thread 解析
   - 状态与 reason 映射
   - session 类型、provider、父子关系等元数据语义
-- `CodeTaskMasterApp.swift`
+- `CodexTaskmasterApp.swift`
   - 桌面界面
   - session 状态扫描
   - 表格、详情区、日志区和用户交互
@@ -303,12 +303,12 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 
 ## 仓库结构
 
-- `CodeTaskMasterApp.swift`：主应用
+- `CodexTaskmasterApp.swift`：主应用
 - `TaskMasterCore.swift`：共享语义与解析逻辑
 - `TaskMasterSendRuntime.swift`：请求队列与平台发送运行时
 - `main.swift`：应用启动入口
 - `codex_terminal_sender.sh`：helper CLI 与循环引擎
-- `build_code_taskmaster_app.sh`：构建脚本
+- `build_codex_taskmaster_app.sh`：构建脚本
 - `generate_icon.swift`：图标生成脚本
 - `scripts/check.sh`：项目检查入口
 - `scripts/regression_check.sh`：扩展回归入口，可选带 UI smoke test

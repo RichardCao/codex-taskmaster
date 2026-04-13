@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_SWIFT_SOURCES=(
   "${ROOT}/TaskMasterCore.swift"
-  "${ROOT}/CodeTaskMasterApp.swift"
+  "${ROOT}/CodexTaskmasterApp.swift"
   "${ROOT}/TaskMasterSendRuntime.swift"
   "${ROOT}/main.swift"
 )
@@ -40,6 +40,6 @@ else
 fi
 
 printf '==> build app\n'
-"${ROOT}/build_code_taskmaster_app.sh"
+"${ROOT}/build_codex_taskmaster_app.sh"
 
 printf 'all checks passed\n'

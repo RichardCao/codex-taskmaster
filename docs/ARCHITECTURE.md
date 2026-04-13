@@ -6,7 +6,7 @@
 
 - 仓库仍是单仓结构，但关键边界已经开始形成
 - 共享语义雏形已经抽到 [TaskMasterCore.swift](/Users/create/codex-terminal-app/TaskMasterCore.swift)
-- macOS UI 主入口是 [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
+- macOS UI 主入口是 [CodexTaskmasterApp.swift](/Users/create/codex-terminal-app/CodexTaskmasterApp.swift)
 - 发送请求排队、平台发送适配、发送后验证主路径已经拆到 [TaskMasterSendRuntime.swift](/Users/create/codex-terminal-app/TaskMasterSendRuntime.swift)
 - helper CLI、loop daemon、session 扫描与 session 操作主逻辑仍主要在 [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh)
 - 当前平台实现默认面向 macOS `Terminal.app`
@@ -50,7 +50,7 @@
   - `thread_archive` / `thread_unarchive` / `thread_delete`
   - `thread-provider-plan*` / `thread-provider-migrate*`
   - `start_loop` / `stop_loop` / `status_loop`
-- [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
+- [CodexTaskmasterApp.swift](/Users/create/codex-terminal-app/CodexTaskmasterApp.swift)
   - `SessionSnapshot`
   - `parseProbeAllOutput`
   - `parseThreadListOutput`
@@ -130,11 +130,11 @@ UI 职责：
 
 当前主要实现在：
 
-- [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
+- [CodexTaskmasterApp.swift](/Users/create/codex-terminal-app/CodexTaskmasterApp.swift)
 
 打包与工具链当前主要在：
 
-- [build_code_taskmaster_app.sh](/Users/create/codex-terminal-app/build_code_taskmaster_app.sh)
+- [build_codex_taskmaster_app.sh](/Users/create/codex-terminal-app/build_codex_taskmaster_app.sh)
 - [generate_icon.swift](/Users/create/codex-terminal-app/generate_icon.swift)
 - [scripts/check.sh](/Users/create/codex-terminal-app/scripts/check.sh)
 - [scripts/regression_check.sh](/Users/create/codex-terminal-app/scripts/regression_check.sh)
@@ -245,8 +245,8 @@ UI 职责：
 
 下面这些仍是强绑定 macOS 的，Linux 应视为参考，而不是直接复用：
 
-- [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
-- [build_code_taskmaster_app.sh](/Users/create/codex-terminal-app/build_code_taskmaster_app.sh)
+- [CodexTaskmasterApp.swift](/Users/create/codex-terminal-app/CodexTaskmasterApp.swift)
+- [build_codex_taskmaster_app.sh](/Users/create/codex-terminal-app/build_codex_taskmaster_app.sh)
 - [generate_icon.swift](/Users/create/codex-terminal-app/generate_icon.swift)
 - [scripts/ui_smoke_test.sh](/Users/create/codex-terminal-app/scripts/ui_smoke_test.sh)
 

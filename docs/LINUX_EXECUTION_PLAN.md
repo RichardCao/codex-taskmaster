@@ -103,7 +103,7 @@ Linux 第一版要做到：
   - 发送请求编排
   - 平台发送接口
   - macOS 发送实现
-- [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
+- [CodexTaskmasterApp.swift](/Users/create/codex-terminal-app/CodexTaskmasterApp.swift)
   - AppKit UI
   - session 展示、筛选、日志、用户交互
 - [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh)
@@ -201,7 +201,7 @@ Linux 第一版优先只做 CLI，不做 GUI。
 
 - 进一步把 `codex_terminal_sender.sh` 中与平台无关的 session / loop 语义整理出来
 - 继续收口状态文本、错误码、reason 映射
-- 减少 `CodeTaskMasterApp.swift` 中的业务语义散落
+- 减少 `CodexTaskmasterApp.swift` 中的业务语义散落
 
 建议文件方向：
 

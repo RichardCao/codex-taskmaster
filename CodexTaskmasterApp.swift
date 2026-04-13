@@ -427,7 +427,7 @@ final class AppFocusTracker {
     }
 }
 
-final class CodeTaskMasterApp: NSObject, NSApplicationDelegate {
+final class CodexTaskmasterApp: NSObject, NSApplicationDelegate {
     private var windowController: MainWindowController?
     private var didRunTerminationCleanup = false
 
@@ -1195,11 +1195,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             tableColumn.width = column.width
             tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.identifier, ascending: column.identifier != defaultLoopSortKey)
             tableColumn.minWidth = loopColumnMinimumWidth(column.identifier)
-            if column.identifier == "lastLog" {
-                tableColumn.resizingMask = [.autoresizingMask, .userResizingMask]
-            } else {
-                tableColumn.resizingMask = .userResizingMask
-            }
+            tableColumn.resizingMask = .userResizingMask
             activeLoopsTableView.addTableColumn(tableColumn)
         }
 
@@ -1238,11 +1234,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             tableColumn.width = column.width
             tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.identifier, ascending: column.identifier == defaultSessionSortKey ? false : true)
             tableColumn.minWidth = sessionColumnMinimumWidth(column.identifier)
-            if column.identifier == "reason" {
-                tableColumn.resizingMask = [.autoresizingMask, .userResizingMask]
-            } else {
-                tableColumn.resizingMask = .userResizingMask
-            }
+            tableColumn.resizingMask = .userResizingMask
             sessionStatusTableView.addTableColumn(tableColumn)
         }
 

@@ -21,13 +21,13 @@
 ### 核心逻辑参考
 
 - [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh)
-- [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
+- [CodexTaskmasterApp.swift](/Users/create/codex-terminal-app/CodexTaskmasterApp.swift)
 - [TaskMasterSendRuntime.swift](/Users/create/codex-terminal-app/TaskMasterSendRuntime.swift)
 
 说明：
 
 - `codex_terminal_sender.sh` 是 helper / loop / session 操作的主要参考实现
-- `CodeTaskMasterApp.swift` 虽然是 macOS UI，但里面仍有大量 session 解析、状态映射、结果解释与展示语义
+- `CodexTaskmasterApp.swift` 虽然是 macOS UI，但里面仍有大量 session 解析、状态映射、结果解释与展示语义
 - `TaskMasterSendRuntime.swift` 承载了请求队列、平台适配接口和发送结果分类，Linux 迁移时必须参考
 
 ### 构建与测试参考
@@ -58,7 +58,7 @@
 - `Codex Taskmaster.app`
 - `CodexTaskmaster-1024.png`
 - `CodexTaskmaster.iconset/`
-- [build_code_taskmaster_app.sh](/Users/create/codex-terminal-app/build_code_taskmaster_app.sh)
+- [build_codex_taskmaster_app.sh](/Users/create/codex-terminal-app/build_codex_taskmaster_app.sh)
 - [generate_icon.swift](/Users/create/codex-terminal-app/generate_icon.swift)
 - [scripts/ui_smoke_test.sh](/Users/create/codex-terminal-app/scripts/ui_smoke_test.sh)
 
