@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
+
 APP_NAME="codex-terminal-sender"
 DEFAULT_INTERVAL=600
 DEFAULT_MESSAGE="继续"

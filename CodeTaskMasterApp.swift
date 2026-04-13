@@ -647,6 +647,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var sessionScanGeneration = 0
     private var sessionScanTotal = 0
     private var sessionScanShouldStop = false
+    private var displayedSessionListMode: SessionListMode = .active
+    private var activeSessionScanMode: SessionListMode?
     private var statusSegments: [String: String] = [:]
     private var statusSegmentColors: [String: NSColor] = [:]
     private var statusSegmentClearWorkItems: [String: DispatchWorkItem] = [:]
@@ -658,7 +660,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var didForceInitialTopSplitRatioAfterAppear = false
     private var lastTopSplitWidth: CGFloat = 0
     private var isApplyingTopSplitRatio = false
-    private var sessionStatusSplitRatio: CGFloat = 0.62
+    private var sessionStatusSplitRatio: CGFloat = 0.56
     private var didApplyInitialSessionStatusSplitRatio = false
     private var lastSessionStatusSplitHeight: CGFloat = 0
     private var isApplyingSessionStatusSplitRatio = false
@@ -1070,12 +1072,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionStatusSplitView.translatesAutoresizingMaskIntoConstraints = false
         sessionStatusSplitView.delegate = self
         let sessionStatusTopPane = makeSplitPane(contentView: sessionStatusTopStack, minHeight: 110)
-        let sessionStatusBottomPane = makeSplitPane(contentView: sessionStatusBottomStack, minHeight: 92)
+        let sessionStatusBottomPane = makeSplitPane(contentView: sessionStatusBottomStack, minHeight: 138)
         sessionStatusSplitView.addArrangedSubview(sessionStatusTopPane)
         sessionStatusSplitView.addArrangedSubview(sessionStatusBottomPane)
         sessionStatusSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         sessionStatusSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
-        let sessionStatusMinHeight = CGFloat(110 + 92) + sessionStatusSplitView.dividerThickness
+        let sessionStatusMinHeight = CGFloat(110 + 138) + sessionStatusSplitView.dividerThickness
         sessionStatusSplitView.heightAnchor.constraint(greaterThanOrEqualToConstant: sessionStatusMinHeight).isActive = true
         let sessionStatusPanel = makePanel(title: "Session Status", metaLabel: sessionStatusMetaLabel, contentView: sessionStatusSplitView)
         let logFilterControls = NSStackView(views: [activityLogSearchField, activityLogFailuresOnlyCheckbox, activityLogSelectedSessionCheckbox, exportSessionLogButton, clearLogButton, saveLogButton])
@@ -1791,12 +1793,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionScopeControl.selectedSegment == 1 ? .archived : .active
     }
 
-    private func sessionScopeText() -> String {
-        currentSessionListMode() == .archived ? "已归档" : "普通"
+    private func sessionScopeText(for mode: SessionListMode) -> String {
+        mode == .archived ? "已归档" : "普通"
+    }
+
+    private func requestedSessionScopeText() -> String {
+        sessionScopeText(for: currentSessionListMode())
+    }
+
+    private func displayedSessionScopeText() -> String {
+        sessionScopeText(for: displayedSessionListMode)
     }
 
     private func sessionEmptyStateText() -> String {
-        switch currentSessionListMode() {
+        switch displayedSessionListMode {
         case .active:
             return "视图: 普通 | 未加载 session 状态。点击“检测状态”开始扫描。"
         case .archived:
@@ -2009,7 +2019,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func updateSessionStatusMetaLabel() {
         if allSessionSnapshots.isEmpty {
             if isSessionScanRunning, let scannedCount = lastSessionRenderScannedCount, let totalCount = lastSessionRenderTotalCount {
-                var parts = ["视图: \(sessionScopeText())", "正在扫描 \(scannedCount)/\(totalCount)…"]
+                var parts = ["视图: \(displayedSessionScopeText())", "正在扫描 \(scannedCount)/\(totalCount)…"]
                 if let searchSummary = sessionSearchSummary() {
                     parts.append(searchSummary)
                 }
@@ -2020,7 +2030,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
 
-        var parts = ["视图: \(sessionScopeText())", "已加载: \(allSessionSnapshots.count)"]
+        var parts = ["视图: \(displayedSessionScopeText())", "已加载: \(allSessionSnapshots.count)"]
         if let scannedCount = lastSessionRenderScannedCount, let totalCount = lastSessionRenderTotalCount {
             let progressText = lastSessionRenderIsComplete ? "已扫描: \(scannedCount)/\(totalCount)" : "扫描中: \(scannedCount)/\(totalCount)"
             parts.append(progressText)
@@ -2878,7 +2888,7 @@ conn.close()
         if !didApplyInitialSessionStatusSplitRatio,
            sessionStatusSplitView.subviews.count == 2,
            sessionStatusSplitView.bounds.height > sessionStatusSplitView.dividerThickness {
-            setSessionStatusSplitRatio(0.62)
+            setSessionStatusSplitRatio(0.56)
             didApplyInitialSessionStatusSplitRatio = true
             lastSessionStatusSplitHeight = sessionStatusSplitView.bounds.height
         }
@@ -4684,6 +4694,7 @@ conn.close()
         guard isSessionScanRunning else { return }
         sessionScanShouldStop = true
         sessionScanGeneration += 1
+        let stoppedMode = activeSessionScanMode ?? displayedSessionListMode
 
         sessionScanProcessLock.lock()
         let process = currentSessionScanProcess
@@ -4701,9 +4712,10 @@ conn.close()
             renderSessionSnapshots(scannedCount: allSessionSnapshots.count, totalCount: sessionScanTotal, isComplete: false)
             sessionStatusMetaLabel.stringValue += " | 已停止"
         } else {
-            sessionStatusMetaLabel.stringValue = "视图: \(sessionScopeText()) | 检测已停止。"
+            sessionStatusMetaLabel.stringValue = "视图: \(sessionScopeText(for: stoppedMode)) | 检测已停止。"
             sessionStatusTableView.reloadData()
         }
+        activeSessionScanMode = nil
     }
 
     private func refreshLoopsSnapshot() {
@@ -4779,6 +4791,8 @@ conn.close()
             return
         }
 
+        activeSessionScanMode = .active
+        displayedSessionListMode = .active
         isSessionScanRunning = true
         sessionScanShouldStop = false
         sessionScanGeneration += 1
@@ -4804,6 +4818,7 @@ conn.close()
                 DispatchQueue.main.async {
                     guard self.sessionScanGeneration == generation else { return }
                     self.isSessionScanRunning = false
+                    self.activeSessionScanMode = nil
                     self.updateDetectStatusButtonState()
                     self.allSessionSnapshots = []
                     self.sessionSnapshots = []
@@ -4822,6 +4837,7 @@ conn.close()
                 self.sessionScanTotal = totalCount
                 if totalCount == 0 {
                     self.isSessionScanRunning = false
+                    self.activeSessionScanMode = nil
                     self.updateDetectStatusButtonState()
                     self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 没有可扫描的 session。"
                     self.sessionStatusTableView.reloadData()
@@ -4874,6 +4890,7 @@ conn.close()
             DispatchQueue.main.async {
                 guard self.sessionScanGeneration == generation else { return }
                 self.isSessionScanRunning = false
+                self.activeSessionScanMode = nil
                 self.updateDetectStatusButtonState()
 
                 if encounteredFailure {
@@ -4894,6 +4911,8 @@ conn.close()
     }
 
     private func refreshArchivedSessions() {
+        activeSessionScanMode = .archived
+        displayedSessionListMode = .archived
         isSessionScanRunning = true
         sessionScanShouldStop = false
         sessionScanGeneration += 1
@@ -4918,6 +4937,7 @@ conn.close()
             DispatchQueue.main.async {
                 guard self.sessionScanGeneration == generation else { return }
                 self.isSessionScanRunning = false
+                self.activeSessionScanMode = nil
                 self.updateDetectStatusButtonState()
 
                 if result.status != 0 {
@@ -5040,18 +5060,25 @@ conn.close()
 
     @objc
     private func changeSessionScope() {
+        let requestedMode = currentSessionListMode()
         if isSessionScanRunning {
-            stopSessionStatusScan()
+            let activeMode = activeSessionScanMode ?? displayedSessionListMode
+            sessionScopeControl.selectedSegment = activeMode == .archived ? 1 : 0
+            setStatus("请等待当前检测完成或手动停止后再切换", key: "scan", color: .systemOrange)
+            appendOutput("检测状态仍在进行中，已保持当前视图为\(sessionScopeText(for: activeMode))。")
+            return
         }
+
+        guard requestedMode != displayedSessionListMode else {
+            setStatus("当前视图切换为\(displayedSessionScopeText())", key: "scan")
+            return
+        }
+
         invalidateSessionSearch(resetPromptCache: true)
-        allSessionSnapshots = []
-        sessionSnapshots = []
-        sessionScanTotal = 0
-        sessionStatusTableView.deselectAll(nil)
         sessionStatusTableView.reloadData()
-        sessionStatusMetaLabel.stringValue = sessionEmptyStateText()
         updateSessionDetailView()
-        setStatus("当前视图切换为\(sessionScopeText())", key: "scan")
+        setStatus("已切换到\(requestedSessionScopeText())视图，点击“检测状态”刷新", key: "scan", color: .systemOrange)
+        appendOutput("已切换 Session Status 视图到\(requestedSessionScopeText())；当前列表仍显示上次\(displayedSessionScopeText())检测结果，点击“检测状态”后刷新。")
     }
 
     @objc
