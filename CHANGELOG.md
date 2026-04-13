@@ -19,13 +19,15 @@
 
 - 发送运行时继续沿着 `Core / Queue / Platform` 分层收口
 - `.app` 名称与构建脚本统一为 `Codex Taskmaster`
+- `发送一次`、`开始循环`、`恢复当前` 现在会先预检 `~/.codex-terminal-sender` 运行目录可写性
+- 遇到 `runtime` / `loop-state` 权限问题时，UI 会直接弹出明确中文警告，而不再只显示泛化失败
 - 最新本地验证已包含：
   - `bash -n codex_terminal_sender.sh`
   - `swiftc -parse CodexTaskmasterApp.swift TaskMasterCore.swift TaskMasterSendRuntime.swift main.swift`
   - `bash ./build_codex_taskmaster_app.sh`
+  - `tests/test_helper_smoke.sh` 夹具已更新，跟上 helper 当前读取的 `threads` 字段
 
 ### 已知问题
 
-- `bash ./scripts/check.sh` 当前仍会失败在既有 helper smoke case：
-  - `could not find rollout path for target 'alpha'`
-- 这更像测试夹具或本地 smoke 前提未满足，当前未看到与本轮文档整理直接相关的新编译回归
+- 如果旧的 `~/.codex-terminal-sender/runtime/loop-state` 目录仍由其他用户持有，旧 loop daemon 残留仍可能继续报权限错误
+- 当前版本已能在操作前直接提示这类问题，但目录属主仍需要用户手工修正

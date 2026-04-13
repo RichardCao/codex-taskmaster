@@ -97,6 +97,8 @@ bash ./scripts/check.sh
 - Swift 类型检查
 - app 构建
 
+当前 helper smoke 夹具已经补齐了 helper 现阶段会读取的 `threads` 字段，不再停在旧的 `alpha rollout path` 假失败上。
+
 如果你想执行一轮更完整的本地回归检查，可以运行：
 
 ```bash
@@ -245,6 +247,12 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 - probe 状态
 - terminal 状态
 - 具体细节
+
+额外保护：
+
+- `发送一次`、`开始循环`、`恢复当前` 会先检查 `~/.codex-terminal-sender` 相关目录是否可写
+- 如果检测到 `runtime`、`user-loop-state` 或旧的 `loop-state` 目录权限异常，界面会直接拦下操作并弹出中文警告
+- 这类问题通常是之前用其他用户或 `sudo` 运行过相关脚本，导致属主不一致
 
 ## Loop 语义
 
