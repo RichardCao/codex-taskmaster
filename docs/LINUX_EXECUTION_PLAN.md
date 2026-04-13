@@ -98,6 +98,7 @@ Linux 第一版要做到：
   - Foundation-only
   - 放共享语义的雏形
   - 已承载 session / loop 快照模型、probe/thread 解析、状态与 reason 映射、target 语义
+  - 已显式承载 session provider / source / parent / type 元数据
 - [TaskMasterSendRuntime.swift](/Users/create/codex-terminal-app/TaskMasterSendRuntime.swift)
   - 发送请求编排
   - 平台发送接口
@@ -123,8 +124,10 @@ Linux 迁移按下面 4 层推进。
 - SessionSnapshot / LoopSnapshot 等模型
 - thread-list / probe-all 解析
 - name / target / canonical session 语义
+- provider / source / parent / type 语义
 - status / terminal / reason 映射
 - loop 互斥与重试退避语义
+- local provider migrate 语义
 
 当前落点：
 
@@ -213,6 +216,7 @@ Linux 第一版优先只做 CLI，不做 GUI。
 - 新增或迁移的逻辑不依赖 AppKit
 - 当前 UI 行为不变
 - 现有检查脚本通过
+- 不通过伪造 `source=cli` 来改变 session 类型
 
 ### 阶段 2：做 Linux `tmux` 适配器最小闭环
 

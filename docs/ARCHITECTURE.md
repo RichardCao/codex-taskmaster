@@ -10,6 +10,13 @@
 - 发送请求排队、平台发送适配、发送后验证主路径已经拆到 [TaskMasterSendRuntime.swift](/Users/create/codex-terminal-app/TaskMasterSendRuntime.swift)
 - helper CLI、loop daemon、session 扫描与 session 操作主逻辑仍主要在 [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh)
 - 当前平台实现默认面向 macOS `Terminal.app`
+- Session 侧新增了一层显式元数据：
+  - `provider`
+  - `source`
+  - `parent_thread_id`
+  - `agent_nickname`
+  - `agent_role`
+  - 基于 `source` 推导出的 `Type`
 
 ## 推荐分层
 
@@ -24,8 +31,10 @@
 - 读取 Codex 本地 session 元数据
 - 解析 `thread-list`、`probe`、`probe-all`
 - 维护 name / target / canonical session 语义
+- 维护 session 的 provider / source / parent / type 等元数据语义
 - 维护 loop 配置、状态文件、日志与互斥约束
 - 维护发送结果分类、错误码、原因文本
+- 维护本地 provider 迁移语义
 
 当前主要分布：
 
@@ -39,6 +48,7 @@
   - `find_conflicting_running_loop_target`
   - 重试退避相关逻辑
   - `thread_archive` / `thread_unarchive` / `thread_delete`
+  - `thread-provider-plan*` / `thread-provider-migrate*`
   - `start_loop` / `stop_loop` / `status_loop`
 - [CodeTaskMasterApp.swift](/Users/create/codex-terminal-app/CodeTaskMasterApp.swift)
   - `SessionSnapshot`
@@ -52,6 +62,7 @@
 - Core 不依赖具体窗口聚焦、剪贴板、按键注入
 - 同一 canonical session / thread id 只允许一个运行态 loop 的规则放在 Core
 - `accepted`、`send_unverified` 这类中间态的重试语义也应放在 Core
+- provider 迁移如果继续保留，必须继续视为 Core 级本地状态变更，而不是 UI 私有逻辑
 
 ### 2. Platform Adapter
 
@@ -167,8 +178,15 @@ UI 职责：
 - archive
 - unarchive
 - delete
+- local provider migrate
 
 这样 macOS UI、Linux CLI、未来其他平台都能复用一套行为定义。
+
+补充约束：
+
+- provider 迁移当前只允许改写本地 `threads.model_provider`
+- 不允许顺手伪造 `source=cli`
+- 不允许把 `subagent` thread 人工升格成主会话
 
 ## Linux 推荐迁移顺序
 

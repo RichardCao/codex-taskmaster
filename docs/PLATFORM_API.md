@@ -26,6 +26,12 @@
 thread_id
 name
 target
+provider
+source
+parent_thread_id
+agent_nickname
+agent_role
+session_type
 first_user_message
 rollout_path
 archived
@@ -206,6 +212,7 @@ SendRequestCoordinator
 - `probe-all`
 - `session count`
 - name 语义解释
+- provider / source / parent / type 元数据解释
 
 ### 状态映射
 
@@ -215,6 +222,20 @@ SendRequestCoordinator
 - `busy`
 - `unavailable`
 - `archived`
+
+### Session 元数据操作
+
+- rename
+- archive
+- unarchive
+- delete
+- local provider migrate
+
+补充约束：
+
+- local provider migrate 只改本地 `threads.model_provider`
+- 不应隐式改写 `source`
+- 不应把子 agent thread 伪装成 `CLI`
 
 ### 发送策略
 

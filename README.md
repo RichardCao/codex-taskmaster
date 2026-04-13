@@ -1,6 +1,6 @@
 # Codex Taskmaster
 
-`Codex Taskmaster` 是一个原生 macOS 工具，用来向 Terminal 里运行的 Codex session 发送消息。它支持单次发送、循环发送、session 状态扫描、提示词历史查看，以及 session 的改名、归档、恢复和本地彻底删除。
+`Codex Taskmaster` 是一个原生 macOS 工具，用来向 Terminal 里运行的 Codex session 发送消息。它支持单次发送、循环发送、session 状态扫描、提示词历史查看，以及 session 的改名、归档、恢复、本地彻底删除和本地 provider 迁移。
 
 这个项目面向本地 Codex CLI 工作流，核心目标有三点：
 
@@ -12,6 +12,7 @@
 
 - 原生 AppKit 单窗口界面
 - `Session Status` 状态扫描与排序
+- `Session Status` 显示 `Type` 列，区分 `CLI` / `Subagent` / `Exec` / `Other`
 - `Active Loops` 循环任务列表与日志
 - 选中 session 后查看完整信息、最近发送统计、最近发送结果、相关 Loop、提示词历史
 - 单次发送与循环发送
@@ -20,6 +21,7 @@
 - session 改名
 - session 归档与恢复
 - 带风险提示的本地彻底删除
+- 支持把当前 session 或全部 session 迁移到当前 `config.toml` 的 `model_provider`
 - 按 session 状态决定是否允许发送
 - 同一真实 Session 同一时刻只允许一个运行态 loop，避免重复轰炸
 
@@ -130,6 +132,7 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
   - session / loop 快照模型
   - probe/thread 解析
   - 状态与 reason 映射
+  - session 类型、provider、父子关系等元数据语义
 - `CodeTaskMasterApp.swift`
   - 桌面界面
   - session 状态扫描
@@ -146,6 +149,30 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
   - session 归档、恢复、删除等辅助能力
 
 应用会先排队发送请求，再探测目标 session 状态。默认模式下，只有目标看起来可发送时才会真正输入；强制模式会跳过这层 session 状态限制，但仍会返回发送成功或失败原因。
+
+## Session 类型与 Provider
+
+`Session Status` 现在会额外展示一列 `Type`，用于区分会话来源：
+
+- `CLI`
+- `Subagent`
+- `Exec`
+- `Other`
+
+这个维度是为了让下面几类问题更容易判断：
+
+- 为什么某条 session 能 `codex resume <id>`，但不一定会出现在默认 resume 列表里
+- 为什么某条 session 更适合做人工维护主会话，而另一条更像内部执行线程
+- 当前选中的 session 是不是某个父会话派生出来的子 agent
+
+详情区还会显示：
+
+- `Provider`
+- `Parent Session ID`
+- `Agent Nickname`
+- `Agent Role`
+
+其中 `Provider` 来自本地 `state_5.sqlite` 的 `threads.model_provider`，`Type` 则根据 `threads.source` 推断。
 
 ## Session 名称语义
 
@@ -216,6 +243,30 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
   - `session_index.jsonl` 中对应的 rename/name 记录
   - rollout 文件本身
 - 因为这不是公开原生 API，所以界面会弹出明显的风险提示
+
+## Provider 迁移语义
+
+界面中新增了两个按钮：
+
+- `迁移当前到当前Provider`
+- `全部迁移到当前Provider`
+
+这里的“当前 Provider”指的是 `~/.codex/config.toml` 中当前配置的 `model_provider`。
+
+当前迁移行为是本地状态迁移，不是 Codex 公开的原生 session API：
+
+- 只修改 `state_5.sqlite` 里的 `threads.model_provider`
+- 会同步刷新 `updated_at`
+- 不修改 `source`
+- 不重写 rollout 文件
+- 不把子 agent 伪装成主 `CLI` 会话
+
+如果选中的 session 是 `Subagent`，或者它拥有子 agent，会先弹确认框，让你选择：
+
+- 只迁移当前这一条
+- 递归迁移整组相关 session
+
+“全部迁移”同样只做本地 provider 字段改写，不会改动 session 类型和 rollout 内容。
 
 ## 日志
 

@@ -55,6 +55,10 @@ Usage:
   codex_terminal_sender.sh thread-unarchive -t THREAD_ID
   codex_terminal_sender.sh thread-delete -t THREAD_ID
   codex_terminal_sender.sh thread-list [--archived]
+  codex_terminal_sender.sh thread-provider-plan -t THREAD_ID -p PROVIDER
+  codex_terminal_sender.sh thread-provider-plan-all -p PROVIDER
+  codex_terminal_sender.sh thread-provider-migrate -t THREAD_ID -p PROVIDER [--family]
+  codex_terminal_sender.sh thread-provider-migrate-all -p PROVIDER
   codex_terminal_sender.sh wait-idle   -t TARGET [-s SECONDS] [-w SECONDS]
   codex_terminal_sender.sh loop-once
   codex_terminal_sender.sh loop-resume -t TARGET
@@ -86,6 +90,14 @@ Commands:
               Permanently delete a session from local Codex state and remove its rollout file
   thread-list
               List Codex sessions via the native app-server API
+  thread-provider-plan
+              Inspect one session's provider migration scope
+  thread-provider-plan-all
+              Preview how many local sessions would migrate to one provider
+  thread-provider-migrate
+              Migrate one session, or one related family, to one provider in local state
+  thread-provider-migrate-all
+              Migrate all local sessions to one provider in local state
   wait-idle   Wait until the target appears stably idle
   loop-once   Internal command: run one loop scheduling tick
   loop-resume Clear a paused loop state and reschedule it immediately
@@ -696,13 +708,14 @@ if os.path.exists(session_index_path):
 conn = sqlite3.connect(db_path)
 cur = conn.cursor()
 row = cur.execute(
-    "select rollout_path, title, first_user_message, cwd from threads where id = ? limit 1",
+    "select rollout_path, title, first_user_message, cwd, model_provider, source, agent_nickname, agent_role from threads where id = ? limit 1",
     (thread_id,),
 ).fetchone()
 conn.close()
 if row:
-    values = [(value or "").replace("\n", " ") for value in row]
+    values = [(value or "").replace("\n", " ") for value in row[:4]]
     values.append(session_name)
+    values.extend((value or "").replace("\n", " ") for value in row[4:])
     print("|".join(values))
 PY
 }
@@ -831,12 +844,16 @@ probe_session_status() {
 
   thread_id="$(resolve_thread_id "$target")"
   local target_cwd
-  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
+  local model_provider
+  local session_source
+  local agent_nickname
+  local agent_role
+  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name model_provider session_source agent_nickname agent_role <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
 
   [[ -n "${rollout_path:-}" && -f "${rollout_path:-}" ]] || die "could not find rollout path for target '$target'"
   tty_name="$(resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path" 2>/dev/null || true)"
 
-  python3 - "$thread_id" "$thread_title" "$session_name" "$rollout_path" "$tty_name" "$CODEX_LOGS_DB_PATH" "$PROBE_RECENT_LOG_WINDOW_SECONDS" <<'PY'
+  python3 - "$thread_id" "$thread_title" "$session_name" "$rollout_path" "$tty_name" "$CODEX_LOGS_DB_PATH" "$PROBE_RECENT_LOG_WINDOW_SECONDS" "$model_provider" "$session_source" "$agent_nickname" "$agent_role" <<'PY'
 import json
 import sqlite3
 import sys
@@ -844,7 +861,7 @@ import time
 import subprocess
 from pathlib import Path
 
-thread_id, thread_title, session_name, rollout_path, tty_name, logs_db, recent_log_window = sys.argv[1:]
+thread_id, thread_title, session_name, rollout_path, tty_name, logs_db, recent_log_window, model_provider, session_source, agent_nickname, agent_role = sys.argv[1:]
 recent_log_window = int(recent_log_window)
 
 
@@ -1054,10 +1071,23 @@ if status == "idle_stable" and has_recent_interrupt and terminal["state"] == "pr
     status = "interrupted_idle"
     reason = "terminal is ready and a fresh interrupt log was recorded"
 
+parent_thread_id = ""
+if session_source:
+    try:
+        source_obj = json.loads(session_source)
+        parent_thread_id = (((source_obj.get("subagent") or {}).get("thread_spawn") or {}).get("parent_thread_id") or "")
+    except Exception:
+        parent_thread_id = ""
+
 effective_target = session_name or thread_id
 print(f"target: {effective_target}")
 print(f"thread_id: {thread_id}")
 print(f"name: {session_name}")
+print(f"provider: {model_provider}")
+print(f"source: {session_source or '-'}")
+print(f"parent_thread_id: {parent_thread_id or '-'}")
+print(f"agent_nickname: {agent_nickname or '-'}")
+print(f"agent_role: {agent_role or '-'}")
 print(f"tty: {tty_name or '-'}")
 print(f"status: {status}")
 print(f"reason: {reason}")
@@ -1620,6 +1650,204 @@ PY
   )
 }
 
+thread_provider_plan() {
+  local thread_id="$1"
+  local target_provider="$2"
+  python3 - "$CODEX_STATE_DB_PATH" "$thread_id" "$target_provider" <<'PY'
+import json
+import sqlite3
+import sys
+
+db_path, thread_id, target_provider = sys.argv[1:]
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+rows = cur.execute("select id, model_provider, source from threads").fetchall()
+conn.close()
+
+threads = {}
+children = {}
+for tid, provider, source in rows:
+    parent_id = ""
+    if source:
+        try:
+            source_obj = json.loads(source)
+            parent_id = (((source_obj.get("subagent") or {}).get("thread_spawn") or {}).get("parent_thread_id") or "")
+        except Exception:
+            parent_id = ""
+    threads[tid] = {"provider": provider or "", "parent_id": parent_id}
+    if parent_id:
+        children.setdefault(parent_id, []).append(tid)
+
+if thread_id not in threads:
+    print("status: failed")
+    print("reason: thread_not_found")
+    print(f"thread_id: {thread_id}")
+    raise SystemExit(1)
+
+root_thread_id = thread_id
+visited = set()
+while threads[root_thread_id]["parent_id"] and threads[root_thread_id]["parent_id"] in threads and root_thread_id not in visited:
+    visited.add(root_thread_id)
+    root_thread_id = threads[root_thread_id]["parent_id"]
+
+family = []
+stack = [root_thread_id]
+seen = set()
+while stack:
+    current = stack.pop()
+    if current in seen or current not in threads:
+        continue
+    seen.add(current)
+    family.append(current)
+    stack.extend(reversed(children.get(current, [])))
+
+family_migrate_needed_count = sum(1 for item in family if threads[item]["provider"] != target_provider)
+direct_child_count = len(children.get(thread_id, []))
+
+print("status: success")
+print("reason: plan_ready")
+print(f"thread_id: {thread_id}")
+print(f"root_thread_id: {root_thread_id}")
+print(f"current_provider: {threads[thread_id]['provider']}")
+print(f"target_provider: {target_provider}")
+print(f"parent_thread_id: {threads[thread_id]['parent_id'] or '-'}")
+print(f"is_subagent: {'yes' if threads[thread_id]['parent_id'] else 'no'}")
+print(f"direct_child_count: {direct_child_count}")
+print(f"family_count: {len(family)}")
+print(f"family_migrate_needed_count: {family_migrate_needed_count}")
+print(f"family_ids: {','.join(family)}")
+PY
+}
+
+thread_provider_plan_all() {
+  local target_provider="$1"
+  python3 - "$CODEX_STATE_DB_PATH" "$target_provider" <<'PY'
+import sqlite3
+import sys
+
+db_path, target_provider = sys.argv[1:]
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+rows = cur.execute("select model_provider from threads").fetchall()
+conn.close()
+total = len(rows)
+migrate_needed = sum(1 for (provider,) in rows if (provider or "") != target_provider)
+print("status: success")
+print("reason: plan_ready")
+print(f"target_provider: {target_provider}")
+print(f"total_threads: {total}")
+print(f"migrate_needed_count: {migrate_needed}")
+print(f"already_matching_count: {total - migrate_needed}")
+PY
+}
+
+thread_provider_migrate() {
+  local thread_id="$1"
+  local target_provider="$2"
+  local migrate_family="${3:-0}"
+  python3 - "$CODEX_STATE_DB_PATH" "$thread_id" "$target_provider" "$migrate_family" <<'PY'
+import json
+import sqlite3
+import sys
+import time
+
+db_path, thread_id, target_provider, migrate_family_flag = sys.argv[1:]
+migrate_family = migrate_family_flag == "1"
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+rows = cur.execute("select id, model_provider, source from threads").fetchall()
+
+threads = {}
+children = {}
+for tid, provider, source in rows:
+    parent_id = ""
+    if source:
+        try:
+            source_obj = json.loads(source)
+            parent_id = (((source_obj.get("subagent") or {}).get("thread_spawn") or {}).get("parent_thread_id") or "")
+        except Exception:
+            parent_id = ""
+    threads[tid] = {"provider": provider or "", "parent_id": parent_id}
+    if parent_id:
+        children.setdefault(parent_id, []).append(tid)
+
+if thread_id not in threads:
+    print("status: failed")
+    print("reason: thread_not_found")
+    print(f"thread_id: {thread_id}")
+    conn.close()
+    raise SystemExit(1)
+
+target_ids = [thread_id]
+root_thread_id = thread_id
+if migrate_family:
+    visited = set()
+    while threads[root_thread_id]["parent_id"] and threads[root_thread_id]["parent_id"] in threads and root_thread_id not in visited:
+        visited.add(root_thread_id)
+        root_thread_id = threads[root_thread_id]["parent_id"]
+    target_ids = []
+    stack = [root_thread_id]
+    seen = set()
+    while stack:
+        current = stack.pop()
+        if current in seen or current not in threads:
+            continue
+        seen.add(current)
+        target_ids.append(current)
+        stack.extend(reversed(children.get(current, [])))
+
+changed = [tid for tid in target_ids if threads[tid]["provider"] != target_provider]
+if changed:
+    now = int(time.time())
+    cur.executemany(
+        "update threads set model_provider = ?, updated_at = ? where id = ?",
+        [(target_provider, now, tid) for tid in changed],
+    )
+    conn.commit()
+conn.close()
+
+print("status: success")
+print("reason: migrated")
+print(f"thread_id: {thread_id}")
+print(f"target_provider: {target_provider}")
+print(f"scope: {'family' if migrate_family else 'current'}")
+print(f"root_thread_id: {root_thread_id}")
+print(f"migrated_count: {len(changed)}")
+print(f"skipped_count: {len(target_ids) - len(changed)}")
+print(f"target_ids: {','.join(target_ids)}")
+PY
+}
+
+thread_provider_migrate_all() {
+  local target_provider="$1"
+  python3 - "$CODEX_STATE_DB_PATH" "$target_provider" <<'PY'
+import sqlite3
+import sys
+import time
+
+db_path, target_provider = sys.argv[1:]
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+rows = cur.execute("select id, model_provider from threads").fetchall()
+changed = [tid for tid, provider in rows if (provider or "") != target_provider]
+if changed:
+    now = int(time.time())
+    cur.executemany(
+        "update threads set model_provider = ?, updated_at = ? where id = ?",
+        [(target_provider, now, tid) for tid in changed],
+    )
+    conn.commit()
+conn.close()
+
+print("status: success")
+print("reason: migrated")
+print(f"target_provider: {target_provider}")
+print(f"migrated_count: {len(changed)}")
+print(f"skipped_count: {len(rows) - len(changed)}")
+print(f"total_threads: {len(rows)}")
+PY
+}
+
 wait_until_idle() {
   local target="$1"
   local stable_seconds="$2"
@@ -2041,7 +2269,11 @@ resolve_live_tty() {
 
   thread_id="$(resolve_thread_id "$target")"
   local target_cwd
-  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
+  local model_provider
+  local session_source
+  local agent_nickname
+  local agent_role
+  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name model_provider session_source agent_nickname agent_role <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
   resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path"
 }
 
@@ -2400,7 +2632,11 @@ resume_loop() {
   conflicting_target="$(find_conflicting_running_loop_target "$thread_id" "$key" 2>/dev/null || true)"
   [[ -z "$conflicting_target" ]] || die "another active loop already targets this session: ${conflicting_target}"
   local target_cwd
-  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
+  local model_provider
+  local session_source
+  local agent_nickname
+  local agent_role
+  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name model_provider session_source agent_nickname agent_role <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
   resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path" >/dev/null
   ensure_loop_daemon
   write_loop_definition "$target" "${INTERVAL:-$DEFAULT_INTERVAL}" "${MESSAGE:-$DEFAULT_MESSAGE}" "${FORCE_SEND:-0}" "$thread_id"
@@ -2822,6 +3058,87 @@ parse_thread_list_args() {
   done
 }
 
+parse_thread_provider_plan_args() {
+  THREAD_ID=""
+  THREAD_PROVIDER=""
+  while getopts ":t:p:h" opt; do
+    case "$opt" in
+      t) THREAD_ID="$OPTARG" ;;
+      p) THREAD_PROVIDER="$OPTARG" ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$THREAD_ID" ]] || die "thread-provider-plan requires -t THREAD_ID"
+  [[ -n "$THREAD_PROVIDER" ]] || die "thread-provider-plan requires -p PROVIDER"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
+parse_thread_provider_plan_all_args() {
+  THREAD_PROVIDER=""
+  while getopts ":p:h" opt; do
+    case "$opt" in
+      p) THREAD_PROVIDER="$OPTARG" ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$THREAD_PROVIDER" ]] || die "thread-provider-plan-all requires -p PROVIDER"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
+parse_thread_provider_migrate_args() {
+  THREAD_ID=""
+  THREAD_PROVIDER=""
+  THREAD_MIGRATE_FAMILY=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -t)
+        [[ $# -ge 2 ]] || die "option -t requires an argument"
+        THREAD_ID="$2"
+        shift 2
+        ;;
+      -p)
+        [[ $# -ge 2 ]] || die "option -p requires an argument"
+        THREAD_PROVIDER="$2"
+        shift 2
+        ;;
+      --family)
+        THREAD_MIGRATE_FAMILY=1
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "unknown option: $1"
+        ;;
+    esac
+  done
+  [[ -n "$THREAD_ID" ]] || die "thread-provider-migrate requires -t THREAD_ID"
+  [[ -n "$THREAD_PROVIDER" ]] || die "thread-provider-migrate requires -p PROVIDER"
+}
+
+parse_thread_provider_migrate_all_args() {
+  THREAD_PROVIDER=""
+  while getopts ":p:h" opt; do
+    case "$opt" in
+      p) THREAD_PROVIDER="$OPTARG" ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$THREAD_PROVIDER" ]] || die "thread-provider-migrate-all requires -p PROVIDER"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
 parse_wait_idle_args() {
   TARGET=""
   STABLE_SECONDS=3
@@ -2920,6 +3237,22 @@ main() {
     thread-list)
       parse_thread_list_args "$@"
       thread_list "$THREAD_LIST_ARCHIVED"
+      ;;
+    thread-provider-plan)
+      parse_thread_provider_plan_args "$@"
+      thread_provider_plan "$THREAD_ID" "$THREAD_PROVIDER"
+      ;;
+    thread-provider-plan-all)
+      parse_thread_provider_plan_all_args "$@"
+      thread_provider_plan_all "$THREAD_PROVIDER"
+      ;;
+    thread-provider-migrate)
+      parse_thread_provider_migrate_args "$@"
+      thread_provider_migrate "$THREAD_ID" "$THREAD_PROVIDER" "$THREAD_MIGRATE_FAMILY"
+      ;;
+    thread-provider-migrate-all)
+      parse_thread_provider_migrate_all_args "$@"
+      thread_provider_migrate_all "$THREAD_PROVIDER"
       ;;
     wait-idle)
       parse_wait_idle_args "$@"

@@ -81,6 +81,7 @@ scripts/
 
 - 读 `~/.codex`
 - 解析 session
+- 解析 provider / source / parent / type
 - 调 `tmux list-panes`
 - 调 `tmux capture-pane`
 - 调 `tmux send-keys`
@@ -93,3 +94,4 @@ scripts/
 - 改图标
 - 研究桌面自动化
 - 同时兼容多个 Linux 终端
+- 通过伪造 `source=cli` 来让子 agent 假装成主会话

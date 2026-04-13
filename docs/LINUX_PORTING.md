@@ -121,13 +121,20 @@ Linux 替代建议：
 - 同一 canonical session / thread id 同一时刻只允许一个运行态 loop
 - 可以保留多个停止态 loop 配置，但不应放开多个运行态 loop
 - session 名称语义尽量贴近 `codex resume`
+- session 类型语义要显式区分 `CLI` / `Subagent` / `Exec` / `Other`
+- session provider 应作为显式元数据保留，而不是只靠当前配置推断
 - rename / archive / unarchive 优先走 Codex 原生能力
+- provider 迁移如果保留，只能先定义成“本地 `threads.model_provider` 迁移”
 - 平台自动化不能长期阻塞 UI 主线程；如果 Linux 以后补 GUI，这条也必须保留
 
 这些约束里，最重要的是两条：
 
 1. 不允许模糊误发
 2. 不把“已受理待确认”伪装成“已失败”
+
+补充一条：
+
+3. 不要通过篡改 `source=cli` 的方式把 `subagent` thread 伪装成主会话
 
 ## Linux 适配器建议接口
 

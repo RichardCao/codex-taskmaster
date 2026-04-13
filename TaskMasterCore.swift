@@ -21,6 +21,11 @@ struct SessionSnapshot {
     let name: String
     let target: String
     let threadID: String
+    let provider: String
+    let source: String
+    let parentThreadID: String
+    let agentNickname: String
+    let agentRole: String
     let status: String
     let reason: String
     let terminalState: String
@@ -67,6 +72,36 @@ func sessionPossibleTargets(_ session: SessionSnapshot) -> [String] {
     return ordered
 }
 
+func sessionTypeLabel(_ session: SessionSnapshot) -> String {
+    let source = session.source.trimmingCharacters(in: .whitespacesAndNewlines)
+    if source == "cli" {
+        return "CLI"
+    }
+    if source == "exec" {
+        return "Exec"
+    }
+    if source.contains("\"subagent\"") {
+        return "Subagent"
+    }
+    return source.isEmpty ? "Other" : "Other"
+}
+
+func sessionIsCLIPrimary(_ session: SessionSnapshot) -> Bool {
+    sessionTypeLabel(session) == "CLI"
+}
+
+func parentThreadIDFromSource(_ source: String) -> String {
+    guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+          let data = source.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let subagent = object["subagent"] as? [String: Any],
+          let spawn = subagent["thread_spawn"] as? [String: Any],
+          let parentThreadID = spawn["parent_thread_id"] as? String else {
+        return ""
+    }
+    return parentThreadID
+}
+
 func parseThreadRuntimeStatus(_ raw: Any?) -> String {
     guard let object = raw as? [String: Any],
           let type = object["type"] as? String else {
@@ -94,6 +129,11 @@ func parseProbeAllOutput(_ output: String) -> [SessionSnapshot] {
                 name: current["name"] ?? "",
                 target: current["target"] ?? threadID,
                 threadID: threadID,
+                provider: current["provider"] ?? "",
+                source: current["source"] ?? "",
+                parentThreadID: current["parent_thread_id"] ?? "",
+                agentNickname: current["agent_nickname"] ?? "",
+                agentRole: current["agent_role"] ?? "",
                 status: current["status"] ?? "unknown",
                 reason: current["reason"] ?? "",
                 terminalState: current["terminal_state"] ?? "unavailable",
@@ -151,10 +191,16 @@ func parseThreadListOutput(_ output: String, archived: Bool) -> [SessionSnapshot
             updatedAtEpoch = "0"
         }
 
+        let source = item["source"] as? String ?? ""
         return SessionSnapshot(
             name: item["name"] as? String ?? "",
             target: threadID,
             threadID: threadID,
+            provider: item["modelProvider"] as? String ?? item["model_provider"] as? String ?? "",
+            source: source,
+            parentThreadID: item["parentThreadId"] as? String ?? item["parent_thread_id"] as? String ?? parentThreadIDFromSource(source),
+            agentNickname: item["agentNickname"] as? String ?? item["agent_nickname"] as? String ?? "",
+            agentRole: item["agentRole"] as? String ?? item["agent_role"] as? String ?? "",
             status: archived ? "archived" : parseThreadRuntimeStatus(item["status"]),
             reason: archived ? "session is archived and can be restored" : "",
             terminalState: archived ? "archived" : "unavailable",

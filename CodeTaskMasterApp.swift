@@ -7,6 +7,7 @@ private let autoRefreshInterval: TimeInterval = 3
 private let requestPollInterval: TimeInterval = 0.5
 private let stateDirectoryPath = "\(userHomeDirectory)/.codex-terminal-sender"
 private let codexStateDatabasePath = "\(userHomeDirectory)/.codex/state_5.sqlite"
+private let codexConfigPath = "\(userHomeDirectory)/.codex/config.toml"
 private let codexSessionIndexPath = "\(userHomeDirectory)/.codex/session_index.jsonl"
 private let pendingRequestDirectoryPath = "\(stateDirectoryPath)/requests/pending"
 private let processingRequestDirectoryPath = "\(stateDirectoryPath)/requests/processing"
@@ -726,6 +727,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private lazy var archiveSessionButton = makeButton(title: "归档", action: #selector(archiveSelectedSession))
     private lazy var restoreSessionButton = makeButton(title: "恢复", action: #selector(restoreSelectedSession))
     private lazy var deleteSessionButton = makeButton(title: "删除", action: #selector(deleteSelectedSession))
+    private lazy var migrateSessionProviderButton = makeButton(title: "迁移当前到当前Provider", action: #selector(migrateSelectedSessionToCurrentProvider))
+    private lazy var migrateAllSessionsProviderButton = makeButton(title: "全部迁移到当前Provider", action: #selector(migrateAllSessionsToCurrentProvider))
     private lazy var clearLogButton = makeButton(title: "清空日志", action: #selector(clearActivityLog))
     private lazy var saveLogButton = makeButton(title: "保存日志", action: #selector(saveActivityLog))
     private lazy var exportSessionLogButton = makeButton(title: "导出当前 Session", action: #selector(exportSelectedSessionLogs))
@@ -967,13 +970,19 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         archiveSessionButton.isEnabled = false
         restoreSessionButton.isEnabled = false
         deleteSessionButton.isEnabled = false
+        migrateSessionProviderButton.isEnabled = false
+        migrateAllSessionsProviderButton.isEnabled = false
         archiveSessionButton.contentTintColor = .systemOrange
         restoreSessionButton.contentTintColor = .systemBlue
         deleteSessionButton.contentTintColor = .systemRed
+        migrateSessionProviderButton.contentTintColor = .systemPurple
+        migrateAllSessionsProviderButton.contentTintColor = .systemPurple
         saveRenameButton.toolTip = "保存当前 session 的名称"
         archiveSessionButton.toolTip = "按 Codex 原生语义归档当前 session"
         restoreSessionButton.toolTip = "恢复当前已归档 session"
         deleteSessionButton.toolTip = "从本地状态中彻底删除当前 session"
+        migrateSessionProviderButton.toolTip = "将当前选中 session 迁移到当前 config.toml 中的 model_provider"
+        migrateAllSessionsProviderButton.toolTip = "将本地所有 session 迁移到当前 config.toml 中的 model_provider"
 
         let renameRow = NSStackView(views: [renameField, saveRenameButton, archiveSessionButton, restoreSessionButton, deleteSessionButton])
         renameRow.orientation = .horizontal
@@ -983,6 +992,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         archiveSessionButton.setContentHuggingPriority(.required, for: .horizontal)
         restoreSessionButton.setContentHuggingPriority(.required, for: .horizontal)
         deleteSessionButton.setContentHuggingPriority(.required, for: .horizontal)
+
+        let migrationRow = NSStackView(views: [migrateSessionProviderButton, migrateAllSessionsProviderButton])
+        migrationRow.orientation = .horizontal
+        migrationRow.spacing = 8
+        migrationRow.alignment = .centerY
+        migrateSessionProviderButton.setContentHuggingPriority(.required, for: .horizontal)
+        migrateAllSessionsProviderButton.setContentHuggingPriority(.required, for: .horizontal)
 
         let sessionScopeRow = NSStackView(views: [sessionScopeControl, sessionSearchField, sessionPromptSearchCheckbox])
         sessionScopeRow.orientation = .horizontal
@@ -1028,13 +1044,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionScopeRow.widthAnchor.constraint(equalTo: sessionStatusTopStack.widthAnchor).isActive = true
         sessionStatusScrollView.widthAnchor.constraint(equalTo: sessionStatusTopStack.widthAnchor).isActive = true
 
-        let sessionStatusBottomStack = NSStackView(views: [renameRow, sessionDetailScrollView])
+        let sessionStatusBottomStack = NSStackView(views: [renameRow, migrationRow, sessionDetailScrollView])
         sessionStatusBottomStack.orientation = .vertical
         sessionStatusBottomStack.spacing = 8
         sessionStatusBottomStack.alignment = .leading
         sessionStatusBottomStack.distribution = .fill
         sessionStatusBottomStack.translatesAutoresizingMaskIntoConstraints = false
         renameRow.widthAnchor.constraint(equalTo: sessionStatusBottomStack.widthAnchor).isActive = true
+        migrationRow.widthAnchor.constraint(equalTo: sessionStatusBottomStack.widthAnchor).isActive = true
         sessionDetailScrollView.widthAnchor.constraint(equalTo: sessionStatusBottomStack.widthAnchor).isActive = true
 
         renameField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
@@ -1042,6 +1059,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionScopeRow.setContentCompressionResistancePriority(.required, for: .vertical)
         renameRow.setContentHuggingPriority(.required, for: .vertical)
         renameRow.setContentCompressionResistancePriority(.required, for: .vertical)
+        migrationRow.setContentHuggingPriority(.required, for: .vertical)
+        migrationRow.setContentCompressionResistancePriority(.required, for: .vertical)
         sessionStatusScrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
         sessionStatusScrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         sessionDetailScrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
@@ -1189,6 +1208,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func configureSessionStatusTable() {
         let columns: [(identifier: String, title: String, width: CGFloat)] = [
             ("name", "Name", 96),
+            ("type", "Type", 74),
             ("threadID", "Session ID", 160),
             ("status", "Status", 96),
             ("terminalState", "Terminal", 92),
@@ -1262,7 +1282,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func sessionColumnMinimumWidth(_ identifier: String) -> CGFloat {
         switch identifier {
-        case "name", "status", "terminalState", "tty", "threadID", "updatedAt", "reason":
+        case "name", "type", "status", "terminalState", "tty", "threadID", "updatedAt", "reason":
             return 2.5
         default:
             return 2.5
@@ -1273,6 +1293,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         switch identifier {
         case "name":
             return 220
+        case "type":
+            return 120
         case "threadID":
             return 320
         case "status":
@@ -1633,6 +1655,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         switch identifier {
         case "name":
             return sessionActualName(session)
+        case "type":
+            return sessionTypeLabel(session)
         case "threadID":
             return session.threadID
         case "status":
@@ -1678,7 +1702,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func headerWidthPadding(for tableColumn: NSTableColumn, in tableView: NSTableView) -> CGFloat {
         if tableView == sessionStatusTableView {
             switch tableColumn.identifier.rawValue {
-            case "status", "terminalState", "tty":
+            case "type", "status", "terminalState", "tty":
                 return 56
             default:
                 return 30
@@ -1807,6 +1831,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         guard !normalizedQuery.isEmpty else { return true }
         let candidates = [
             sessionActualName(session),
+            sessionTypeLabel(session),
+            session.provider,
             session.threadID,
             sessionEffectiveTarget(session),
             session.preview,
@@ -2235,6 +2261,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             switch key {
             case "name":
                 orderedAscending = sessionActualName(lhs).localizedStandardCompare(sessionActualName(rhs)) == .orderedAscending
+            case "type":
+                orderedAscending = sessionTypeLabel(lhs).localizedStandardCompare(sessionTypeLabel(rhs)) == .orderedAscending
             case "threadID":
                 orderedAscending = lhs.threadID.localizedStandardCompare(rhs.threadID) == .orderedAscending
             case "status":
@@ -2262,6 +2290,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         switch key {
         case "name":
             return sessionActualName(lhs) == sessionActualName(rhs)
+        case "type":
+            return sessionTypeLabel(lhs) == sessionTypeLabel(rhs)
         case "threadID":
             return lhs.threadID == rhs.threadID
         case "status":
@@ -2305,6 +2335,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         var lines = [
             "Name: \(name.isEmpty ? "-" : name)",
             "Session ID: \(session.threadID)",
+            "Type: \(sessionTypeLabel(session))",
+            "Provider: \(session.provider.isEmpty ? "-" : session.provider)",
             "Archived: \(session.isArchived ? "yes" : "no")",
             "Status: \(localizedSessionStatusLabel(session))",
             "Terminal: \(localizedTerminalState(session.terminalState))",
@@ -2312,6 +2344,15 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             "Updated: \(formatEpoch(session.updatedAtEpoch))",
             "原因: \(localizedSessionReason(session.reason))"
         ]
+        if !session.parentThreadID.isEmpty {
+            lines.append("Parent Session ID: \(session.parentThreadID)")
+        }
+        if !session.agentNickname.isEmpty {
+            lines.append("Agent Nickname: \(session.agentNickname)")
+        }
+        if !session.agentRole.isEmpty {
+            lines.append("Agent Role: \(session.agentRole)")
+        }
         let preview = session.preview.trimmingCharacters(in: .whitespacesAndNewlines)
         if !preview.isEmpty {
             lines.append("Preview: \(preview)")
@@ -2600,6 +2641,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             archiveSessionButton.isEnabled = false
             restoreSessionButton.isEnabled = false
             deleteSessionButton.isEnabled = false
+            migrateSessionProviderButton.isEnabled = false
+            migrateAllSessionsProviderButton.isEnabled = currentConfiguredModelProvider() != nil
             sessionDetailView.string = "选中一条 session 后，这里会显示完整信息、最近发送结果、相关 Loop 和提示词历史。"
             sessionDetailView.scrollToBeginningOfDocument(nil)
             updateActivityLogControls()
@@ -2616,6 +2659,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         archiveSessionButton.isEnabled = !session.isArchived
         restoreSessionButton.isEnabled = session.isArchived
         deleteSessionButton.isEnabled = true
+        migrateSessionProviderButton.isEnabled = currentConfiguredModelProvider() != nil
+        migrateAllSessionsProviderButton.isEnabled = currentConfiguredModelProvider() != nil
         renameField.placeholderString = session.isArchived
             ? "已归档 session 需先恢复后再改名"
             : "输入新名称，留空可恢复为未 rename 状态"
@@ -2657,6 +2702,55 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.sessionDetailView.scrollToBeginningOfDocument(nil)
             }
         }
+    }
+
+    private func currentConfiguredModelProvider() -> String? {
+        guard let text = try? String(contentsOfFile: codexConfigPath, encoding: .utf8) else {
+            return nil
+        }
+        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard line.hasPrefix("model_provider") else { continue }
+            guard let equalsIndex = line.firstIndex(of: "=") else { continue }
+            let rawValue = line[line.index(after: equalsIndex)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = rawValue.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        return nil
+    }
+
+    private func sessionProviderPlan(threadID: String, targetProvider: String) -> [String: String]? {
+        let result = runStandardHelper(arguments: ["thread-provider-plan", "-t", threadID, "-p", targetProvider])
+        guard result.status == 0 else { return nil }
+        return parseStructuredHelperFields(result.stdout)
+    }
+
+    private func allSessionProviderPlan(targetProvider: String) -> [String: String]? {
+        let result = runStandardHelper(arguments: ["thread-provider-plan-all", "-p", targetProvider])
+        guard result.status == 0 else { return nil }
+        return parseStructuredHelperFields(result.stdout)
+    }
+
+    private func migrateSessionProvider(threadID: String, targetProvider: String, includeFamily: Bool) -> (success: Bool, detail: String) {
+        var arguments = ["thread-provider-migrate", "-t", threadID, "-p", targetProvider]
+        if includeFamily {
+            arguments.append("--family")
+        }
+        let result = runStandardHelper(arguments: arguments)
+        if result.status == 0 {
+            return (true, result.stdout)
+        }
+        return (false, [result.stderr, result.stdout].first { !$0.isEmpty } ?? "迁移 provider 失败")
+    }
+
+    private func migrateAllSessionsProvider(targetProvider: String) -> (success: Bool, detail: String) {
+        let result = runStandardHelper(arguments: ["thread-provider-migrate-all", "-p", targetProvider])
+        if result.status == 0 {
+            return (true, result.stdout)
+        }
+        return (false, [result.stderr, result.stdout].first { !$0.isEmpty } ?? "迁移全部 session provider 失败")
     }
 
     private func updateSessionName(threadID: String, newName: String) -> (success: Bool, error: String) {
@@ -3283,7 +3377,7 @@ conn.close()
             windowPoint: windowPoint
         )
         let isInSessionActionArea = anyViewContainsWindowPoint(
-            [saveRenameButton, archiveSessionButton, restoreSessionButton, deleteSessionButton, exportSessionLogButton],
+            [saveRenameButton, archiveSessionButton, restoreSessionButton, deleteSessionButton, migrateSessionProviderButton, migrateAllSessionsProviderButton, exportSessionLogButton],
             windowPoint: windowPoint
         )
         let isInActiveLoopsArea = viewContainsWindowPoint(activeScrollView, windowPoint: windowPoint) || viewContainsWindowPoint(activeLoopsTableView.headerView, windowPoint: windowPoint)
@@ -3840,10 +3934,17 @@ conn.close()
         detectStatusButton.isEnabled = true
         if enabled {
             updateLoopActionButtons()
+            updateSessionDetailView()
         } else {
             stopButton.isEnabled = false
             resumeLoopButton.isEnabled = false
             deleteLoopButton.isEnabled = false
+            saveRenameButton.isEnabled = false
+            archiveSessionButton.isEnabled = false
+            restoreSessionButton.isEnabled = false
+            deleteSessionButton.isEnabled = false
+            migrateSessionProviderButton.isEnabled = false
+            migrateAllSessionsProviderButton.isEnabled = false
         }
     }
 
@@ -5061,6 +5162,8 @@ conn.close()
         archiveSessionButton.isEnabled = false
         restoreSessionButton.isEnabled = false
         deleteSessionButton.isEnabled = false
+        migrateSessionProviderButton.isEnabled = false
+        migrateAllSessionsProviderButton.isEnabled = false
         renameField.isEnabled = false
         setStatus("保存名称中…", key: "action")
         appendOutput("执行 保存名称: thread_id=\(session.threadID) name=\(newName.isEmpty ? "<empty>" : newName)")
@@ -5074,6 +5177,8 @@ conn.close()
                 self.archiveSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                 self.restoreSessionButton.isEnabled = false
                 self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
+                self.migrateSessionProviderButton.isEnabled = self.currentConfiguredModelProvider() != nil && self.sessionStatusTableView.selectedRow >= 0
+                self.migrateAllSessionsProviderButton.isEnabled = self.currentConfiguredModelProvider() != nil
 
                 if result.success {
                     if let index = self.allSessionSnapshots.firstIndex(where: { $0.threadID == session.threadID }) {
@@ -5082,6 +5187,11 @@ conn.close()
                             name: newName,
                             target: newName.isEmpty ? previous.threadID : newName,
                             threadID: previous.threadID,
+                            provider: previous.provider,
+                            source: previous.source,
+                            parentThreadID: previous.parentThreadID,
+                            agentNickname: previous.agentNickname,
+                            agentRole: previous.agentRole,
                             status: previous.status,
                             reason: previous.reason,
                             terminalState: previous.terminalState,
@@ -5160,6 +5270,8 @@ conn.close()
         archiveSessionButton.isEnabled = false
         restoreSessionButton.isEnabled = false
         deleteSessionButton.isEnabled = false
+        migrateSessionProviderButton.isEnabled = false
+        migrateAllSessionsProviderButton.isEnabled = false
         renameField.isEnabled = false
         setStatus("归档 Session 中…", key: "action")
         appendOutput("执行 归档 Session: thread_id=\(session.threadID)")
@@ -5196,6 +5308,8 @@ conn.close()
                     self.archiveSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.restoreSessionButton.isEnabled = false
                     self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
+                    self.migrateSessionProviderButton.isEnabled = self.currentConfiguredModelProvider() != nil && self.sessionStatusTableView.selectedRow >= 0
+                    self.migrateAllSessionsProviderButton.isEnabled = self.currentConfiguredModelProvider() != nil
                     self.setStatus("归档 Session 失败", key: "action")
                     self.appendOutput("stderr: \(result.error)")
                     NSSound.beep()
@@ -5243,6 +5357,8 @@ conn.close()
         archiveSessionButton.isEnabled = false
         restoreSessionButton.isEnabled = false
         deleteSessionButton.isEnabled = false
+        migrateSessionProviderButton.isEnabled = false
+        migrateAllSessionsProviderButton.isEnabled = false
         renameField.isEnabled = false
         setStatus("恢复归档中…", key: "action")
         appendOutput("执行 恢复归档: thread_id=\(session.threadID)")
@@ -5272,6 +5388,8 @@ conn.close()
                     self.archiveSessionButton.isEnabled = false
                     self.restoreSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
+                    self.migrateSessionProviderButton.isEnabled = self.currentConfiguredModelProvider() != nil && self.sessionStatusTableView.selectedRow >= 0
+                    self.migrateAllSessionsProviderButton.isEnabled = self.currentConfiguredModelProvider() != nil
                     self.setStatus("恢复归档失败", key: "action")
                     self.appendOutput("stderr: \(result.error)")
                     NSSound.beep()
@@ -5334,6 +5452,8 @@ conn.close()
         archiveSessionButton.isEnabled = false
         restoreSessionButton.isEnabled = false
         deleteSessionButton.isEnabled = false
+        migrateSessionProviderButton.isEnabled = false
+        migrateAllSessionsProviderButton.isEnabled = false
         renameField.isEnabled = false
         setStatus("彻底删除中…", key: "action")
         appendOutput("执行 彻底删除: thread_id=\(session.threadID)")
@@ -5367,6 +5487,154 @@ conn.close()
                     }
                     self.updateSessionDetailView()
                     self.setStatus("彻底删除失败", key: "action")
+                    self.appendOutput("stderr: \(result.detail)")
+                    NSSound.beep()
+                }
+            }
+        }
+    }
+
+    @objc
+    private func migrateSelectedSessionToCurrentProvider() {
+        guard let session = selectedSessionSnapshot() else {
+            appendOutput("请先选择一条 session，再迁移 provider。")
+            setStatus("请选择一个 session")
+            NSSound.beep()
+            return
+        }
+        guard let targetProvider = currentConfiguredModelProvider() else {
+            appendOutput("未能从 ~/.codex/config.toml 读取当前 model_provider。")
+            setStatus("当前 provider 未配置", key: "action")
+            NSSound.beep()
+            return
+        }
+
+        guard let plan = sessionProviderPlan(threadID: session.threadID, targetProvider: targetProvider) else {
+            appendOutput("读取 session provider 迁移计划失败。")
+            setStatus("读取迁移计划失败", key: "action")
+            NSSound.beep()
+            return
+        }
+
+        let isSubagent = (plan["is_subagent"] ?? "no") == "yes"
+        let familyCount = Int(plan["family_count"] ?? "1") ?? 1
+        let familyMigrateNeeded = Int(plan["family_migrate_needed_count"] ?? "0") ?? 0
+        let currentProvider = plan["current_provider"] ?? session.provider
+        let directChildCount = Int(plan["direct_child_count"] ?? "0") ?? 0
+
+        var includeFamily = false
+        if isSubagent || directChildCount > 0 {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "迁移相关 Session 到当前 Provider？"
+            alert.informativeText = """
+            当前 Provider: \(targetProvider)
+            选中 Session 当前 Provider: \(currentProvider.isEmpty ? "-" : currentProvider)
+            Session ID: \(session.threadID)
+            Type: \(sessionTypeLabel(session))
+
+            这条 session \(isSubagent ? "属于子 agent 会话" : "存在子 agent 会话")。
+            相关会话总数: \(familyCount)
+            需要迁移的相关会话数: \(familyMigrateNeeded)
+
+            你可以只迁移当前这一条，也可以递归迁移整组相关 session。
+            """
+            alert.addButton(withTitle: "迁移相关")
+            alert.addButton(withTitle: "仅迁移当前")
+            alert.addButton(withTitle: "取消")
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                includeFamily = true
+            } else if response != .alertSecondButtonReturn {
+                return
+            }
+        } else {
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = "迁移当前 Session 到当前 Provider？"
+            alert.informativeText = """
+            当前 Provider: \(targetProvider)
+            选中 Session 当前 Provider: \(currentProvider.isEmpty ? "-" : currentProvider)
+            Session ID: \(session.threadID)
+            Type: \(sessionTypeLabel(session))
+            """
+            alert.addButton(withTitle: "迁移")
+            alert.addButton(withTitle: "取消")
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                return
+            }
+        }
+
+        setButtonsEnabled(false)
+        setStatus("迁移 Session Provider 中…", key: "action")
+        appendOutput("执行 迁移 Session Provider: thread_id=\(session.threadID) target_provider=\(targetProvider) scope=\(includeFamily ? "family" : "current")")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = self.migrateSessionProvider(threadID: session.threadID, targetProvider: targetProvider, includeFamily: includeFamily)
+            DispatchQueue.main.async {
+                self.setButtonsEnabled(true)
+                if result.success {
+                    self.setStatus("迁移 Session Provider 完成", key: "action")
+                    self.appendOutput(result.detail)
+                    self.detectStatuses()
+                } else {
+                    self.setStatus("迁移 Session Provider 失败", key: "action")
+                    self.appendOutput("stderr: \(result.detail)")
+                    NSSound.beep()
+                }
+            }
+        }
+    }
+
+    @objc
+    private func migrateAllSessionsToCurrentProvider() {
+        guard let targetProvider = currentConfiguredModelProvider() else {
+            appendOutput("未能从 ~/.codex/config.toml 读取当前 model_provider。")
+            setStatus("当前 provider 未配置", key: "action")
+            NSSound.beep()
+            return
+        }
+        guard let plan = allSessionProviderPlan(targetProvider: targetProvider) else {
+            appendOutput("读取全部 session provider 迁移计划失败。")
+            setStatus("读取迁移计划失败", key: "action")
+            NSSound.beep()
+            return
+        }
+
+        let migrateNeeded = Int(plan["migrate_needed_count"] ?? "0") ?? 0
+        let totalThreads = Int(plan["total_threads"] ?? "0") ?? 0
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "将所有 Session 迁移到当前 Provider？"
+        alert.informativeText = """
+        当前 Provider: \(targetProvider)
+        本地 Session 总数: \(totalThreads)
+        需要迁移的 Session 数: \(migrateNeeded)
+
+        这会直接改写本地 state_5.sqlite 中的 threads.model_provider。
+        不会改写 source，也不会重写 rollout 文件。
+        """
+        alert.addButton(withTitle: "全部迁移")
+        alert.addButton(withTitle: "取消")
+        alert.buttons.first?.hasDestructiveAction = true
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+
+        setButtonsEnabled(false)
+        setStatus("迁移全部 Session Provider 中…", key: "action")
+        appendOutput("执行 全部迁移 Session Provider: target_provider=\(targetProvider)")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = self.migrateAllSessionsProvider(targetProvider: targetProvider)
+            DispatchQueue.main.async {
+                self.setButtonsEnabled(true)
+                if result.success {
+                    self.setStatus("迁移全部 Session Provider 完成", key: "action")
+                    self.appendOutput(result.detail)
+                    self.detectStatuses()
+                } else {
+                    self.setStatus("迁移全部 Session Provider 失败", key: "action")
                     self.appendOutput("stderr: \(result.detail)")
                     NSSound.beep()
                 }
