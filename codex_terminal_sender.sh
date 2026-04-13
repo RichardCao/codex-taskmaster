@@ -19,6 +19,7 @@ LOOP_FAILURE_PAUSE_THRESHOLD="${CODEX_TASKMASTER_LOOP_FAILURE_PAUSE_THRESHOLD:-5
 LOOP_ACCEPTED_RETRY_SECONDS="${CODEX_TASKMASTER_LOOP_ACCEPTED_RETRY_SECONDS:-30}"
 LOOP_UNVERIFIED_RETRY_SECONDS="${CODEX_TASKMASTER_LOOP_UNVERIFIED_RETRY_SECONDS:-20}"
 LOOP_FORCE_FAILURE_RETRY_SECONDS="${CODEX_TASKMASTER_LOOP_FORCE_FAILURE_RETRY_SECONDS:-15}"
+REQUEST_STALE_GRACE_SECONDS="${CODEX_TASKMASTER_REQUEST_STALE_GRACE_SECONDS:-120}"
 
 STATE_DIR="${CODEX_TASKMASTER_STATE_DIR:-${HOME}/.codex-terminal-sender}"
 REQUESTS_DIR="${STATE_DIR}/requests"
@@ -183,6 +184,23 @@ write_loop_status_kv() {
     STOPPED_REASON "$stopped_reason"
 }
 
+load_current_loop_status_file() {
+  local source_tag="$1"
+
+  STATE_TAG=""
+  NEXT_RUN=""
+  FAILURE_COUNT=""
+  FAILURE_REASON=""
+  PAUSED=""
+  PAUSED_REASON=""
+  STOPPED=""
+  STOPPED_REASON=""
+
+  [[ -f "$LOOP_STATUS_FILE" ]] || return 1
+  load_kv_file "$LOOP_STATUS_FILE"
+  [[ "${STATE_TAG:-}" == "$source_tag" ]]
+}
+
 write_loop_definition() {
   local target="$1"
   local interval="$2"
@@ -252,11 +270,7 @@ find_conflicting_running_loop_target() {
     load_kv_file "$loop_file"
     [[ "${THREAD_ID:-}" == "$thread_id" ]] || continue
 
-    STOPPED=""
-    PAUSED=""
-    if [[ -f "$LOOP_STATUS_FILE" ]]; then
-      load_kv_file "$LOOP_STATUS_FILE"
-    fi
+    load_current_loop_status_file "$(loop_source_tag)" >/dev/null 2>&1 || true
     [[ "${STOPPED:-0}" == "1" ]] && continue
     [[ "${PAUSED:-0}" == "1" ]] && continue
     if [[ "$require_higher_priority" == "1" && -n "$current_key" && "$key" > "$current_key" ]]; then
@@ -322,10 +336,7 @@ has_active_loops() {
   for loop_file in "$LOOPS_DIR"/*.loop; do
     key="$(basename "${loop_file%.loop}")"
     paths_for_target "$key"
-    STOPPED=""
-    if [[ -f "$LOOP_STATUS_FILE" ]]; then
-      load_kv_file "$LOOP_STATUS_FILE"
-    fi
+    load_current_loop_status_file "$(loop_source_tag)" >/dev/null 2>&1 || true
     if [[ "${STOPPED:-0}" != "1" ]]; then
       shopt -u nullglob
       return 0
@@ -413,6 +424,43 @@ append_loop_log_line() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$file" 2>/dev/null || true
 }
 
+prune_stale_request_files() {
+  python3 - "$PENDING_REQUEST_DIR" "$PROCESSING_REQUEST_DIR" "$REQUEST_STALE_GRACE_SECONDS" <<'PY'
+import json
+import os
+import sys
+import time
+
+pending_dir, processing_dir, grace_seconds = sys.argv[1:]
+grace_seconds = int(grace_seconds or 0)
+now = int(time.time())
+
+for directory in (pending_dir, processing_dir):
+    if not os.path.isdir(directory):
+        continue
+    for name in os.listdir(directory):
+        if not name.endswith(".request.json"):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except Exception:
+            continue
+        created_at = int(payload.get("created_at", 0) or 0)
+        timeout_seconds = int(payload.get("timeout_seconds", 0) or 0)
+        if created_at <= 0:
+            continue
+        expiry_age = max(30, timeout_seconds + grace_seconds)
+        if now - created_at < expiry_age:
+            continue
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+PY
+}
+
 last_nonempty_log_line() {
   local file="$1"
   [[ -f "$file" ]] || return 0
@@ -444,6 +492,7 @@ find_matching_inflight_request() {
   local target="$1"
   local message="$2"
 
+  prune_stale_request_files
   python3 - "$PENDING_REQUEST_DIR" "$PROCESSING_REQUEST_DIR" "$target" "$message" <<'PY'
 import json
 import os
@@ -488,6 +537,7 @@ PY
 
 current_request_queue_state() {
   local request_id="$1"
+  prune_stale_request_files
   request_paths_for_id "$request_id"
 
   if [[ -f "$REQUEST_FILE" ]]; then
@@ -1421,12 +1471,16 @@ thread_action_guard_live_session() {
   local first_user_message=""
   local target_cwd=""
   local session_name=""
+  local model_provider=""
+  local session_source=""
+  local agent_nickname=""
+  local agent_role=""
   local live_tty_output=""
   local live_tty_status=1
 
   metadata="$(load_target_metadata "$thread_id" 2>/dev/null || true)"
   [[ -n "$metadata" ]] || return 0
-  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name <<<"$metadata"
+  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name model_provider session_source agent_nickname agent_role <<<"$metadata"
 
   set +e
   live_tty_output="$(resolve_target_tty "$thread_id" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path" 2>&1)"
@@ -2447,32 +2501,21 @@ process_loops_once() {
     paths_for_target "$key"
     source_tag="$(stat -f '%m:%z' "$loop_file" 2>/dev/null || echo missing)"
 
-    if [[ -f "$LOOP_STATUS_FILE" ]]; then
-      STATE_TAG=""
-      NEXT_RUN=""
-      FAILURE_COUNT=""
-      FAILURE_REASON=""
-      PAUSED=""
-      PAUSED_REASON=""
-      STOPPED=""
-      STOPPED_REASON=""
-      load_kv_file "$LOOP_STATUS_FILE"
-      if [[ "${STATE_TAG:-}" == "$source_tag" ]]; then
-        if [[ "${NEXT_RUN:-}" =~ ^[0-9]+$ ]]; then
-          next_run="$NEXT_RUN"
-        fi
-        if [[ "${FAILURE_COUNT:-}" =~ ^[0-9]+$ ]]; then
-          failure_count="$FAILURE_COUNT"
-        fi
-        failure_reason="${FAILURE_REASON:-}"
-        if [[ "${PAUSED:-0}" == "1" ]]; then
-          paused=1
-          paused_reason="${PAUSED_REASON:-$failure_reason}"
-        fi
-        if [[ "${STOPPED:-0}" == "1" ]]; then
-          stopped=1
-          stopped_reason="${STOPPED_REASON:-}"
-        fi
+    if load_current_loop_status_file "$source_tag"; then
+      if [[ "${NEXT_RUN:-}" =~ ^[0-9]+$ ]]; then
+        next_run="$NEXT_RUN"
+      fi
+      if [[ "${FAILURE_COUNT:-}" =~ ^[0-9]+$ ]]; then
+        failure_count="$FAILURE_COUNT"
+      fi
+      failure_reason="${FAILURE_REASON:-}"
+      if [[ "${PAUSED:-0}" == "1" ]]; then
+        paused=1
+        paused_reason="${PAUSED_REASON:-$failure_reason}"
+      fi
+      if [[ "${STOPPED:-0}" == "1" ]]; then
+        stopped=1
+        stopped_reason="${STOPPED_REASON:-}"
       fi
     fi
 
@@ -2649,7 +2692,11 @@ start_loop() {
     die "failed to load target metadata for thread '${thread_id}'"
   fi
   local target_cwd
-  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name <<<"$start_detail"
+  local model_provider
+  local session_source
+  local agent_nickname
+  local agent_role
+  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name model_provider session_source agent_nickname agent_role <<<"$start_detail"
 
   if ! start_detail="$(resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path" 2>&1)"; then
     failure_reason="$(classify_loop_reason "$start_detail")"
@@ -2701,11 +2748,7 @@ resume_loop() {
   load_kv_file "$LOOP_FILE"
   source_tag="$(stat -f '%m:%z' "$LOOP_FILE" 2>/dev/null || echo missing)"
 
-  if [[ -f "$LOOP_STATUS_FILE" ]]; then
-    FAILURE_REASON=""
-    PAUSED_REASON=""
-    STOPPED_REASON=""
-    load_kv_file "$LOOP_STATUS_FILE"
+  if load_current_loop_status_file "$source_tag"; then
     failure_reason="${PAUSED_REASON:-${STOPPED_REASON:-${FAILURE_REASON:-}}}"
   fi
 
@@ -2830,16 +2873,7 @@ status_one() {
   local stopped_reason=""
   local failure_count="0"
   local failure_reason=""
-  if [[ -f "$LOOP_STATUS_FILE" ]]; then
-    STATE_TAG=""
-    NEXT_RUN=""
-    FAILURE_COUNT=""
-    FAILURE_REASON=""
-    PAUSED=""
-    PAUSED_REASON=""
-    STOPPED=""
-    STOPPED_REASON=""
-    load_kv_file "$LOOP_STATUS_FILE"
+  if load_current_loop_status_file "$(loop_source_tag)"; then
     next_run="${NEXT_RUN:-unknown}"
     [[ "${FAILURE_COUNT:-}" =~ ^[0-9]+$ ]] && failure_count="$FAILURE_COUNT"
     failure_reason="${FAILURE_REASON:-}"

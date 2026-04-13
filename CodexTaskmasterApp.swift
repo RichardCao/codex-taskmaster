@@ -733,6 +733,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var isProgrammaticLoopSelectionChange = false
     private var didAutoSizeActiveLoopsColumns = false
     private var didAutoSizeSessionColumns = false
+    private var isRefreshingLoopsSnapshot = false
+    private var pendingLoopSnapshotRefresh = false
 
     private lazy var sendButton = makeButton(title: "发送一次", action: #selector(sendOnce))
     private lazy var startButton = makeButton(title: "开始循环", action: #selector(startLoop))
@@ -4079,7 +4081,6 @@ conn.close()
         detectStatusButton.isEnabled = true
         if enabled {
             updateLoopActionButtons()
-            updateSessionDetailView()
         } else {
             stopButton.isEnabled = false
             resumeLoopButton.isEnabled = false
@@ -4362,7 +4363,7 @@ conn.close()
     private func startAutoRefresh() {
         refreshTimer?.invalidate()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: autoRefreshInterval, repeats: true) { [weak self] _ in
-            self?.refreshLoopsSnapshot()
+            self?.requestLoopSnapshotRefresh()
         }
         if let refreshTimer {
             RunLoop.main.add(refreshTimer, forMode: .common)
@@ -4623,10 +4624,9 @@ conn.close()
         detail.contains("found multiple matching Terminal ttys for target")
     }
 
-    private func validateUniqueTarget(_ target: String, actionName: String) -> Bool {
+    private func handleUniqueTargetValidationResult(_ result: (status: Int32, stdout: String, stderr: String), target: String, actionName: String) -> Bool {
         lastTargetValidationFailureReason = nil
         lastTargetValidationFailureDetail = ""
-        let result = runStandardHelper(arguments: ["resolve-thread-id", "-t", target])
         guard result.status == 0 else {
             let detail = result.stderr.isEmpty ? result.stdout : result.stderr
             if isAmbiguousTargetError(detail) {
@@ -4645,6 +4645,22 @@ conn.close()
             return false
         }
         return true
+    }
+
+    private func validateUniqueTarget(_ target: String, actionName: String) -> Bool {
+        let result = runStandardHelper(arguments: ["resolve-thread-id", "-t", target])
+        return handleUniqueTargetValidationResult(result, target: target, actionName: actionName)
+    }
+
+    private func validateUniqueTargetAsync(target: String, actionName: String, completion: @escaping (Bool) -> Void) {
+        lastTargetValidationFailureReason = nil
+        lastTargetValidationFailureDetail = ""
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = self.runStandardHelper(arguments: ["resolve-thread-id", "-t", target])
+            DispatchQueue.main.async {
+                completion(self.handleUniqueTargetValidationResult(result, target: target, actionName: actionName))
+            }
+        }
     }
 
     private func validateInterval() -> String? {
@@ -4731,6 +4747,13 @@ conn.close()
         alert.runModal()
     }
 
+    private func helperTargetArgument(from arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: "-t"), index + 1 < arguments.count else {
+            return nil
+        }
+        return arguments[index + 1]
+    }
+
     private func runHelper(arguments: [String], actionName: String) {
         persistDefaults()
         setStatus("", key: "send")
@@ -4758,6 +4781,16 @@ conn.close()
                     if actionName == "发送一次" || actionName == "开始循环" {
                         self.recordCurrentInputsInHistory()
                     }
+                    if actionName == "删除当前",
+                       let deletedTarget = self.helperTargetArgument(from: arguments) {
+                        self.loopSnapshots.removeAll { $0.target == deletedTarget }
+                        if self.preferredLoopSelectionTarget == deletedTarget {
+                            self.preferredLoopSelectionTarget = nil
+                        }
+                        self.activeLoopsTableView.reloadData()
+                        self.updateLoopActionButtons()
+                        self.refreshTableWrapping(self.activeLoopsTableView)
+                    }
                     self.setStatus(accepted ? "\(actionName)已受理" : "\(actionName)完成", key: "action")
                 } else {
                     let combinedErrorDetail = [result.stderr, result.stdout]
@@ -4774,7 +4807,7 @@ conn.close()
                     self.setStatus("\(actionName)失败", key: "action", color: .systemRed)
                 }
                 self.setButtonsEnabled(true)
-                self.refreshLoopsSnapshot()
+                self.requestLoopSnapshotRefresh()
             }
         }
     }
@@ -4958,7 +4991,29 @@ conn.close()
         activeSessionScanMode = nil
     }
 
+    private func requestLoopSnapshotRefresh() {
+        if isRefreshingLoopsSnapshot {
+            pendingLoopSnapshotRefresh = true
+            return
+        }
+        refreshLoopsSnapshot()
+    }
+
+    private func finishLoopSnapshotRefresh() {
+        if pendingLoopSnapshotRefresh {
+            pendingLoopSnapshotRefresh = false
+            refreshLoopsSnapshot()
+            return
+        }
+        isRefreshingLoopsSnapshot = false
+    }
+
     private func refreshLoopsSnapshot() {
+        guard !isRefreshingLoopsSnapshot else {
+            pendingLoopSnapshotRefresh = true
+            return
+        }
+        isRefreshingLoopsSnapshot = true
         DispatchQueue.global(qos: .utility).async {
             let process = Process()
             let stdout = Pipe()
@@ -4981,6 +5036,7 @@ conn.close()
                     self.stopButton.isEnabled = false
                     self.resumeLoopButton.isEnabled = false
                     self.deleteLoopButton.isEnabled = false
+                    self.finishLoopSnapshotRefresh()
                 }
                 return
             }
@@ -5012,9 +5068,7 @@ conn.close()
                 self.restoreLoopSelection(preferredTarget: nil)
                 self.refreshTableWrapping(self.activeLoopsTableView)
                 self.updateLoopActionButtons()
-                if self.sessionStatusTableView.selectedRow >= 0 {
-                    self.updateSessionDetailView()
-                }
+                self.finishLoopSnapshotRefresh()
             }
         }
     }
@@ -5216,21 +5270,25 @@ conn.close()
         guard preflightRuntimePermissions(actionName: "发送一次", requiresLoopState: false) else {
             return
         }
-        guard validateUniqueTarget(target, actionName: "发送") else {
-            NSSound.beep()
-            return
-        }
         guard sendRequestCoordinator.ensurePermission(prompt: true) else {
             appendOutput("Codex Taskmaster 缺少辅助功能权限，无法发送按键。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
             setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
             NSSound.beep()
             return
         }
-        var arguments = ["send", "-t", target, "-m", currentMessage()]
-        if isForceSendEnabled() {
-            arguments.append("-f")
+        setButtonsEnabled(false)
+        setStatus("发送一次校验中…", key: "action")
+        validateUniqueTargetAsync(target: target, actionName: "发送") { isValid in
+            guard isValid else {
+                self.setButtonsEnabled(true)
+                return
+            }
+            var arguments = ["send", "-t", target, "-m", self.currentMessage()]
+            if self.isForceSendEnabled() {
+                arguments.append("-f")
+            }
+            self.runHelper(arguments: arguments, actionName: "发送一次")
         }
-        runHelper(arguments: arguments, actionName: "发送一次")
     }
 
     @objc
@@ -5246,52 +5304,57 @@ conn.close()
         guard preflightRuntimePermissions(actionName: "开始循环", requiresLoopState: true) else {
             return
         }
-        guard validateUniqueTarget(target, actionName: "开始循环") else {
-            let reason = lastTargetValidationFailureReason ?? "start_failed"
-            _ = saveStoppedLoopEntry(target: target, interval: interval, message: currentMessage(), forceSend: isForceSendEnabled(), reason: reason)
-            setStatus("开始循环失败", key: "action", color: .systemRed)
-            refreshLoopsSnapshot()
-            NSSound.beep()
-            return
-        }
         guard sendRequestCoordinator.ensurePermission(prompt: true) else {
             appendOutput("Codex Taskmaster 缺少辅助功能权限，无法处理循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
             setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
             _ = saveStoppedLoopEntry(target: target, interval: interval, message: currentMessage(), forceSend: isForceSendEnabled(), reason: "missing_accessibility_permission")
             setStatus("开始循环失败", key: "action", color: .systemRed)
-            refreshLoopsSnapshot()
+            requestLoopSnapshotRefresh()
             NSSound.beep()
             return
         }
-
-        let conflicts = conflictingLoops(for: target)
-        if !conflicts.isEmpty {
-            guard promptToReplaceExistingLoops(conflicts: conflicts, target: target) else {
-                appendOutput("已取消开始循环：检测到互斥循环未替换。")
-                setStatus("开始循环已取消", key: "action")
+        setButtonsEnabled(false)
+        setStatus("开始循环校验中…", key: "action")
+        validateUniqueTargetAsync(target: target, actionName: "开始循环") { isValid in
+            guard isValid else {
+                let reason = self.lastTargetValidationFailureReason ?? "start_failed"
+                _ = self.saveStoppedLoopEntry(target: target, interval: interval, message: self.currentMessage(), forceSend: self.isForceSendEnabled(), reason: reason)
+                self.setStatus("开始循环失败", key: "action", color: .systemRed)
+                self.requestLoopSnapshotRefresh()
+                self.setButtonsEnabled(true)
                 return
             }
-            runLoopReplacement(
-                target: target,
-                interval: interval,
-                message: currentMessage(),
-                forceSend: isForceSendEnabled(),
-                conflicts: conflicts
-            )
-            return
-        }
 
-        var arguments = ["start", "-t", target, "-i", interval, "-m", currentMessage()]
-        if isForceSendEnabled() {
-            arguments.append("-f")
+            let conflicts = self.conflictingLoops(for: target)
+            if !conflicts.isEmpty {
+                self.setButtonsEnabled(true)
+                guard self.promptToReplaceExistingLoops(conflicts: conflicts, target: target) else {
+                    self.appendOutput("已取消开始循环：检测到互斥循环未替换。")
+                    self.setStatus("开始循环已取消", key: "action")
+                    return
+                }
+                self.runLoopReplacement(
+                    target: target,
+                    interval: interval,
+                    message: self.currentMessage(),
+                    forceSend: self.isForceSendEnabled(),
+                    conflicts: conflicts
+                )
+                return
+            }
+
+            var arguments = ["start", "-t", target, "-i", interval, "-m", self.currentMessage()]
+            if self.isForceSendEnabled() {
+                arguments.append("-f")
+            }
+            self.runHelper(arguments: arguments, actionName: "开始循环")
         }
-        runHelper(arguments: arguments, actionName: "开始循环")
     }
 
     @objc
     private func refreshLoopsAction() {
         appendOutput("刷新循环列表。")
-        refreshLoopsSnapshot()
+        requestLoopSnapshotRefresh()
     }
 
     @objc
@@ -5368,13 +5431,6 @@ conn.close()
             return
         }
 
-        guard validateUniqueTarget(loop.target, actionName: "恢复当前") else {
-            setStatus("恢复当前失败", key: "action", color: .systemRed)
-            refreshLoopsSnapshot()
-            NSSound.beep()
-            return
-        }
-
         guard sendRequestCoordinator.ensurePermission(prompt: true) else {
             appendOutput("Codex Taskmaster 缺少辅助功能权限，无法恢复循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
             setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
@@ -5384,7 +5440,17 @@ conn.close()
         }
 
         targetField.stringValue = loop.target
-        runHelper(arguments: ["loop-resume", "-t", loop.target], actionName: "恢复当前")
+        setButtonsEnabled(false)
+        setStatus("恢复当前校验中…", key: "action")
+        validateUniqueTargetAsync(target: loop.target, actionName: "恢复当前") { isValid in
+            guard isValid else {
+                self.setStatus("恢复当前失败", key: "action", color: .systemRed)
+                self.requestLoopSnapshotRefresh()
+                self.setButtonsEnabled(true)
+                return
+            }
+            self.runHelper(arguments: ["loop-resume", "-t", loop.target], actionName: "恢复当前")
+        }
     }
 
     @objc

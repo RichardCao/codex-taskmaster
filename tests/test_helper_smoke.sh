@@ -399,6 +399,7 @@ assert_contains "$nonforce_status" "failure_reason: tty_focus_failed"
 assert_not_contains "$nonforce_status" "pause_reason:"
 nonforce_log="$(cat "${STATE_DIR}/runtime/loop-logs/${nonforce_key}.log")"
 assert_not_contains "$nonforce_log" "paused: consecutive forced-send failure threshold reached"
+"$HELPER" loop-delete -t "$nonforce_target" >/dev/null
 
 CONFLICT_SEND_STUB="${TEST_TMP}/loop-send-success-stub.sh"
 CONFLICT_SEND_COUNTER="${TEST_TMP}/loop-send-success-counter.txt"
@@ -484,6 +485,28 @@ CODEX_TASKMASTER_LOOP_ACCEPTED_RETRY_SECONDS=40 \
 accepted_status="$("$HELPER" status -t "$accepted_target")"
 accepted_next_run="$(printf '%s\n' "$accepted_status" | awk -F': ' '$1=="next_run_epoch"{print $2}')"
 (( accepted_next_run - accepted_now_before >= 35 ))
+
+stale_request_id="stale-processing-request"
+cat >"${STATE_DIR}/requests/processing/${stale_request_id}.request.json" <<EOF
+{"request_id":"${stale_request_id}","target":"linuxkernel","message":"继续","source_tag":"helper-send","timeout_seconds":12,"force_send":false,"created_at":1}
+EOF
+stale_target="linuxkernel"
+stale_key="$(printf '%s' "$stale_target" | shasum -a 256 | awk '{print $1}')"
+cat >"${STATE_DIR}/loops/${stale_key}.loop" <<EOF
+TARGET=${stale_target}
+INTERVAL=5
+MESSAGE=继续
+FORCE_SEND=0
+THREAD_ID=stale-thread
+EOF
+: > "${STATE_DIR}/runtime/loop-logs/${stale_key}.log"
+printf '0' >"$CONFLICT_SEND_COUNTER"
+CODEX_TASKMASTER_SEND_STUB="$CONFLICT_SEND_STUB" \
+CODEX_TASKMASTER_TEST_COUNTER_FILE="$CONFLICT_SEND_COUNTER" \
+"$HELPER" loop-once
+assert_equals "$(cat "$CONFLICT_SEND_COUNTER")" "1"
+[[ ! -f "${STATE_DIR}/requests/processing/${stale_request_id}.request.json" ]]
+"$HELPER" loop-delete -t "$stale_target" >/dev/null
 
 FORCE_FAILURE_STUB="${TEST_TMP}/loop-send-force-failure-stub.sh"
 cat >"$FORCE_FAILURE_STUB" <<'EOF'
