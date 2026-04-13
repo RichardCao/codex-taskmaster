@@ -113,6 +113,12 @@ Linux 第一版要做到：
 
 这意味着后续迁移的正确方向不是“重写一个 Linux App”，而是继续把共享语义和平台适配边界拉直。
 
+补充判断：
+
+- 当前分层已经够支撑 Linux 第一阶段开工
+- 但 [CodexTaskmasterApp.swift](/Users/create/codex-terminal-app/CodexTaskmasterApp.swift) 仍承载了过多 Session 与 Loop 业务编排
+- 所以 Linux 第一阶段不应简单照抄 UI 文件，而应一边移植，一边继续把共享语义外提
+
 ## 4. 目标分层
 
 Linux 迁移按下面 4 层推进。
@@ -202,6 +208,8 @@ Linux 第一版优先只做 CLI，不做 GUI。
 - 进一步把 `codex_terminal_sender.sh` 中与平台无关的 session / loop 语义整理出来
 - 继续收口状态文本、错误码、reason 映射
 - 减少 `CodexTaskmasterApp.swift` 中的业务语义散落
+- 把 session 变更和 helper 调用包装成更稳定的 service 层
+- 把 `Provider` / `Type` / `Parent` / `source` 相关元数据解释继续集中到共享层
 
 建议文件方向：
 
@@ -210,6 +218,8 @@ Linux 第一版优先只做 CLI，不做 GUI。
   - `TaskMasterSessionCore.swift`
   - `TaskMasterLoopCore.swift`
   - `TaskMasterReasonMap.swift`
+  - `TaskMasterSessionService.swift`
+  - `TaskMasterLoopService.swift`
 
 验收：
 

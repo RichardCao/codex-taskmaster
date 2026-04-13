@@ -8,6 +8,7 @@
 - 不应该把当前 macOS App 原样搬过去
 - Linux 第一阶段应优先做 `共享语义 + tmux adapter + CLI`
 - 先把发送链路跑通，再考虑 GUI
+- 在正式移植前，当前仓库还应继续把 UI 文件里的共享语义再往外收一轮
 
 ## 迁移目标
 
@@ -202,6 +203,25 @@ Linux 替代建议：
 
 - 如果目标是尽快在 Linux 上继续用，先走路径 A
 - 如果目标是后面继续支持 Windows 或 Linux GUI，尽快往路径 B 靠
+
+## 对当前代码基线的判断
+
+这一轮复查后，可以明确两点：
+
+- 当前仓库已经不是“完全糊在一个文件里”的状态
+- 但也还没有达到“Linux 只需接一个新 adapter 就行”的程度
+
+最现实的判断是：
+
+- 当前结构适合开始 Linux 第一阶段
+- 但 Linux 开发过程中，仍要顺手继续把共享语义从 [CodexTaskmasterApp.swift](/Users/create/codex-terminal-app/CodexTaskmasterApp.swift) 和 [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh) 中收出来
+
+最值得继续收口的部分：
+
+- Session 拉取与结构化解析
+- Session 变更服务层
+- Loop 状态机与结果解释
+- reason/status 的共享映射
 
 ## 推荐的实际执行顺序
 

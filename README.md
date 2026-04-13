@@ -12,7 +12,8 @@
 
 - 原生 AppKit 单窗口界面
 - `Session Status` 状态扫描与排序
-- `Session Status` 显示 `Type` 列，区分 `CLI` / `Subagent` / `Exec` / `Other`
+- `Session Status` 显示 `Provider` 和 `Type` 列
+- `Provider` 与 `类型` 列支持表头筛选
 - `Active Loops` 循环任务列表与日志
 - 选中 session 后查看完整信息、最近发送统计、最近发送结果、相关 Loop、提示词历史
 - 单次发送与循环发送
@@ -21,6 +22,7 @@
 - session 改名
 - session 归档与恢复
 - 带风险提示的本地彻底删除
+- 子会话向下递归删除规划
 - 支持把当前 session 或全部 session 迁移到当前 `config.toml` 的 `model_provider`
 - 按 session 状态决定是否允许发送
 - 同一真实 Session 同一时刻只允许一个运行态 loop，避免重复轰炸
@@ -150,9 +152,37 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 
 应用会先排队发送请求，再探测目标 session 状态。默认模式下，只有目标看起来可发送时才会真正输入；强制模式会跳过这层 session 状态限制，但仍会返回发送成功或失败原因。
 
+## 当前结构评估
+
+如果从“前后端分离”这个角度看，这个项目现在已经有了可用的分层雏形，但还不能算拆得足够干净。
+
+已经做得比较对的部分：
+
+- `TaskMasterCore.swift` 已经承载了共享模型、解析和部分状态语义
+- `TaskMasterSendRuntime.swift` 已经把发送请求排队、平台发送接口和结果回收从 UI 主文件里抽出来
+- `codex_terminal_sender.sh` 作为 helper CLI，已经把 loop daemon、session 操作和大量本地状态处理集中到了单独入口
+
+目前仍然不够好的部分：
+
+- [CodexTaskmasterApp.swift](/Users/create/codex-terminal-app/CodexTaskmasterApp.swift) 仍然超过 6000 行，同时承担了 UI、helper 调用编排、session 合并、过滤、排序、删除确认、provider 迁移确认和状态提示
+- `codex_terminal_sender.sh` 里同时混有共享语义、平台探测、loop 调度和本地状态变更，Core 与 Platform 的边界还不够硬
+- 一些错误码、状态映射和 helper 输出解释仍然分散在 UI 文件与 shell helper 之间，没有完全收口到共享层
+
+结论：
+
+- 当前结构已经足够继续演进，也足够支撑 Linux 迁移前的整理
+- 但如果目标是长期维护、继续扩平台，当前分层还需要继续收口，不能把现状当成“已经彻底分离”
+
 ## Session 类型与 Provider
 
-`Session Status` 现在会额外展示一列 `Type`，用于区分会话来源：
+`Session Status` 现在会额外展示：
+
+- `Provider`
+- `Type`
+
+其中 `Provider` 与 `类型` 两列都支持表头筛选。
+
+`Type` 用于区分会话来源：
 
 - `CLI`
 - `Subagent`
@@ -243,13 +273,16 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
   - `session_index.jsonl` 中对应的 rename/name 记录
   - rollout 文件本身
 - 因为这不是公开原生 API，所以界面会弹出明显的风险提示
+- 如果当前 session 仍被判定为活跃，会阻止删除或归档，并弹出明确提示
+- 如果当前 session 存在子会话，会先询问是否连同子会话一起向下递归删除
+- 如果当前 session 具有父会话，只做提示，不会默认向上递归删除
 
 ## Provider 迁移语义
 
 界面中新增了两个按钮：
 
-- `迁移当前到当前Provider`
-- `全部迁移到当前Provider`
+- `迁移当前会话`
+- `迁移全部会话`
 
 这里的“当前 Provider”指的是 `~/.codex/config.toml` 中当前配置的 `model_provider`。
 
@@ -315,6 +348,7 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 - `scripts/ui_smoke_test.sh`：独立 UI 启动烟雾测试
 - `tests/test_helper_smoke.sh`：helper 冒烟测试
 - `docs/ARCHITECTURE.md`：架构边界与分层建议
+- `CHANGELOG.md`：近期变更记录
 - `docs/LINUX_EXECUTION_PLAN.md`：Linux 详细移植计划
 - `docs/LINUX_PORTING.md`：Linux 迁移方案
 - `docs/PLATFORM_API.md`：平台适配接口约定

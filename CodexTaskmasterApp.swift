@@ -553,12 +553,18 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private enum SessionFilterKind: String {
+        case provider
+        case type
         case status
         case terminal
         case tty
 
         var title: String {
             switch self {
+            case .provider:
+                return "Provider"
+            case .type:
+                return "类型"
             case .status:
                 return "Status"
             case .terminal:
@@ -628,9 +634,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let sessionStatusSplitView = AdjustableSplitView()
     private let topSplitView = AdjustableSplitView()
     private let contentSplitView = AdjustableSplitView()
+    private let activeLoopsPanelView = NSView()
+    private let sessionStatusPanelView = NSView()
     private let outputView = NSTextView()
-    private let statusLabel = NSTextField(labelWithString: "Ready")
-    private let activeLoopsMetaLabel = NSTextField(labelWithString: "No active loops.")
+    private let statusLabel = NSTextField(labelWithString: "就绪")
+    private let activeLoopsMetaLabel = NSTextField(labelWithString: "暂无循环。")
     private let sessionStatusMetaLabel = NSTextField(labelWithString: "点击“检测状态”加载 session 列表。")
     private let activityLogMetaLabel = NSTextField(labelWithString: "显示 0 / 0")
     private var refreshTimer: Timer?
@@ -671,6 +679,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let sessionScanProcessLock = NSLock()
     private var currentSessionScanProcess: Process?
     private var sessionDetailLoadGeneration = 0
+    private var lastSessionDetailThreadID: String?
+    private var lastSessionDetailText = ""
     private var sessionSearchDebounceTimer: Timer?
     private var sessionSearchRevision = 0
     private var isSessionPromptSearchRunning = false
@@ -689,6 +699,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let tableBaseRowHeight: CGFloat = 24
     private let tableWrappedRowHeightCap: CGFloat = 110
     private var selectedSessionStatusFilters = Set<String>()
+    private var selectedSessionProviderFilters = Set<String>()
+    private var selectedSessionTypeFilters = Set<String>()
     private var selectedSessionTerminalFilters = Set<String>()
     private var selectedSessionTTYFilters = Set<String>()
     private let sessionFilterContainerView = NSView()
@@ -729,8 +741,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private lazy var archiveSessionButton = makeButton(title: "归档", action: #selector(archiveSelectedSession))
     private lazy var restoreSessionButton = makeButton(title: "恢复", action: #selector(restoreSelectedSession))
     private lazy var deleteSessionButton = makeButton(title: "删除", action: #selector(deleteSelectedSession))
-    private lazy var migrateSessionProviderButton = makeButton(title: "迁移当前到当前Provider", action: #selector(migrateSelectedSessionToCurrentProvider))
-    private lazy var migrateAllSessionsProviderButton = makeButton(title: "全部迁移到当前Provider", action: #selector(migrateAllSessionsToCurrentProvider))
+    private lazy var migrateSessionProviderButton = makeButton(title: "迁移当前会话", action: #selector(migrateSelectedSessionToCurrentProvider))
+    private lazy var migrateAllSessionsProviderButton = makeButton(title: "迁移全部会话", action: #selector(migrateAllSessionsToCurrentProvider))
     private lazy var clearLogButton = makeButton(title: "清空日志", action: #selector(clearActivityLog))
     private lazy var saveLogButton = makeButton(title: "保存日志", action: #selector(saveActivityLog))
     private lazy var exportSessionLogButton = makeButton(title: "导出当前 Session", action: #selector(exportSelectedSessionLogs))
@@ -815,8 +827,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         resumeLoopButton.isEnabled = false
         deleteLoopButton.isEnabled = false
         installTableSelectionOutsideMonitor()
-        appendOutput("Codex Taskmaster is ready.")
-        appendOutput("Active Loops will refresh automatically every \(Int(autoRefreshInterval)) seconds.")
+        appendOutput("Codex Taskmaster 已就绪。")
+        appendOutput("循环列表会每 \(Int(autoRefreshInterval)) 秒自动刷新一次。")
         refreshLoopsSnapshot()
         startAutoRefresh()
         startRequestPump()
@@ -1036,7 +1048,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         outputScrollView.documentView = outputView
         outputScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 100).isActive = true
 
-        let activeLoopsPanel = makePanel(title: "Active Loops", metaLabel: activeLoopsMetaLabel, contentView: activeLoopsScrollView)
+        let activeLoopsPanel = makePanel(title: "循环列表", metaLabel: activeLoopsMetaLabel, contentView: activeLoopsScrollView, reusePanelView: activeLoopsPanelView)
         let sessionStatusTopStack = NSStackView(views: [sessionScopeRow, sessionStatusScrollView])
         sessionStatusTopStack.orientation = .vertical
         sessionStatusTopStack.spacing = 8
@@ -1079,7 +1091,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionStatusSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
         let sessionStatusMinHeight = CGFloat(110 + 138) + sessionStatusSplitView.dividerThickness
         sessionStatusSplitView.heightAnchor.constraint(greaterThanOrEqualToConstant: sessionStatusMinHeight).isActive = true
-        let sessionStatusPanel = makePanel(title: "Session Status", metaLabel: sessionStatusMetaLabel, contentView: sessionStatusSplitView)
+        let sessionStatusPanel = makePanel(title: "会话状态", metaLabel: sessionStatusMetaLabel, contentView: sessionStatusSplitView, reusePanelView: sessionStatusPanelView)
         let logFilterControls = NSStackView(views: [activityLogSearchField, activityLogFailuresOnlyCheckbox, activityLogSelectedSessionCheckbox, exportSessionLogButton, clearLogButton, saveLogButton])
         logFilterControls.orientation = .horizontal
         logFilterControls.spacing = 6
@@ -1097,10 +1109,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         exportSessionLogButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         clearLogButton.setContentHuggingPriority(.required, for: .horizontal)
         saveLogButton.setContentHuggingPriority(.required, for: .horizontal)
-        exportSessionLogButton.toolTip = "导出当前选中 Session 相关日志"
+        exportSessionLogButton.toolTip = "导出当前选中会话相关日志"
         clearLogButton.toolTip = "清空当前日志显示"
         saveLogButton.toolTip = "保存当前日志到文件"
-        let logPanel = makePanel(title: "Activity Log", metaLabel: activityLogMetaLabel, contentView: outputScrollView, headerAccessoryView: logFilterControls)
+        let logPanel = makePanel(title: "运行日志", metaLabel: activityLogMetaLabel, contentView: outputScrollView, headerAccessoryView: logFilterControls)
         let activeLoopsPane = makeSplitPane(contentView: activeLoopsPanel, minWidth: 220, minHeight: 100)
         let sessionStatusPane = makeSplitPane(contentView: sessionStatusPanel, minWidth: 180, minHeight: 100)
         let topContentPane = makeSplitPane(contentView: topSplitView, minHeight: LayoutMetrics.topPaneMinHeight)
@@ -1169,15 +1181,16 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func configureLoopsTable() {
         let columns: [(identifier: String, title: String, width: CGFloat)] = [
-            ("state", "Status", 88),
-            ("result", "Result", 96),
-            ("reason", "Reason", 138),
-            ("target", "Target", 88),
-            ("interval", "Interval", 72),
-            ("forceSend", "Mode", 72),
-            ("nextRun", "Next Run", 120),
-            ("message", "Message", 120),
-            ("lastLog", "Last Result", 180)
+            ("state", "状态", 88),
+            ("result", "结果", 96),
+            ("reason", "原因", 138),
+            ("target", "目标", 88),
+            ("interval", "间隔", 72),
+            ("forceSend", "模式", 72),
+            ("nextRun", "下次执行", 120),
+            ("message", "消息", 120),
+            ("lastLog", "最近结果", 180),
+            ("tailSpacer", "", 6)
         ]
 
         activeLoopsTableView.headerView = NSTableHeaderView()
@@ -1193,26 +1206,32 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.identifier))
             tableColumn.title = column.title
             tableColumn.width = column.width
-            tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.identifier, ascending: column.identifier != defaultLoopSortKey)
+            if column.identifier != "tailSpacer" {
+                tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.identifier, ascending: column.identifier != defaultLoopSortKey)
+            }
             tableColumn.minWidth = loopColumnMinimumWidth(column.identifier)
-            tableColumn.resizingMask = .userResizingMask
+            tableColumn.maxWidth = loopColumnMaximumWidth(column.identifier)
+            tableColumn.resizingMask = column.identifier == "tailSpacer" ? [] : .userResizingMask
             activeLoopsTableView.addTableColumn(tableColumn)
         }
 
         activeLoopsScrollView.documentView = activeLoopsTableView
         activeLoopsTableView.sortDescriptors = [NSSortDescriptor(key: defaultLoopSortKey, ascending: true)]
+        synchronizeScrollableTableWidth(activeLoopsTableView)
     }
 
     private func configureSessionStatusTable() {
         let columns: [(identifier: String, title: String, width: CGFloat)] = [
-            ("name", "Name", 96),
-            ("type", "Type", 74),
-            ("threadID", "Session ID", 160),
-            ("status", "Status", 96),
-            ("terminalState", "Terminal", 92),
+            ("name", "名称", 96),
+            ("type", "类型", 74),
+            ("provider", "Provider", 96),
+            ("threadID", "会话 ID", 160),
+            ("status", "状态", 96),
+            ("terminalState", "终端", 92),
             ("tty", "TTY", 72),
-            ("updatedAt", "Updated", 118),
-            ("reason", "原因", 180)
+            ("updatedAt", "更新时间", 118),
+            ("reason", "原因", 180),
+            ("tailSpacer", "", 6)
         ]
 
         let headerView = SessionStatusHeaderView()
@@ -1232,14 +1251,18 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.identifier))
             tableColumn.title = column.title
             tableColumn.width = column.width
-            tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.identifier, ascending: column.identifier == defaultSessionSortKey ? false : true)
+            if column.identifier != "tailSpacer" {
+                tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.identifier, ascending: column.identifier == defaultSessionSortKey ? false : true)
+            }
             tableColumn.minWidth = sessionColumnMinimumWidth(column.identifier)
-            tableColumn.resizingMask = .userResizingMask
+            tableColumn.maxWidth = sessionColumnMaximumWidth(column.identifier)
+            tableColumn.resizingMask = column.identifier == "tailSpacer" ? [] : .userResizingMask
             sessionStatusTableView.addTableColumn(tableColumn)
         }
 
         sessionStatusScrollView.documentView = sessionStatusTableView
         sessionStatusTableView.sortDescriptors = [NSSortDescriptor(key: defaultSessionSortKey, ascending: false)]
+        synchronizeScrollableTableWidth(sessionStatusTableView)
     }
 
     private func loopColumnMinimumWidth(_ identifier: String) -> CGFloat {
@@ -1253,6 +1276,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func loopColumnMaximumWidth(_ identifier: String) -> CGFloat {
         switch identifier {
+        case "tailSpacer":
+            return 6
         case "state":
             return 132
         case "result":
@@ -1285,6 +1310,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func sessionColumnMaximumWidth(_ identifier: String) -> CGFloat {
         switch identifier {
+        case "tailSpacer":
+            return 6
         case "name":
             return 220
         case "type":
@@ -1651,6 +1678,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return sessionActualName(session)
         case "type":
             return sessionTypeLabel(session)
+        case "provider":
+            return session.provider.isEmpty ? "-" : session.provider
         case "threadID":
             return session.threadID
         case "status":
@@ -1715,6 +1744,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         for column in tableView.tableColumns {
             let identifier = column.identifier.rawValue
+            if identifier == "tailSpacer" {
+                if abs(column.width - 6) > 0.5 {
+                    column.width = 6
+                }
+                continue
+            }
             let headerWidth = measuredTextWidth(column.title) + headerWidthPadding(for: column, in: tableView) + tableCellHorizontalPadding
             let rowCount = tableView == activeLoopsTableView ? loopSnapshots.count : sessionSnapshots.count
             var widest = headerWidth
@@ -1729,6 +1764,27 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             let clampedWidth = min(max(widest, column.minWidth), tableColumnMaximumWidth(tableView: tableView, identifier: identifier))
             if abs(column.width - clampedWidth) > 0.5 {
                 column.width = clampedWidth
+            }
+        }
+
+        synchronizeScrollableTableWidth(tableView)
+    }
+
+    private func synchronizeScrollableTableWidth(_ tableView: NSTableView) {
+        let totalWidth = tableView.tableColumns.reduce(CGFloat(0)) { partial, column in
+            partial + column.width
+        } + CGFloat(max(0, tableView.tableColumns.count - 1)) * tableView.intercellSpacing.width
+        let targetWidth = max(totalWidth, tableView.enclosingScrollView?.contentView.bounds.width ?? 0)
+        var frame = tableView.frame
+        if abs(frame.width - targetWidth) > 0.5 {
+            frame.size.width = targetWidth
+            tableView.frame = frame
+        }
+        if let headerView = tableView.headerView {
+            var headerFrame = headerView.frame
+            if abs(headerFrame.width - targetWidth) > 0.5 {
+                headerFrame.size.width = targetWidth
+                headerView.frame = headerFrame
             }
         }
     }
@@ -1847,6 +1903,16 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func matchesSessionFilters(_ session: SessionSnapshot) -> Bool {
+        let providerValue = session.provider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : session.provider
+        if !selectedSessionProviderFilters.isEmpty && !selectedSessionProviderFilters.contains(providerValue) {
+            return false
+        }
+
+        let typeValue = sessionTypeLabel(session)
+        if !selectedSessionTypeFilters.isEmpty && !selectedSessionTypeFilters.contains(typeValue) {
+            return false
+        }
+
         let statusValue = localizedSessionStatusLabel(session)
         if !selectedSessionStatusFilters.isEmpty && !selectedSessionStatusFilters.contains(statusValue) {
             return false
@@ -1875,6 +1941,19 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func sessionFilterOptions(for kind: SessionFilterKind) -> [String] {
         switch kind {
+        case .provider:
+            var values = Set(allSessionSnapshots.map { snapshot in
+                let provider = snapshot.provider.trimmingCharacters(in: .whitespacesAndNewlines)
+                return provider.isEmpty ? "-" : provider
+            })
+            values.insert("-")
+            return values.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        case .type:
+            let base = ["CLI", "Subagent", "Exec", "Other"]
+            guard !allSessionSnapshots.isEmpty else { return base }
+            let seen = Set(allSessionSnapshots.map(sessionTypeLabel(_:)))
+            let extras = seen.subtracting(base).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            return base + extras
         case .status:
             let base = sessionStatusOptionBaseOrder()
             guard !allSessionSnapshots.isEmpty else { return base }
@@ -1899,6 +1978,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func selectedFilterValues(for kind: SessionFilterKind) -> Set<String> {
         switch kind {
+        case .provider:
+            return selectedSessionProviderFilters
+        case .type:
+            return selectedSessionTypeFilters
         case .status:
             return selectedSessionStatusFilters
         case .terminal:
@@ -1910,6 +1993,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func setSelectedFilterValues(_ values: Set<String>, for kind: SessionFilterKind) {
         switch kind {
+        case .provider:
+            selectedSessionProviderFilters = values
+        case .type:
+            selectedSessionTypeFilters = values
         case .status:
             selectedSessionStatusFilters = values
         case .terminal:
@@ -1922,6 +2009,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func sessionFilterKind(for columnIdentifier: String) -> SessionFilterKind? {
         switch columnIdentifier {
+        case "provider":
+            return .provider
+        case "type":
+            return .type
         case "status":
             return .status
         case "terminalState":
@@ -2645,8 +2736,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             deleteSessionButton.isEnabled = false
             migrateSessionProviderButton.isEnabled = false
             migrateAllSessionsProviderButton.isEnabled = currentConfiguredModelProvider() != nil
-            sessionDetailView.string = "选中一条 session 后，这里会显示完整信息、最近发送结果、相关 Loop 和提示词历史。"
-            sessionDetailView.scrollToBeginningOfDocument(nil)
+            let emptyDetailText = "选中一条 session 后，这里会显示完整信息、最近发送结果、相关 Loop 和提示词历史。"
+            if sessionDetailView.string != emptyDetailText {
+                sessionDetailView.string = emptyDetailText
+                sessionDetailView.scrollToBeginningOfDocument(nil)
+            }
+            lastSessionDetailThreadID = nil
+            lastSessionDetailText = emptyDetailText
             updateActivityLogControls()
             if isFilteringActivityLogBySelectedSession {
                 refreshActivityLogView(scrollToEnd: false)
@@ -2674,8 +2770,15 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             "最近发送结果\n加载中…",
             "提示词历史\n加载中…"
         ].joined(separator: "\n\n")
-        sessionDetailView.string = initialDetailText
-        sessionDetailView.scrollToBeginningOfDocument(nil)
+        let shouldResetForInitialText = lastSessionDetailThreadID != session.threadID || lastSessionDetailText != initialDetailText
+        if sessionDetailView.string != initialDetailText {
+            sessionDetailView.string = initialDetailText
+        }
+        if shouldResetForInitialText {
+            sessionDetailView.scrollToBeginningOfDocument(nil)
+        }
+        lastSessionDetailThreadID = session.threadID
+        lastSessionDetailText = initialDetailText
         updateActivityLogControls()
         if isFilteringActivityLogBySelectedSession {
             refreshActivityLogView(scrollToEnd: false)
@@ -2700,8 +2803,15 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 guard self.sessionDetailLoadGeneration == generation else { return }
                 guard self.sessionStatusTableView.selectedRow >= 0, self.sessionStatusTableView.selectedRow < self.sessionSnapshots.count else { return }
                 guard self.sessionSnapshots[self.sessionStatusTableView.selectedRow].threadID == threadID else { return }
-                self.sessionDetailView.string = detailText
-                self.sessionDetailView.scrollToBeginningOfDocument(nil)
+                let shouldResetForDetailText = self.lastSessionDetailThreadID != threadID || self.lastSessionDetailText != detailText
+                if self.sessionDetailView.string != detailText {
+                    self.sessionDetailView.string = detailText
+                }
+                if shouldResetForDetailText {
+                    self.sessionDetailView.scrollToBeginningOfDocument(nil)
+                }
+                self.lastSessionDetailThreadID = threadID
+                self.lastSessionDetailText = detailText
             }
         }
     }
@@ -2862,6 +2972,25 @@ conn.close()
         return (false, detail)
     }
 
+    private func sessionFamilyPlan(threadID: String) -> [String: String]? {
+        let result = runStandardHelper(arguments: ["thread-family-plan", "-t", threadID])
+        guard result.status == 0 else { return nil }
+        return parseStructuredHelperFields(result.stdout)
+    }
+
+    private func deleteSessionsRecursively(threadIDs: [String]) -> (success: Bool, detail: String) {
+        var deletedIDs: [String] = []
+        for threadID in threadIDs {
+            let result = deleteSessionPermanently(threadID: threadID)
+            if !result.success {
+                let prefix = deletedIDs.isEmpty ? "" : "已删除: \(deletedIDs.joined(separator: ",")) | "
+                return (false, prefix + result.detail)
+            }
+            deletedIDs.append(threadID)
+        }
+        return (true, deletedIDs.joined(separator: ","))
+    }
+
     private func selectSessionRow(threadID: String) {
         guard let row = sessionSnapshots.firstIndex(where: { $0.threadID == threadID }) else { return }
         sessionStatusTableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
@@ -3015,7 +3144,7 @@ conn.close()
         contentSplitRatio = min(max(currentTopHeight / availableHeight, 0.18), 0.88)
     }
 
-    private func makePanel(title: String, metaLabel: NSTextField?, contentView: NSView, headerAccessoryView: NSView? = nil) -> NSView {
+    private func makePanel(title: String, metaLabel: NSTextField?, contentView: NSView, headerAccessoryView: NSView? = nil, reusePanelView: NSView? = nil) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
 
@@ -3048,7 +3177,7 @@ conn.close()
         contentView.setContentHuggingPriority(.defaultLow, for: .vertical)
         contentView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
-        let panelView = NSView()
+        let panelView = reusePanelView ?? NSView()
         panelView.translatesAutoresizingMaskIntoConstraints = false
         panelView.addSubview(headerStack)
         panelView.addSubview(contentView)
@@ -3346,8 +3475,7 @@ conn.close()
     private func installTableSelectionOutsideMonitor() {
         removeTableSelectionOutsideMonitor()
         tableSelectionOutsideLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
-            self?.handleTableSelectionMouseDown(event)
-            return event
+            self?.handleTableSelectionMouseDown(event) ?? event
         }
     }
 
@@ -3368,12 +3496,14 @@ conn.close()
         views.contains { viewContainsWindowPoint($0, windowPoint: windowPoint) }
     }
 
-    private func handleTableSelectionMouseDown(_ event: NSEvent) {
-        guard let window = view.window, event.window == window else { return }
+    private func handleTableSelectionMouseDown(_ event: NSEvent) -> NSEvent? {
+        guard let window = view.window, event.window == window else { return event }
 
         let windowPoint = event.locationInWindow
         let activeScrollView = activeLoopsTableView.enclosingScrollView
         let sessionScrollView = sessionStatusTableView.enclosingScrollView
+        let selectedLoopTargetBeforeClick = selectedLoopTarget()
+        let selectedSessionThreadIDBeforeClick = selectedSessionThreadID()
         let isInActiveLoopActionArea = anyViewContainsWindowPoint(
             [stopButton, resumeLoopButton, deleteLoopButton],
             windowPoint: windowPoint
@@ -3382,15 +3512,23 @@ conn.close()
             [saveRenameButton, archiveSessionButton, restoreSessionButton, deleteSessionButton, migrateSessionProviderButton, migrateAllSessionsProviderButton, exportSessionLogButton],
             windowPoint: windowPoint
         )
-        let isInActiveLoopsArea = viewContainsWindowPoint(activeScrollView, windowPoint: windowPoint) || viewContainsWindowPoint(activeLoopsTableView.headerView, windowPoint: windowPoint)
-        let isInSessionStatusArea = viewContainsWindowPoint(sessionScrollView, windowPoint: windowPoint) || viewContainsWindowPoint(sessionStatusTableView.headerView, windowPoint: windowPoint)
+        let pointInActiveTable = activeLoopsTableView.convert(windowPoint, from: nil)
+        let pointInSessionTable = sessionStatusTableView.convert(windowPoint, from: nil)
+        let isInActiveTableBody = activeLoopsTableView.bounds.contains(pointInActiveTable)
+        let isInSessionTableBody = sessionStatusTableView.bounds.contains(pointInSessionTable)
+        let isInActiveTableEmptyArea = isInActiveTableBody && activeLoopsTableView.row(at: pointInActiveTable) < 0
+        let isInSessionTableEmptyArea = isInSessionTableBody && sessionStatusTableView.row(at: pointInSessionTable) < 0
+        let isInActiveHeader = viewContainsWindowPoint(activeLoopsTableView.headerView, windowPoint: windowPoint)
+        let isInSessionHeader = viewContainsWindowPoint(sessionStatusTableView.headerView, windowPoint: windowPoint)
+        let isInActiveLoopsArea = anyViewContainsWindowPoint([activeLoopsPanelView, activeScrollView, activeLoopsTableView.headerView].compactMap { $0 }, windowPoint: windowPoint)
+        let isInSessionStatusArea = anyViewContainsWindowPoint([sessionStatusPanelView, sessionScrollView, sessionStatusTableView.headerView].compactMap { $0 }, windowPoint: windowPoint)
 
         if isInActiveLoopActionArea {
             if sessionStatusTableView.selectedRow >= 0 {
                 sessionStatusTableView.deselectAll(nil)
                 updateSessionDetailView()
             }
-            return
+            return event
         }
 
         if isInSessionActionArea {
@@ -3402,7 +3540,7 @@ conn.close()
                 updateLoopActionButtons()
                 refreshTableWrapping(activeLoopsTableView)
             }
-            return
+            return event
         }
 
         if isInActiveLoopsArea {
@@ -3410,16 +3548,14 @@ conn.close()
                 sessionStatusTableView.deselectAll(nil)
                 updateSessionDetailView()
             }
-            let pointInActiveTable = activeLoopsTableView.convert(windowPoint, from: nil)
-            if !activeLoopsTableView.bounds.contains(pointInActiveTable) || activeLoopsTableView.row(at: pointInActiveTable) < 0 {
-                preferredLoopSelectionTarget = nil
-                isProgrammaticLoopSelectionChange = true
-                activeLoopsTableView.deselectAll(nil)
-                isProgrammaticLoopSelectionChange = false
-                updateLoopActionButtons()
-                refreshTableWrapping(activeLoopsTableView)
+            if isInActiveHeader || isInActiveTableEmptyArea {
+                if let selectedLoopTargetBeforeClick {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.restoreLoopSelection(preferredTarget: selectedLoopTargetBeforeClick)
+                    }
+                }
             }
-            return
+            return event
         }
 
         if isInSessionStatusArea {
@@ -3431,13 +3567,14 @@ conn.close()
                 updateLoopActionButtons()
                 refreshTableWrapping(activeLoopsTableView)
             }
-            let pointInSessionTable = sessionStatusTableView.convert(windowPoint, from: nil)
-            if !sessionStatusTableView.bounds.contains(pointInSessionTable) || sessionStatusTableView.row(at: pointInSessionTable) < 0 {
-                sessionStatusTableView.deselectAll(nil)
-                updateSessionDetailView()
-                refreshTableWrapping(sessionStatusTableView)
+            if isInSessionHeader || isInSessionTableEmptyArea {
+                if let selectedSessionThreadIDBeforeClick {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.restoreSessionSelection(preferredThreadID: selectedSessionThreadIDBeforeClick)
+                    }
+                }
             }
-            return
+            return event
         }
 
         var didChangeSelection = false
@@ -3459,6 +3596,7 @@ conn.close()
         if didChangeSelection {
             view.window?.makeFirstResponder(nil)
         }
+        return event
     }
 
     private func isHistoryDropdownShown() -> Bool {
@@ -5428,7 +5566,16 @@ conn.close()
         }
 
         let session = sessionSnapshots[selectedRow]
+        let familyPlan = sessionFamilyPlan(threadID: session.threadID)
         let matchingLoopTargets = loopTargetsAffectingSession(session)
+        let parentThreadID = familyPlan?["parent_thread_id"] ?? "-"
+        let directChildCount = Int(familyPlan?["direct_child_count"] ?? "0") ?? 0
+        let descendantIDs = (familyPlan?["descendant_ids"] ?? "")
+            .split(separator: ",")
+            .map { String($0) }
+            .filter { !$0.isEmpty }
+        let descendantCount = Int(familyPlan?["descendant_count"] ?? "\(descendantIDs.count)") ?? descendantIDs.count
+
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "彻底删除这个 Session？"
@@ -5449,6 +5596,24 @@ conn.close()
         Name: \(sessionActualName(session).isEmpty ? "-" : sessionActualName(session))
         当前路径: \(session.rolloutPath.isEmpty ? "-" : session.rolloutPath)
         """
+        if parentThreadID != "-" {
+            informativeText += """
+
+
+            提示：这条 session 有父 agent：
+            \(parentThreadID)
+            默认不会删除父 agent。
+            """
+        }
+        if directChildCount > 0 || descendantCount > 0 {
+            informativeText += """
+
+
+            这条 session 下还有子 agent 会话。
+            直接子会话数: \(directChildCount)
+            递归子会话总数: \(descendantCount)
+            """
+        }
         if !matchingLoopTargets.isEmpty {
             informativeText += """
 
@@ -5459,12 +5624,31 @@ conn.close()
             """
         }
         alert.informativeText = informativeText
-        alert.addButton(withTitle: "删除")
-        alert.addButton(withTitle: "取消")
+        if descendantCount > 0 {
+            alert.addButton(withTitle: "删除当前和子会话")
+            alert.addButton(withTitle: "只删当前")
+            alert.addButton(withTitle: "取消")
+        } else {
+            alert.addButton(withTitle: "删除")
+            alert.addButton(withTitle: "取消")
+        }
         alert.buttons.first?.hasDestructiveAction = true
 
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            return
+        let includeDescendants: Bool
+        let response = alert.runModal()
+        if descendantCount > 0 {
+            if response == .alertFirstButtonReturn {
+                includeDescendants = true
+            } else if response == .alertSecondButtonReturn {
+                includeDescendants = false
+            } else {
+                return
+            }
+        } else {
+            guard response == .alertFirstButtonReturn else {
+                return
+            }
+            includeDescendants = false
         }
 
         saveRenameButton.isEnabled = false
@@ -5475,17 +5659,20 @@ conn.close()
         migrateAllSessionsProviderButton.isEnabled = false
         renameField.isEnabled = false
         setStatus("彻底删除中…", key: "action")
-        appendOutput("执行 彻底删除: thread_id=\(session.threadID)")
+        let targetThreadIDs = includeDescendants ? ([session.threadID] + descendantIDs) : [session.threadID]
+        appendOutput("执行 彻底删除: thread_ids=\(targetThreadIDs.joined(separator: ","))")
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = self.deleteSessionPermanently(threadID: session.threadID)
+            let orderedThreadIDs = includeDescendants ? (descendantIDs.reversed() + [session.threadID]) : [session.threadID]
+            let result = self.deleteSessionsRecursively(threadIDs: orderedThreadIDs)
 
             DispatchQueue.main.async {
                 if result.success {
-                    self.allSessionSnapshots.removeAll { $0.threadID == session.threadID }
-                    self.sessionSnapshots.removeAll { $0.threadID == session.threadID }
+                    let deletedSet = Set(orderedThreadIDs)
+                    self.allSessionSnapshots.removeAll { deletedSet.contains($0.threadID) }
+                    self.sessionSnapshots.removeAll { deletedSet.contains($0.threadID) }
                     if self.sessionScanTotal > 0 {
-                        self.sessionScanTotal = max(0, self.sessionScanTotal - 1)
+                        self.sessionScanTotal = max(0, self.sessionScanTotal - orderedThreadIDs.count)
                     }
                     self.invalidateSessionSearch()
                     self.renderSessionSnapshots(
@@ -5494,7 +5681,7 @@ conn.close()
                         isComplete: true
                     )
                     self.setStatus("彻底删除完成", key: "action")
-                    self.appendOutput(result.detail.isEmpty ? "已彻底删除 session: \(session.threadID)" : result.detail)
+                    self.appendOutput(result.detail.isEmpty ? "已彻底删除 session: \(orderedThreadIDs.joined(separator: ","))" : "已彻底删除 session: \(result.detail)")
                     self.refreshLoopsSnapshot()
                 } else {
                     if let fields = self.parseStructuredHelperFields(result.detail) {
@@ -5540,6 +5727,25 @@ conn.close()
         let familyMigrateNeeded = Int(plan["family_migrate_needed_count"] ?? "0") ?? 0
         let currentProvider = plan["current_provider"] ?? session.provider
         let directChildCount = Int(plan["direct_child_count"] ?? "0") ?? 0
+        let currentProviderDisplay = currentProvider.isEmpty ? "-" : currentProvider
+
+        if currentProvider == targetProvider && familyMigrateNeeded == 0 {
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = "无需迁移"
+            alert.informativeText = """
+            当前选中会话及其相关会话的 Provider 已经是目标值。
+
+            当前 Provider: \(currentProviderDisplay)
+            目标 Provider: \(targetProvider)
+            相关会话数: \(familyCount)
+            """
+            alert.addButton(withTitle: "确定")
+            alert.runModal()
+            appendOutput("迁移已取消：当前会话及相关会话的 provider 已经是 \(targetProvider)。")
+            setStatus("无需迁移", key: "action")
+            return
+        }
 
         var includeFamily = false
         if isSubagent || directChildCount > 0 {
@@ -5548,7 +5754,7 @@ conn.close()
             alert.messageText = "迁移相关 Session 到当前 Provider？"
             alert.informativeText = """
             当前 Provider: \(targetProvider)
-            选中 Session 当前 Provider: \(currentProvider.isEmpty ? "-" : currentProvider)
+            选中 Session 当前 Provider: \(currentProviderDisplay)
             Session ID: \(session.threadID)
             Type: \(sessionTypeLabel(session))
 
@@ -5573,7 +5779,7 @@ conn.close()
             alert.messageText = "迁移当前 Session 到当前 Provider？"
             alert.informativeText = """
             当前 Provider: \(targetProvider)
-            选中 Session 当前 Provider: \(currentProvider.isEmpty ? "-" : currentProvider)
+            选中 Session 当前 Provider: \(currentProviderDisplay)
             Session ID: \(session.threadID)
             Type: \(sessionTypeLabel(session))
             """
@@ -5622,6 +5828,24 @@ conn.close()
 
         let migrateNeeded = Int(plan["migrate_needed_count"] ?? "0") ?? 0
         let totalThreads = Int(plan["total_threads"] ?? "0") ?? 0
+
+        if migrateNeeded == 0 {
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = "无需迁移"
+            alert.informativeText = """
+            本地所有会话的 Provider 已经是目标值。
+
+            目标 Provider: \(targetProvider)
+            会话总数: \(totalThreads)
+            """
+            alert.addButton(withTitle: "确定")
+            alert.runModal()
+            appendOutput("全部迁移已取消：所有 session 的 provider 已经是 \(targetProvider)。")
+            setStatus("无需迁移", key: "action")
+            return
+        }
+
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "将所有 Session 迁移到当前 Provider？"
@@ -5778,18 +6002,22 @@ conn.close()
 
     func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
         if tableView == activeLoopsTableView {
+            let preservedTarget = selectedLoopTarget()
             applyLoopSorting()
             activeLoopsTableView.reloadData()
             adjustTableColumnWidths(activeLoopsTableView)
             didAutoSizeActiveLoopsColumns = true
+            restoreLoopSelection(preferredTarget: preservedTarget)
             refreshTableWrapping(activeLoopsTableView)
             return
         }
         if tableView == sessionStatusTableView {
+            let preservedThreadID = selectedSessionThreadID()
             applySessionSorting()
             sessionStatusTableView.reloadData()
             adjustTableColumnWidths(sessionStatusTableView)
             didAutoSizeSessionColumns = true
+            restoreSessionSelection(preferredThreadID: preservedThreadID)
             refreshTableWrapping(sessionStatusTableView)
             updateSessionDetailView()
         }
@@ -5798,6 +6026,7 @@ conn.close()
     func tableViewColumnDidResize(_ notification: Notification) {
         guard let tableView = notification.object as? NSTableView else { return }
         if tableView == activeLoopsTableView || tableView == sessionStatusTableView {
+            synchronizeScrollableTableWidth(tableView)
             refreshTableWrapping(tableView)
         }
     }

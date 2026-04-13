@@ -56,6 +56,7 @@ Usage:
   codex_terminal_sender.sh thread-archive  -t THREAD_ID
   codex_terminal_sender.sh thread-unarchive -t THREAD_ID
   codex_terminal_sender.sh thread-delete -t THREAD_ID
+  codex_terminal_sender.sh thread-family-plan -t THREAD_ID
   codex_terminal_sender.sh thread-list [--archived]
   codex_terminal_sender.sh thread-provider-plan -t THREAD_ID -p PROVIDER
   codex_terminal_sender.sh thread-provider-plan-all -p PROVIDER
@@ -90,6 +91,8 @@ Commands:
               Restore an archived session via Codex's native app-server API
   thread-delete
               Permanently delete a session from local Codex state and remove its rollout file
+  thread-family-plan
+              Inspect one session's parent/child relationship in local state
   thread-list
               List Codex sessions via the native app-server API
   thread-provider-plan
@@ -1721,6 +1724,82 @@ print(f"family_ids: {','.join(family)}")
 PY
 }
 
+thread_family_plan() {
+  local thread_id="$1"
+  python3 - "$CODEX_STATE_DB_PATH" "$thread_id" <<'PY'
+import json
+import sqlite3
+import sys
+
+db_path, thread_id = sys.argv[1:]
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+rows = cur.execute("select id, source from threads").fetchall()
+conn.close()
+
+threads = {}
+children = {}
+for tid, source in rows:
+    parent_id = ""
+    if source:
+        try:
+            source_obj = json.loads(source)
+            parent_id = (((source_obj.get("subagent") or {}).get("thread_spawn") or {}).get("parent_thread_id") or "")
+        except Exception:
+            parent_id = ""
+    threads[tid] = {"parent_id": parent_id}
+    if parent_id:
+        children.setdefault(parent_id, []).append(tid)
+
+if thread_id not in threads:
+    print("status: failed")
+    print("reason: thread_not_found")
+    print(f"thread_id: {thread_id}")
+    raise SystemExit(1)
+
+parent_thread_id = threads[thread_id]["parent_id"] or "-"
+root_thread_id = thread_id
+visited = set()
+while threads[root_thread_id]["parent_id"] and threads[root_thread_id]["parent_id"] in threads and root_thread_id not in visited:
+    visited.add(root_thread_id)
+    root_thread_id = threads[root_thread_id]["parent_id"]
+
+family = []
+stack = [root_thread_id]
+seen = set()
+while stack:
+    current = stack.pop()
+    if current in seen or current not in threads:
+        continue
+    seen.add(current)
+    family.append(current)
+    stack.extend(reversed(children.get(current, [])))
+
+descendants = []
+stack = list(reversed(children.get(thread_id, [])))
+seen = set()
+while stack:
+    current = stack.pop()
+    if current in seen or current not in threads:
+        continue
+    seen.add(current)
+    descendants.append(current)
+    stack.extend(reversed(children.get(current, [])))
+
+print("status: success")
+print("reason: plan_ready")
+print(f"thread_id: {thread_id}")
+print(f"parent_thread_id: {parent_thread_id}")
+print(f"root_thread_id: {root_thread_id}")
+print(f"is_subagent: {'yes' if parent_thread_id != '-' else 'no'}")
+print(f"direct_child_count: {len(children.get(thread_id, []))}")
+print(f"descendant_count: {len(descendants)}")
+print(f"descendant_ids: {','.join(descendants)}")
+print(f"family_count: {len(family)}")
+print(f"family_ids: {','.join(family)}")
+PY
+}
+
 thread_provider_plan_all() {
   local target_provider="$1"
   python3 - "$CODEX_STATE_DB_PATH" "$target_provider" <<'PY'
@@ -3041,6 +3120,21 @@ parse_thread_delete_args() {
   [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
 }
 
+parse_thread_family_plan_args() {
+  THREAD_ID=""
+  while getopts ":t:h" opt; do
+    case "$opt" in
+      t) THREAD_ID="$OPTARG" ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$THREAD_ID" ]] || die "thread-family-plan requires -t THREAD_ID"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
 parse_thread_list_args() {
   THREAD_LIST_ARCHIVED=0
   while [[ $# -gt 0 ]]; do
@@ -3235,6 +3329,10 @@ main() {
     thread-delete)
       parse_thread_delete_args "$@"
       thread_delete "$THREAD_ID"
+      ;;
+    thread-family-plan)
+      parse_thread_family_plan_args "$@"
+      thread_family_plan "$THREAD_ID"
       ;;
     thread-list)
       parse_thread_list_args "$@"

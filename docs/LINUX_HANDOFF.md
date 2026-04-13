@@ -39,6 +39,7 @@
 ### 文档
 
 - [README.md](/Users/create/codex-terminal-app/README.md)
+- [CHANGELOG.md](/Users/create/codex-terminal-app/CHANGELOG.md)
 - [docs/ARCHITECTURE.md](/Users/create/codex-terminal-app/docs/ARCHITECTURE.md)
 - [docs/LINUX_PORTING.md](/Users/create/codex-terminal-app/docs/LINUX_PORTING.md)
 - [docs/LINUX_EXECUTION_PLAN.md](/Users/create/codex-terminal-app/docs/LINUX_EXECUTION_PLAN.md)

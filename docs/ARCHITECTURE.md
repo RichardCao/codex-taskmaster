@@ -18,6 +18,35 @@
   - `agent_role`
   - 基于 `source` 推导出的 `Type`
 
+## 当前代码审查结论
+
+从“前后端分离”这个问题本身看，这个项目并不是典型的 Web 前后端，而更接近：
+
+- `UI`
+- `Core`
+- `Queue / Orchestration`
+- `Platform Adapter`
+
+按这个标准看，当前分层属于“方向对了，但还没拆完”。
+
+已经成型的部分：
+
+- [TaskMasterCore.swift](/Users/create/codex-terminal-app/TaskMasterCore.swift) 已经承接共享模型、解析和一部分状态语义
+- [TaskMasterSendRuntime.swift](/Users/create/codex-terminal-app/TaskMasterSendRuntime.swift) 已经把发送请求排队、平台发送接口和发送后验证主路径抽出了 UI
+- [codex_terminal_sender.sh](/Users/create/codex-terminal-app/codex_terminal_sender.sh) 已经承担 helper CLI、loop daemon 与 session 本地操作
+
+还不够好的部分：
+
+- [CodexTaskmasterApp.swift](/Users/create/codex-terminal-app/CodexTaskmasterApp.swift) 仍超过 6000 行，承担了过多非 UI 语义
+- UI 层仍直接调用 helper 并解释不少业务结果，说明“服务层”边界还不够稳定
+- helper 脚本里同时包含共享语义、平台细节、状态文件管理和本地变更逻辑，长期会阻碍 Linux / Windows 扩展
+
+结论：
+
+- 目前的分层已经足够支撑继续开发和 Linux 第一阶段移植
+- 但如果目标是“平台无关核心 + 多平台适配”，现状还不能算彻底分离
+- 下一步最值得继续抽的是 Session 读取、Session 变更、Loop 状态机、Reason/Status 映射这四块
+
 ## 推荐分层
 
 建议稳定成下面 4 层。
@@ -144,6 +173,61 @@ UI 职责：
 - UI 不直接承载平台自动化细节
 - Linux 如果先做 CLI，可以暂时没有 UI
 - macOS `.app` 打包链路不应直接迁移到 Linux
+
+## 下一轮最值得继续拆的点
+
+建议优先按下面顺序继续收口。
+
+### 1. SessionStore / SessionService
+
+把这些从 UI 文件继续抽走：
+
+- `runStandardHelper`
+- `thread-list` / `probe-all` 结果拉取
+- provider 迁移、归档、恢复、删除调用包装
+- family plan / provider plan 等 helper 输出解析
+
+目标：
+
+- UI 只拿结构化结果
+- helper 调用细节不再散落在视图控制逻辑里
+
+### 2. LoopService
+
+把这些从 UI 文件继续抽走：
+
+- `start` / `stop` / `resume` / `delete`
+- loop 冲突检查
+- loop 状态刷新和结构化日志解释
+
+目标：
+
+- `Active Loops` 只负责展示和触发动作
+- loop 语义和互斥约束统一收口
+
+### 3. Shared Reason Map
+
+把这些继续统一：
+
+- status 到中文标签的映射
+- terminal state 到中文标签的映射
+- send reason 到 UI 告警/日志文案的映射
+
+目标：
+
+- 避免 UI、helper、未来 Linux 端各自维护一套解释
+
+### 4. Platform 子目录
+
+建议逐步把平台实现移动成更清楚的目录结构：
+
+```text
+platform/
+  macos/
+  linux/
+```
+
+哪怕第一步只是移动文件，不改语言，也有利于后续移植时减少“平台代码和共享代码混住”的问题。
 
 ## 对 Linux 迁移最重要的边界
 
