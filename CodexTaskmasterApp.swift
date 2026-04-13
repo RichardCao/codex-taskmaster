@@ -12,6 +12,11 @@ private let codexSessionIndexPath = "\(userHomeDirectory)/.codex/session_index.j
 private let pendingRequestDirectoryPath = "\(stateDirectoryPath)/requests/pending"
 private let processingRequestDirectoryPath = "\(stateDirectoryPath)/requests/processing"
 private let resultRequestDirectoryPath = "\(stateDirectoryPath)/requests/results"
+private let loopsDirectoryPath = "\(stateDirectoryPath)/loops"
+private let runtimeDirectoryPath = "\(stateDirectoryPath)/runtime"
+private let loopLogDirectoryPath = "\(runtimeDirectoryPath)/loop-logs"
+private let userLoopStateDirectoryPath = "\(runtimeDirectoryPath)/user-loop-state"
+private let legacyLoopStateDirectoryPath = "\(runtimeDirectoryPath)/loop-state"
 private let sessionProbeInitialBatchSize = 4
 private let sessionProbeBatchSize = 12
 private let sessionPromptSearchEntryLimit = 12
@@ -4492,6 +4497,106 @@ conn.close()
         alert.runModal()
     }
 
+    private func showRuntimePermissionAlert(actionName: String, detail: String) {
+        let normalizedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "\(actionName)前发现本地权限问题"
+        alert.informativeText = """
+        Codex Taskmaster 无法正常读写本地运行目录，因此这次\(actionName)不会继续执行。
+
+        建议检查这些目录是否属于当前用户并且可写：
+        - `\(runtimeDirectoryPath)`
+        - `\(userLoopStateDirectoryPath)`
+        - `\(legacyLoopStateDirectoryPath)`
+
+        如果之前曾用 `sudo` 或其他用户启动过相关脚本，最常见的修复方式是把 `~/.codex-terminal-sender` 重新改回当前用户属主。
+
+        详细信息：
+        \(normalizedDetail)
+        """
+        alert.addButton(withTitle: "确定")
+        alert.runModal()
+    }
+
+    private func ensureWritableDirectory(at path: String) -> String? {
+        let fileManager = FileManager.default
+        var isDirectory: ObjCBool = false
+
+        if fileManager.fileExists(atPath: path, isDirectory: &isDirectory) {
+            guard isDirectory.boolValue else {
+                return "\(path) 已存在，但它不是目录。"
+            }
+            guard fileManager.isWritableFile(atPath: path) else {
+                return "\(path) 当前不可写。请检查属主或权限设置。"
+            }
+            return nil
+        }
+
+        do {
+            try fileManager.createDirectory(atPath: path, withIntermediateDirectories: true)
+            return nil
+        } catch {
+            return "无法创建目录 \(path)：\(error.localizedDescription)"
+        }
+    }
+
+    private func runtimePermissionIssueForAction(requiresLoopState: Bool) -> String? {
+        var paths = [
+            stateDirectoryPath,
+            "\(stateDirectoryPath)/requests",
+            pendingRequestDirectoryPath,
+            processingRequestDirectoryPath,
+            resultRequestDirectoryPath,
+            runtimeDirectoryPath
+        ]
+
+        if requiresLoopState {
+            paths.append(contentsOf: [
+                loopsDirectoryPath,
+                loopLogDirectoryPath,
+                userLoopStateDirectoryPath
+            ])
+        }
+
+        for path in paths {
+            if let issue = ensureWritableDirectory(at: path) {
+                return issue
+            }
+        }
+
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: legacyLoopStateDirectoryPath, isDirectory: &isDirectory),
+           isDirectory.boolValue,
+           !FileManager.default.isWritableFile(atPath: legacyLoopStateDirectoryPath) {
+            return "\(legacyLoopStateDirectoryPath) 当前不可写。这个旧目录可能会让旧 loop daemon 或旧状态文件持续报权限错误。"
+        }
+
+        return nil
+    }
+
+    private func preflightRuntimePermissions(actionName: String, requiresLoopState: Bool) -> Bool {
+        guard let issue = runtimePermissionIssueForAction(requiresLoopState: requiresLoopState) else {
+            return true
+        }
+
+        appendOutput("已阻止\(actionName)：\(issue)")
+        setStatus("\(actionName)失败", key: "action", color: .systemRed)
+        showRuntimePermissionAlert(actionName: actionName, detail: issue)
+        NSSound.beep()
+        return false
+    }
+
+    private func helperPermissionIssueDetail(_ detail: String) -> String? {
+        let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let lowercased = trimmed.lowercased()
+        guard lowercased.contains("permission denied") || lowercased.contains("operation not permitted") else {
+            return nil
+        }
+        return trimmed
+    }
+
     @discardableResult
     private func saveStoppedLoopEntry(target: String, interval: String, message: String, forceSend: Bool, reason: String) -> Bool {
         if loopSnapshots.contains(where: { $0.target == target && $0.stopped != "yes" }) {
@@ -4655,11 +4760,16 @@ conn.close()
                     }
                     self.setStatus(accepted ? "\(actionName)已受理" : "\(actionName)完成", key: "action")
                 } else {
+                    let combinedErrorDetail = [result.stderr, result.stdout]
+                        .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                        .joined(separator: "\n")
                     if let structuredSendResult,
                        structuredSendResult["reason"] == "ambiguous_target" {
                         let detail = structuredSendResult["detail"] ?? result.stderr
                         let target = structuredSendResult["target"] ?? self.currentTarget()
                         self.showAmbiguousTargetAlert(target: target, detail: detail, actionName: actionName, throttled: false)
+                    } else if let permissionIssue = self.helperPermissionIssueDetail(combinedErrorDetail) {
+                        self.showRuntimePermissionAlert(actionName: actionName, detail: permissionIssue)
                     }
                     self.setStatus("\(actionName)失败", key: "action", color: .systemRed)
                 }
@@ -5103,6 +5213,9 @@ conn.close()
             }
             return
         }
+        guard preflightRuntimePermissions(actionName: "发送一次", requiresLoopState: false) else {
+            return
+        }
         guard validateUniqueTarget(target, actionName: "发送") else {
             NSSound.beep()
             return
@@ -5128,6 +5241,9 @@ conn.close()
                 setStatus("请填写输出内容")
                 NSSound.beep()
             }
+            return
+        }
+        guard preflightRuntimePermissions(actionName: "开始循环", requiresLoopState: true) else {
             return
         }
         guard validateUniqueTarget(target, actionName: "开始循环") else {
@@ -5246,6 +5362,9 @@ conn.close()
             appendOutput("当前选中的循环既不是暂停状态，也不是停止状态。")
             setStatus("当前循环不可恢复", key: "action")
             NSSound.beep()
+            return
+        }
+        guard preflightRuntimePermissions(actionName: "恢复当前", requiresLoopState: true) else {
             return
         }
 

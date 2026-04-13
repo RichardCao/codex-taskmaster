@@ -77,7 +77,11 @@ create table threads (
   cwd text not null,
   title text not null,
   first_user_message text not null default '',
-  archived integer not null default 0
+  archived integer not null default 0,
+  model_provider text not null default '',
+  source text not null default '',
+  agent_nickname text not null default '',
+  agent_role text not null default ''
 );
 create table thread_dynamic_tools (
   thread_id text not null,
@@ -109,11 +113,14 @@ create table logs (
   process_uuid text,
   estimated_bytes integer not null default 0
 );
-insert into threads(id, rollout_path, updated_at, cwd, title, first_user_message, archived) values
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '$ROLLOUT_A', 200, '/tmp/alpha-cwd', 'First prompt', 'First prompt', 0),
-  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '$ROLLOUT_B', 100, '/tmp/beta-cwd', 'Second prompt', 'Second prompt', 0),
-  ('cccccccc-cccc-cccc-cccc-cccccccccccc', '$ROLLOUT_C', 90, '/tmp/archived-cwd', 'Archived prompt', 'Archived prompt', 1),
-  ('dddddddd-dddd-dddd-dddd-dddddddddddd', '$ROLLOUT_D', 80, '/tmp/delta-cwd', 'Delete prompt', 'Delete prompt', 0);
+insert into threads(
+  id, rollout_path, updated_at, cwd, title, first_user_message, archived,
+  model_provider, source, agent_nickname, agent_role
+) values
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '$ROLLOUT_A', 200, '/tmp/alpha-cwd', 'First prompt', 'First prompt', 0, 'openai', 'cli', '', ''),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '$ROLLOUT_B', 100, '/tmp/beta-cwd', 'Second prompt', 'Second prompt', 0, 'openai', 'cli', '', ''),
+  ('cccccccc-cccc-cccc-cccc-cccccccccccc', '$ROLLOUT_C', 90, '/tmp/archived-cwd', 'Archived prompt', 'Archived prompt', 1, 'openai', 'cli', '', ''),
+  ('dddddddd-dddd-dddd-dddd-dddddddddddd', '$ROLLOUT_D', 80, '/tmp/delta-cwd', 'Delete prompt', 'Delete prompt', 0, 'openai', '{"subagent":{"thread_spawn":{"parent_thread_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}}', 'worker-d', 'worker');
 insert into thread_dynamic_tools(thread_id, position, name, description, input_schema, defer_loading) values
   ('dddddddd-dddd-dddd-dddd-dddddddddddd', 0, 'tool-a', 'desc', '{}', 0);
 insert into stage1_outputs(thread_id, source_updated_at, raw_memory, rollout_summary, generated_at) values
