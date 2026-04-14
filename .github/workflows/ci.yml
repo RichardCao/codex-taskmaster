@@ -18,7 +18,7 @@ jobs:
         run: |
           set -euo pipefail
           XCODE_DEVELOPER_DIR="$(
-            find /Applications -maxdepth 2 -type d -path '/Applications/Xcode*.app/Contents/Developer' \
+            find /Applications -maxdepth 3 -type d -path '/Applications/Xcode*.app/Contents/Developer' \
               | sort -V \
               | tail -n 1
           )"
