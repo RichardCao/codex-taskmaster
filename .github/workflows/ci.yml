@@ -48,6 +48,15 @@ jobs:
           set -euo pipefail
           SDK_PATH="${MACOS_SDK_PATH:-}"
           if [[ -z "$SDK_PATH" ]]; then
+            SDK_PATH="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+          fi
+          if [[ -n "$SDK_PATH" ]]; then
+            case "$SDK_PATH" in
+              *MacOSX15*.sdk|*MacOSX14*.sdk) ;;
+              *) SDK_PATH="" ;;
+            esac
+          fi
+          if [[ -z "$SDK_PATH" ]]; then
             for sdk_root in \
               "$(xcode-select -p 2>/dev/null)/Platforms/MacOSX.platform/Developer/SDKs" \
               /Library/Developer/CommandLineTools/SDKs
@@ -61,9 +70,6 @@ jobs:
               )"
               [[ -n "$SDK_PATH" ]] && break
             done
-          fi
-          if [[ -z "$SDK_PATH" ]]; then
-            SDK_PATH="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
           fi
           if [[ -n "$SDK_PATH" ]]; then
             echo "Using SDK: $SDK_PATH"
