@@ -255,21 +255,15 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
     }
 
     private func captureFrontmostContext(currentAppBundleID: String) -> FrontmostAppContext {
-        let frontBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? currentAppBundleID
-        if frontBundleID == currentAppBundleID {
-            let preferredContext = AppFocusTracker.shared.preferredReturnContext(
-                fallbackBundleID: currentAppBundleID,
-                maxAge: 60
-            )
-            return FrontmostAppContext(
-                bundleID: preferredContext.bundleID,
-                terminalTTY: preferredContext.terminalTTY,
-                capturedAt: preferredContext.capturedAt
-            )
-        }
-
-        let frontTerminalTTY = frontBundleID == "com.apple.Terminal" ? currentFrontTerminalTTY() : nil
-        return FrontmostAppContext(bundleID: frontBundleID, terminalTTY: frontTerminalTTY, capturedAt: Date())
+        let preferredContext = AppFocusTracker.shared.preferredReturnContext(
+            fallbackBundleID: currentAppBundleID,
+            maxAge: 60
+        )
+        return FrontmostAppContext(
+            bundleID: preferredContext.bundleID,
+            terminalTTY: preferredContext.terminalTTY,
+            capturedAt: preferredContext.capturedAt
+        )
     }
 
     private func currentFrontTerminalTTY() -> String? {

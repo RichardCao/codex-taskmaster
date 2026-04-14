@@ -644,7 +644,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let outputView = NSTextView()
     private let statusLabel = NSTextField(labelWithString: "就绪")
     private let activeLoopsMetaLabel = NSTextField(labelWithString: "暂无循环。")
-    private let sessionStatusMetaLabel = NSTextField(labelWithString: "点击“检测状态”加载 session 列表。")
+    private let activeLoopsWarningLabel = NSTextField(labelWithString: "")
+    private let sessionStatusMetaLabel = NSTextField(labelWithString: "点击“检测会话”加载 session 列表。")
     private let activityLogMetaLabel = NSTextField(labelWithString: "显示 0 / 0")
     private var refreshTimer: Timer?
     private var requestTimer: Timer?
@@ -735,11 +736,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var didAutoSizeSessionColumns = false
     private var isRefreshingLoopsSnapshot = false
     private var pendingLoopSnapshotRefresh = false
+    private var sessionStatusRefreshTimer: Timer?
+    private let sessionStatusRefreshLock = NSLock()
+    private var sessionStatusRefreshInFlightThreadIDs: Set<String> = []
+    private var sessionStatusRefreshNextAllowedAt: [String: Date] = [:]
+    private let sessionStatusConnectedRefreshInterval: TimeInterval = 15
+    private let sessionStatusDisconnectedRefreshInterval: TimeInterval = 60
+    private let sessionStatusRefreshSchedulerInterval: TimeInterval = 2
+    private let sessionStatusRefreshMaxConcurrentJobs = 4
 
     private lazy var sendButton = makeButton(title: "发送一次", action: #selector(sendOnce))
     private lazy var startButton = makeButton(title: "开始循环", action: #selector(startLoop))
     private lazy var refreshLoopsButton = makeButton(title: "刷新循环", action: #selector(refreshLoopsAction))
-    private lazy var detectStatusButton = makeButton(title: "检测状态", action: #selector(detectStatuses))
+    private lazy var detectStatusButton = makeButton(title: "检测会话", action: #selector(detectStatuses))
+    private lazy var refreshSessionStatusButton = makeButton(title: "刷新状态", action: #selector(refreshSessionStatusesAction))
     private lazy var stopButton = makeButton(title: "停止当前", action: #selector(stopLoop))
     private lazy var resumeLoopButton = makeButton(title: "恢复当前", action: #selector(resumeSelectedLoop))
     private lazy var deleteLoopButton = makeButton(title: "删除当前", action: #selector(deleteSelectedLoop))
@@ -839,6 +849,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         refreshLoopsSnapshot()
         startAutoRefresh()
         startRequestPump()
+        startSessionStatusRefreshTimer()
     }
 
     override func viewDidLayout() {
@@ -857,6 +868,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     deinit {
         refreshTimer?.invalidate()
         requestTimer?.invalidate()
+        sessionStatusRefreshTimer?.invalidate()
         removeHistoryKeyMonitor()
         removeHistoryOutsideMonitors()
         removeTableSelectionOutsideMonitor()
@@ -913,7 +925,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         formGrid.column(at: 0).width = 120
         targetInputRow.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
 
-        let buttonRow = NSStackView(views: [sendButton, startButton, refreshLoopsButton, detectStatusButton, stopButton, resumeLoopButton, deleteLoopButton, stopAllButton])
+        let buttonRow = NSStackView(views: [sendButton, startButton, refreshLoopsButton, detectStatusButton, refreshSessionStatusButton, stopButton, resumeLoopButton, deleteLoopButton, stopAllButton])
         buttonRow.orientation = .horizontal
         buttonRow.spacing = 8
         buttonRow.alignment = .centerY
@@ -1055,7 +1067,27 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         outputScrollView.documentView = outputView
         outputScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 100).isActive = true
 
-        let activeLoopsPanel = makePanel(title: "循环列表", metaLabel: activeLoopsMetaLabel, contentView: activeLoopsScrollView, reusePanelView: activeLoopsPanelView)
+        activeLoopsWarningLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        activeLoopsWarningLabel.textColor = .systemOrange
+        activeLoopsWarningLabel.lineBreakMode = .byWordWrapping
+        activeLoopsWarningLabel.maximumNumberOfLines = 0
+        activeLoopsWarningLabel.isHidden = true
+        activeLoopsWarningLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let activeLoopsContentStack = NSStackView(views: [activeLoopsWarningLabel, activeLoopsScrollView])
+        activeLoopsContentStack.orientation = .vertical
+        activeLoopsContentStack.spacing = 6
+        activeLoopsContentStack.alignment = .leading
+        activeLoopsContentStack.distribution = .fill
+        activeLoopsContentStack.translatesAutoresizingMaskIntoConstraints = false
+        activeLoopsWarningLabel.widthAnchor.constraint(equalTo: activeLoopsContentStack.widthAnchor).isActive = true
+        activeLoopsScrollView.widthAnchor.constraint(equalTo: activeLoopsContentStack.widthAnchor).isActive = true
+        activeLoopsWarningLabel.setContentHuggingPriority(.required, for: .vertical)
+        activeLoopsWarningLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+        activeLoopsScrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
+        activeLoopsScrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+
+        let activeLoopsPanel = makePanel(title: "循环列表", metaLabel: activeLoopsMetaLabel, contentView: activeLoopsContentStack, reusePanelView: activeLoopsPanelView)
         let sessionStatusTopStack = NSStackView(views: [sessionScopeRow, sessionStatusScrollView])
         sessionStatusTopStack.orientation = .vertical
         sessionStatusTopStack.spacing = 8
@@ -1706,9 +1738,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func stringValueForTableCell(tableView: NSTableView, identifier: String, row: Int) -> String {
         if tableView == activeLoopsTableView {
-            guard row < loopSnapshots.count else {
-                return identifier == activeLoopsTableView.tableColumns.first?.identifier.rawValue ? (loopWarnings.first ?? "Warning") : ""
-            }
+            guard row < loopSnapshots.count else { return "" }
             return stringValueForLoopColumn(identifier, loop: loopSnapshots[row])
         }
 
@@ -1863,9 +1893,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func sessionEmptyStateText() -> String {
         switch displayedSessionListMode {
         case .active:
-            return "视图: 普通 | 未加载 session 状态。点击“检测状态”开始扫描。"
+            return "视图: 普通 | 未加载 session 状态。点击“检测会话”开始扫描。"
         case .archived:
-            return "视图: 已归档 | 未加载归档 session。点击“检测状态”读取列表。"
+            return "视图: 已归档 | 未加载归档 session。点击“检测会话”读取列表。"
         }
     }
 
@@ -2131,6 +2161,305 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
         parts.append("刷新: \(Self.timestampFormatter.string(from: Date()))")
         sessionStatusMetaLabel.stringValue = parts.joined(separator: " | ")
+    }
+
+    private func sessionStatusAutoRefreshInterval(for snapshot: SessionSnapshot) -> TimeInterval {
+        localizedSessionStatusLabel(snapshot) == "断联"
+            ? sessionStatusDisconnectedRefreshInterval
+            : sessionStatusConnectedRefreshInterval
+    }
+
+    private func loadedActiveSessionSnapshotsForStatusRefresh() -> [SessionSnapshot] {
+        guard displayedSessionListMode == .active else { return [] }
+        return allSessionSnapshots.filter { !$0.isArchived }
+    }
+
+    private func pruneSessionStatusRefreshState(to snapshots: [SessionSnapshot]) {
+        let activeThreadIDs = Set(snapshots.filter { !$0.isArchived }.map(\.threadID))
+        sessionStatusRefreshLock.lock()
+        sessionStatusRefreshInFlightThreadIDs = sessionStatusRefreshInFlightThreadIDs.filter { activeThreadIDs.contains($0) }
+        sessionStatusRefreshNextAllowedAt = sessionStatusRefreshNextAllowedAt.filter { activeThreadIDs.contains($0.key) }
+        sessionStatusRefreshLock.unlock()
+    }
+
+    private func clearSessionStatusRefreshState() {
+        sessionStatusRefreshLock.lock()
+        sessionStatusRefreshInFlightThreadIDs.removeAll()
+        sessionStatusRefreshNextAllowedAt.removeAll()
+        sessionStatusRefreshLock.unlock()
+    }
+
+    private func scheduleNextSessionStatusRefresh(for snapshot: SessionSnapshot, from completionDate: Date) {
+        let nextAllowed = completionDate.addingTimeInterval(sessionStatusAutoRefreshInterval(for: snapshot))
+        sessionStatusRefreshLock.lock()
+        sessionStatusRefreshNextAllowedAt[snapshot.threadID] = nextAllowed
+        sessionStatusRefreshInFlightThreadIDs.remove(snapshot.threadID)
+        sessionStatusRefreshLock.unlock()
+    }
+
+    private func claimSessionStatusRefreshSnapshots(_ snapshots: [SessionSnapshot], requireDue: Bool, referenceDate: Date) -> [SessionSnapshot] {
+        guard !snapshots.isEmpty else { return [] }
+        sessionStatusRefreshLock.lock()
+        defer { sessionStatusRefreshLock.unlock() }
+
+        var claimed: [SessionSnapshot] = []
+        for snapshot in snapshots {
+            let threadID = snapshot.threadID
+            guard !threadID.isEmpty else { continue }
+            guard !sessionStatusRefreshInFlightThreadIDs.contains(threadID) else { continue }
+            if requireDue,
+               let nextAllowed = sessionStatusRefreshNextAllowedAt[threadID],
+               nextAllowed > referenceDate {
+                continue
+            }
+            sessionStatusRefreshInFlightThreadIDs.insert(threadID)
+            claimed.append(snapshot)
+        }
+        return claimed
+    }
+
+    private func mergedSessionSnapshotAfterStatusRefresh(previous: SessionSnapshot, refreshed: SessionSnapshot) -> SessionSnapshot {
+        SessionSnapshot(
+            name: refreshed.name.isEmpty ? previous.name : refreshed.name,
+            target: refreshed.target.isEmpty ? previous.target : refreshed.target,
+            threadID: previous.threadID,
+            provider: refreshed.provider.isEmpty ? previous.provider : refreshed.provider,
+            source: refreshed.source.isEmpty ? previous.source : refreshed.source,
+            parentThreadID: refreshed.parentThreadID.isEmpty ? previous.parentThreadID : refreshed.parentThreadID,
+            agentNickname: refreshed.agentNickname.isEmpty ? previous.agentNickname : refreshed.agentNickname,
+            agentRole: refreshed.agentRole.isEmpty ? previous.agentRole : refreshed.agentRole,
+            status: refreshed.status,
+            reason: refreshed.reason,
+            terminalState: refreshed.terminalState,
+            tty: refreshed.tty,
+            updatedAtEpoch: refreshed.updatedAtEpoch == "0" ? previous.updatedAtEpoch : refreshed.updatedAtEpoch,
+            rolloutPath: refreshed.rolloutPath.isEmpty ? previous.rolloutPath : refreshed.rolloutPath,
+            preview: refreshed.preview.isEmpty ? previous.preview : refreshed.preview,
+            isArchived: previous.isArchived || refreshed.isArchived
+        )
+    }
+
+    private func applyRefreshedSessionSnapshots(_ refreshedSnapshots: [SessionSnapshot], preserveSelectionThreadID: String?) {
+        guard !refreshedSnapshots.isEmpty else { return }
+
+        var refreshedByThreadID: [String: SessionSnapshot] = [:]
+        for snapshot in refreshedSnapshots {
+            refreshedByThreadID[snapshot.threadID] = snapshot
+        }
+
+        var updatedSnapshots: [SessionSnapshot] = []
+        updatedSnapshots.reserveCapacity(allSessionSnapshots.count)
+        for snapshot in allSessionSnapshots {
+            if let refreshed = refreshedByThreadID[snapshot.threadID] {
+                updatedSnapshots.append(refreshed)
+            } else {
+                updatedSnapshots.append(snapshot)
+            }
+        }
+
+        allSessionSnapshots = updatedSnapshots
+        pruneSessionStatusRefreshState(to: allSessionSnapshots)
+        renderSessionSnapshots(
+            scannedCount: lastSessionRenderScannedCount ?? allSessionSnapshots.count,
+            totalCount: lastSessionRenderTotalCount ?? allSessionSnapshots.count,
+            isComplete: lastSessionRenderIsComplete
+        )
+        restoreSessionSelection(preferredThreadID: preserveSelectionThreadID)
+    }
+
+    private func refreshLoadedSessionStatusesInBackground(showProgress: Bool) {
+        guard !isSessionScanRunning else {
+            if showProgress {
+                setStatus("检测会话进行中，请稍后再刷新状态", key: "scan", color: .systemOrange)
+            }
+            return
+        }
+
+        guard displayedSessionListMode == .active else {
+            refreshArchivedSessionsInBackground(showProgress: showProgress)
+            return
+        }
+
+        let snapshots = loadedActiveSessionSnapshotsForStatusRefresh()
+        guard !snapshots.isEmpty else {
+            if showProgress {
+                refreshSessionStatuses()
+            }
+            return
+        }
+
+        let claimedSnapshots = claimSessionStatusRefreshSnapshots(snapshots, requireDue: false, referenceDate: Date())
+        guard !claimedSnapshots.isEmpty else {
+            if showProgress {
+                setStatus("当前会话状态刷新仍在进行中", key: "scan", color: .systemOrange)
+            }
+            return
+        }
+
+        if showProgress {
+            setStatus("刷新状态执行中…", key: "scan")
+        }
+
+        let preservedSelectionThreadID = selectedSessionThreadID()
+        let semaphore = DispatchSemaphore(value: sessionStatusRefreshMaxConcurrentJobs)
+        let group = DispatchGroup()
+        let resultLock = NSLock()
+        var refreshedSnapshots: [SessionSnapshot] = []
+        var failedThreadIDs: [String] = []
+
+        for snapshot in claimedSnapshots {
+            group.enter()
+            DispatchQueue.global(qos: .utility).async {
+                semaphore.wait()
+                defer {
+                    semaphore.signal()
+                    group.leave()
+                }
+
+                let result = self.runStandardHelper(arguments: ["probe", "-t", snapshot.threadID])
+                guard result.status == 0,
+                      let refreshed = parseProbeAllOutput(result.stdout).first else {
+                    resultLock.lock()
+                    failedThreadIDs.append(snapshot.threadID)
+                    resultLock.unlock()
+                    return
+                }
+
+                let merged = self.mergedSessionSnapshotAfterStatusRefresh(previous: snapshot, refreshed: refreshed)
+                resultLock.lock()
+                refreshedSnapshots.append(merged)
+                resultLock.unlock()
+            }
+        }
+
+        group.notify(queue: .main) {
+            let completionDate = Date()
+            let refreshedByThreadID = Dictionary(uniqueKeysWithValues: refreshedSnapshots.map { ($0.threadID, $0) })
+            for snapshot in claimedSnapshots {
+                let resolved = refreshedByThreadID[snapshot.threadID] ?? snapshot
+                self.scheduleNextSessionStatusRefresh(for: resolved, from: completionDate)
+            }
+
+            guard self.displayedSessionListMode == .active, !self.isSessionScanRunning else {
+                if showProgress {
+                    if failedThreadIDs.isEmpty {
+                        self.setStatus("刷新状态完成", key: "scan")
+                    } else if failedThreadIDs.count == claimedSnapshots.count {
+                        self.setStatus("刷新状态失败", key: "scan", color: .systemRed)
+                    } else {
+                        self.setStatus("刷新状态部分失败", key: "scan", color: .systemOrange)
+                    }
+                }
+                return
+            }
+
+            self.applyRefreshedSessionSnapshots(refreshedSnapshots, preserveSelectionThreadID: preservedSelectionThreadID)
+            if showProgress {
+                if failedThreadIDs.isEmpty {
+                    self.setStatus("刷新状态完成", key: "scan")
+                } else if failedThreadIDs.count == claimedSnapshots.count {
+                    self.setStatus("刷新状态失败", key: "scan", color: .systemRed)
+                } else {
+                    self.setStatus("刷新状态部分失败", key: "scan", color: .systemOrange)
+                }
+            }
+        }
+    }
+
+    private func refreshArchivedSessionsInBackground(showProgress: Bool) {
+        guard !isSessionScanRunning else {
+            if showProgress {
+                setStatus("检测会话进行中，请稍后再刷新状态", key: "scan", color: .systemOrange)
+            }
+            return
+        }
+
+        if showProgress {
+            setStatus("刷新状态执行中…", key: "scan")
+        }
+
+        let preservedSelectionThreadID = selectedSessionThreadID()
+        DispatchQueue.global(qos: .utility).async {
+            let result = self.runStandardHelper(arguments: ["thread-list", "--archived"])
+            DispatchQueue.main.async {
+                guard self.displayedSessionListMode == .archived, !self.isSessionScanRunning else {
+                    if showProgress {
+                        self.setStatus(result.status == 0 ? "刷新状态完成" : "刷新状态失败", key: "scan", color: result.status == 0 ? nil : .systemRed)
+                    }
+                    return
+                }
+
+                if result.status != 0 {
+                    if showProgress {
+                        self.setStatus("刷新状态失败", key: "scan", color: .systemRed)
+                    }
+                    return
+                }
+
+                self.allSessionSnapshots = parseThreadListOutput(result.stdout, archived: true)
+                self.sessionScanTotal = self.allSessionSnapshots.count
+                self.clearSessionStatusRefreshState()
+                self.renderSessionSnapshots(
+                    scannedCount: self.allSessionSnapshots.count,
+                    totalCount: self.allSessionSnapshots.count,
+                    isComplete: true
+                )
+                self.restoreSessionSelection(preferredThreadID: preservedSelectionThreadID)
+                if showProgress {
+                    self.setStatus("刷新状态完成", key: "scan")
+                }
+            }
+        }
+    }
+
+    private func scheduleDueSessionStatusRefreshes() {
+        guard !isSessionScanRunning, displayedSessionListMode == .active else { return }
+        let dueSnapshots = claimSessionStatusRefreshSnapshots(
+            loadedActiveSessionSnapshotsForStatusRefresh(),
+            requireDue: true,
+            referenceDate: Date()
+        )
+        guard !dueSnapshots.isEmpty else { return }
+
+        let preservedSelectionThreadID = selectedSessionThreadID()
+        let semaphore = DispatchSemaphore(value: sessionStatusRefreshMaxConcurrentJobs)
+        let group = DispatchGroup()
+        let resultLock = NSLock()
+        var refreshedSnapshots: [SessionSnapshot] = []
+
+        for snapshot in dueSnapshots {
+            group.enter()
+            DispatchQueue.global(qos: .utility).async {
+                semaphore.wait()
+                defer {
+                    semaphore.signal()
+                    group.leave()
+                }
+
+                let result = self.runStandardHelper(arguments: ["probe", "-t", snapshot.threadID])
+                guard result.status == 0,
+                      let refreshed = parseProbeAllOutput(result.stdout).first else {
+                    return
+                }
+
+                let merged = self.mergedSessionSnapshotAfterStatusRefresh(previous: snapshot, refreshed: refreshed)
+                resultLock.lock()
+                refreshedSnapshots.append(merged)
+                resultLock.unlock()
+            }
+        }
+
+        group.notify(queue: .main) {
+            let completionDate = Date()
+            let refreshedByThreadID = Dictionary(uniqueKeysWithValues: refreshedSnapshots.map { ($0.threadID, $0) })
+            for snapshot in dueSnapshots {
+                let resolved = refreshedByThreadID[snapshot.threadID] ?? snapshot
+                self.scheduleNextSessionStatusRefresh(for: resolved, from: completionDate)
+            }
+
+            guard self.displayedSessionListMode == .active, !self.isSessionScanRunning else { return }
+            self.applyRefreshedSessionSnapshots(refreshedSnapshots, preserveSelectionThreadID: preservedSelectionThreadID)
+        }
     }
 
     private func rebuildDisplayedSessionSnapshots(preserveSelectionThreadID: String?) {
@@ -4079,6 +4408,7 @@ conn.close()
     private func setButtonsEnabled(_ enabled: Bool) {
         [sendButton, startButton, refreshLoopsButton, stopAllButton].forEach { $0.isEnabled = enabled }
         detectStatusButton.isEnabled = true
+        refreshSessionStatusButton.isEnabled = true
         if enabled {
             updateLoopActionButtons()
         } else {
@@ -4095,8 +4425,9 @@ conn.close()
     }
 
     private func updateDetectStatusButtonState() {
-        detectStatusButton.title = isSessionScanRunning ? "停止检测" : "检测状态"
+        detectStatusButton.title = isSessionScanRunning ? "停止检测" : "检测会话"
         detectStatusButton.isEnabled = true
+        refreshSessionStatusButton.isEnabled = true
     }
 
     private func appendOutput(_ text: String) {
@@ -4380,6 +4711,16 @@ conn.close()
         }
     }
 
+    private func startSessionStatusRefreshTimer() {
+        sessionStatusRefreshTimer?.invalidate()
+        sessionStatusRefreshTimer = Timer.scheduledTimer(withTimeInterval: sessionStatusRefreshSchedulerInterval, repeats: true) { [weak self] _ in
+            self?.scheduleDueSessionStatusRefreshes()
+        }
+        if let sessionStatusRefreshTimer {
+            RunLoop.main.add(sessionStatusRefreshTimer, forMode: .common)
+        }
+    }
+
     private func parseStatusOutput(_ output: String) -> [LoopSnapshot] {
         var loops: [LoopSnapshot] = []
         var current: [String: String] = [:]
@@ -4439,6 +4780,32 @@ conn.close()
             guard line.hasPrefix("warning: ") else { return nil }
             return line
         }
+    }
+
+    private func updateActiveLoopsWarningDisplay() {
+        let warningText = loopWarnings.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        activeLoopsWarningLabel.stringValue = warningText
+        activeLoopsWarningLabel.toolTip = warningText.isEmpty ? nil : warningText
+        activeLoopsWarningLabel.isHidden = warningText.isEmpty
+    }
+
+    private func applyLoopSnapshotResult(loops: [LoopSnapshot], warnings: [String], failureMessage: String? = nil) {
+        loopSnapshots = loops
+        loopWarnings = warnings
+        applyLoopSorting()
+
+        if let failureMessage, !failureMessage.isEmpty {
+            activeLoopsMetaLabel.stringValue = failureMessage
+        } else {
+            activeLoopsMetaLabel.stringValue = loops.isEmpty ? "循环: 0" : "循环: \(loops.count)"
+        }
+
+        updateActiveLoopsWarningDisplay()
+        activeLoopsTableView.reloadData()
+        autoSizeActiveLoopsColumnsIfNeeded()
+        restoreLoopSelection(preferredTarget: nil)
+        refreshTableWrapping(activeLoopsTableView)
+        updateLoopActionButtons()
     }
 
     private func maybeShowLoopAmbiguityAlerts(_ loops: [LoopSnapshot]) {
@@ -4979,8 +5346,8 @@ conn.close()
 
         isSessionScanRunning = false
         updateDetectStatusButtonState()
-        setStatus("检测状态已停止", key: "scan")
-        appendOutput("已请求停止检测状态。")
+        setStatus("检测会话已停止", key: "scan")
+        appendOutput("已请求停止检测会话。")
         if sessionScanTotal > 0 {
             renderSessionSnapshots(scannedCount: allSessionSnapshots.count, totalCount: sessionScanTotal, isComplete: false)
             sessionStatusMetaLabel.stringValue += " | 已停止"
@@ -5029,13 +5396,11 @@ conn.close()
                 process.waitUntilExit()
             } catch {
                 DispatchQueue.main.async {
-                    self.loopSnapshots = []
-                    self.loopWarnings = ["Failed to load active loops: \(error.localizedDescription)"]
-                    self.activeLoopsMetaLabel.stringValue = self.loopWarnings.first ?? "Failed to load active loops."
-                    self.activeLoopsTableView.reloadData()
-                    self.stopButton.isEnabled = false
-                    self.resumeLoopButton.isEnabled = false
-                    self.deleteLoopButton.isEnabled = false
+                    self.applyLoopSnapshotResult(
+                        loops: [],
+                        warnings: ["Failed to load active loops: \(error.localizedDescription)"],
+                        failureMessage: "加载循环失败"
+                    )
                     self.finishLoopSnapshotRefresh()
                 }
                 return
@@ -5048,26 +5413,17 @@ conn.close()
 
             DispatchQueue.main.async {
                 if process.terminationStatus == 0 {
-                    self.loopSnapshots = self.parseStatusOutput(outText)
-                    self.loopWarnings = self.parseWarnings(from: outText)
-                    self.applyLoopSorting()
-                    if self.loopSnapshots.isEmpty {
-                        self.activeLoopsMetaLabel.stringValue = self.loopWarnings.first ?? "No loops."
-                    } else {
-                        let warningSuffix = self.loopWarnings.isEmpty ? "" : " | warnings: \(self.loopWarnings.count)"
-                        self.activeLoopsMetaLabel.stringValue = "Loops: \(self.loopSnapshots.count)\(warningSuffix)"
-                    }
-                    self.maybeShowLoopAmbiguityAlerts(self.loopSnapshots)
+                    let loops = self.parseStatusOutput(outText)
+                    let warnings = self.parseWarnings(from: outText)
+                    self.applyLoopSnapshotResult(loops: loops, warnings: warnings)
+                    self.maybeShowLoopAmbiguityAlerts(loops)
                 } else {
-                    self.loopSnapshots = []
-                    self.loopWarnings = [errText.isEmpty ? "Failed to load active loops." : errText]
-                    self.activeLoopsMetaLabel.stringValue = self.loopWarnings.first ?? "Failed to load active loops."
+                    self.applyLoopSnapshotResult(
+                        loops: [],
+                        warnings: [errText.isEmpty ? "Failed to load active loops." : errText],
+                        failureMessage: "加载循环失败"
+                    )
                 }
-                self.activeLoopsTableView.reloadData()
-                self.autoSizeActiveLoopsColumnsIfNeeded()
-                self.restoreLoopSelection(preferredTarget: nil)
-                self.refreshTableWrapping(self.activeLoopsTableView)
-                self.updateLoopActionButtons()
                 self.finishLoopSnapshotRefresh()
             }
         }
@@ -5092,9 +5448,10 @@ conn.close()
         sessionScanGeneration += 1
         let generation = sessionScanGeneration
         sessionScanTotal = 0
+        clearSessionStatusRefreshState()
         updateDetectStatusButtonState()
-        setStatus("检测状态执行中…", key: "scan")
-        appendOutput("执行 检测状态: session-count + probe-all batches")
+        setStatus("检测会话执行中…", key: "scan")
+        appendOutput("执行 检测会话: session-count + probe-all batches")
         invalidateSessionSearch(resetPromptCache: true)
         allSessionSnapshots = []
         sessionSnapshots = []
@@ -5116,9 +5473,9 @@ conn.close()
                     self.updateDetectStatusButtonState()
                     self.allSessionSnapshots = []
                     self.sessionSnapshots = []
-                    self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 检测状态失败: \(countResult.stderr.isEmpty ? countResult.stdout : countResult.stderr)"
+                    self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 检测会话失败: \(countResult.stderr.isEmpty ? countResult.stdout : countResult.stderr)"
                     self.sessionStatusTableView.reloadData()
-                    self.setStatus("检测状态失败", key: "scan")
+                    self.setStatus("检测会话失败", key: "scan", color: .systemRed)
                     if !countResult.stderr.isEmpty {
                         self.appendOutput("stderr: \(countResult.stderr)")
                     }
@@ -5135,7 +5492,7 @@ conn.close()
                     self.updateDetectStatusButtonState()
                     self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 没有可扫描的 session。"
                     self.sessionStatusTableView.reloadData()
-                    self.setStatus("检测状态完成", key: "scan")
+                    self.setStatus("检测会话完成", key: "scan")
                 } else {
                     self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 正在扫描 0/\(totalCount)…"
                     self.sessionStatusTableView.reloadData()
@@ -5174,7 +5531,7 @@ conn.close()
                     self.allSessionSnapshots = mergeSessionSnapshots(existing: self.allSessionSnapshots, newSnapshots: batchSnapshots)
                     self.renderSessionSnapshots(scannedCount: scannedCount, totalCount: totalCount, isComplete: scannedCount >= totalCount)
                     if scannedCount < totalCount {
-                        self.setStatus("检测状态执行中… \(scannedCount)/\(totalCount)", key: "scan")
+                        self.setStatus("检测会话执行中… \(scannedCount)/\(totalCount)", key: "scan")
                     }
                 }
 
@@ -5190,7 +5547,7 @@ conn.close()
                 if encounteredFailure {
                     self.renderSessionSnapshots(scannedCount: scannedCount, totalCount: totalCount, isComplete: false)
                     self.sessionStatusMetaLabel.stringValue += " | 部分失败"
-                    self.setStatus("检测状态部分失败", key: "scan")
+                    self.setStatus("检测会话部分失败", key: "scan", color: .systemOrange)
                     if !failureDetail.isEmpty {
                         self.appendOutput("stderr: \(failureDetail)")
                     }
@@ -5198,7 +5555,12 @@ conn.close()
                 }
 
                 self.renderSessionSnapshots(scannedCount: scannedCount, totalCount: totalCount, isComplete: true)
-                self.setStatus("检测状态完成", key: "scan")
+                self.pruneSessionStatusRefreshState(to: self.allSessionSnapshots)
+                let completionDate = Date()
+                for snapshot in self.loadedActiveSessionSnapshotsForStatusRefresh() {
+                    self.scheduleNextSessionStatusRefresh(for: snapshot, from: completionDate)
+                }
+                self.setStatus("检测会话完成", key: "scan")
                 self.appendOutput("检测到 \(self.sessionSnapshots.count) 个 session 状态。")
             }
         }
@@ -5212,9 +5574,10 @@ conn.close()
         sessionScanGeneration += 1
         let generation = sessionScanGeneration
         sessionScanTotal = 0
+        clearSessionStatusRefreshState()
         updateDetectStatusButtonState()
         setStatus("读取已归档 session 中…", key: "scan")
-        appendOutput("执行 检测状态: thread-list --archived")
+        appendOutput("执行 检测会话: thread-list --archived")
         invalidateSessionSearch(resetPromptCache: true)
         allSessionSnapshots = []
         sessionSnapshots = []
@@ -5363,6 +5726,15 @@ conn.close()
     }
 
     @objc
+    private func refreshSessionStatusesAction() {
+        if displayedSessionListMode == .archived {
+            refreshArchivedSessionsInBackground(showProgress: true)
+            return
+        }
+        refreshLoadedSessionStatusesInBackground(showProgress: true)
+    }
+
+    @objc
     private func toggleSessionPromptSearch() {
         scheduleSessionSearchRefresh()
     }
@@ -5374,7 +5746,7 @@ conn.close()
             let activeMode = activeSessionScanMode ?? displayedSessionListMode
             sessionScopeControl.selectedSegment = activeMode == .archived ? 1 : 0
             setStatus("请等待当前检测完成或手动停止后再切换", key: "scan", color: .systemOrange)
-            appendOutput("检测状态仍在进行中，已保持当前视图为\(sessionScopeText(for: activeMode))。")
+            appendOutput("检测会话仍在进行中，已保持当前视图为\(sessionScopeText(for: activeMode))。")
             return
         }
 
@@ -5386,8 +5758,8 @@ conn.close()
         invalidateSessionSearch(resetPromptCache: true)
         sessionStatusTableView.reloadData()
         updateSessionDetailView()
-        setStatus("已切换到\(requestedSessionScopeText())视图，点击“检测状态”刷新", key: "scan", color: .systemOrange)
-        appendOutput("已切换 Session Status 视图到\(requestedSessionScopeText())；当前列表仍显示上次\(displayedSessionScopeText())检测结果，点击“检测状态”后刷新。")
+        setStatus("已切换到\(requestedSessionScopeText())视图，点击“检测会话”刷新", key: "scan", color: .systemOrange)
+        appendOutput("已切换 Session Status 视图到\(requestedSessionScopeText())；当前列表仍显示上次\(displayedSessionScopeText())检测结果，点击“检测会话”后刷新。")
     }
 
     @objc
@@ -6072,7 +6444,7 @@ conn.close()
 
     func numberOfRows(in tableView: NSTableView) -> Int {
         if tableView == activeLoopsTableView {
-            return max(loopSnapshots.count, loopWarnings.isEmpty ? 0 : 1)
+            return loopSnapshots.count
         }
         if tableView == sessionStatusTableView {
             return sessionSnapshots.count
@@ -6118,13 +6490,7 @@ conn.close()
         textField.toolTip = nil
 
         if tableView == activeLoopsTableView {
-            if row >= loopSnapshots.count {
-                textField.textColor = .systemOrange
-                textField.stringValue = tableColumn == activeLoopsTableView.tableColumns.first ? (loopWarnings.first ?? "Warning") : ""
-                textField.toolTip = textField.stringValue
-                return cellView
-            }
-
+            guard row < loopSnapshots.count else { return cellView }
             let loop = loopSnapshots[row]
             let columnID = tableColumn.identifier.rawValue
             textField.stringValue = stringValueForLoopColumn(columnID, loop: loop)
