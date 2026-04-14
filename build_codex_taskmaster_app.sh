@@ -27,17 +27,22 @@ resolve_sdk_path() {
     return 0
   fi
 
-  local sdk_dir="/Library/Developer/CommandLineTools/SDKs"
   local preferred=""
+  local sdk_root
 
-  if [[ -d "$sdk_dir" ]]; then
+  for sdk_root in \
+    "$(xcode-select -p 2>/dev/null)/Platforms/MacOSX.platform/Developer/SDKs" \
+    /Library/Developer/CommandLineTools/SDKs
+  do
+    [[ -d "$sdk_root" ]] || continue
     preferred="$(
-      find "$sdk_dir" -maxdepth 1 -type d \
+      find "$sdk_root" -maxdepth 1 -type d \
         \( -name 'MacOSX15*.sdk' -o -name 'MacOSX14*.sdk' \) \
         | sort -V \
         | tail -n 1
     )"
-  fi
+    [[ -n "$preferred" ]] && break
+  done
 
   if [[ -n "$preferred" ]]; then
     printf '%s\n' "$preferred"
@@ -79,7 +84,7 @@ fi
 cp "$HELPER_SRC" "$HELPER_DST"
 chmod 755 "$HELPER_DST"
 
-swiftc \
+xcrun swiftc \
   -O \
   -sdk "$SDK_PATH" \
   -framework AppKit \

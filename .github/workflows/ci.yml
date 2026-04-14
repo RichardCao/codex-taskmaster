@@ -14,6 +14,20 @@ jobs:
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || true
+      - name: Select Installed Xcode
+        run: |
+          set -euo pipefail
+          XCODE_DEVELOPER_DIR="$(
+            find /Applications -maxdepth 2 -type d -path '/Applications/Xcode*.app/Contents/Developer' \
+              | sort -V \
+              | tail -n 1
+          )"
+          if [[ -n "$XCODE_DEVELOPER_DIR" ]]; then
+            sudo xcode-select -s "$XCODE_DEVELOPER_DIR"
+            echo "Selected Xcode: $XCODE_DEVELOPER_DIR"
+          else
+            echo "No installed Xcode app found, keeping current developer dir"
+          fi
 
       - name: Inspect environment
         run: |
@@ -34,26 +48,29 @@ jobs:
           set -euo pipefail
           SDK_PATH="${MACOS_SDK_PATH:-}"
           if [[ -z "$SDK_PATH" ]]; then
-            for candidate in \
-              /Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk \
-              /Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk \
-              /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk \
-              /Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk \
-              /Library/Developer/CommandLineTools/SDKs/MacOSX14.5.sdk \
-              /Library/Developer/CommandLineTools/SDKs/MacOSX14.sdk
+            for sdk_root in \
+              "$(xcode-select -p 2>/dev/null)/Platforms/MacOSX.platform/Developer/SDKs" \
+              /Library/Developer/CommandLineTools/SDKs
             do
-              if [[ -d "$candidate" ]]; then
-                SDK_PATH="$candidate"
-                break
-              fi
+              [[ -d "$sdk_root" ]] || continue
+              SDK_PATH="$(
+                find "$sdk_root" -maxdepth 1 -type d \
+                  \( -name 'MacOSX15*.sdk' -o -name 'MacOSX14*.sdk' \) \
+                  | sort -V \
+                  | tail -n 1
+              )"
+              [[ -n "$SDK_PATH" ]] && break
             done
+          fi
+          if [[ -z "$SDK_PATH" ]]; then
+            SDK_PATH="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
           fi
           if [[ -n "$SDK_PATH" ]]; then
             echo "Using SDK: $SDK_PATH"
-            swiftc -sdk "$SDK_PATH" -warnings-as-errors -typecheck ./CodexTaskmasterApp.swift ./TaskMasterCore.swift ./TaskMasterSendRuntime.swift ./main.swift
+            xcrun swiftc -sdk "$SDK_PATH" -warnings-as-errors -typecheck ./CodexTaskmasterApp.swift ./TaskMasterCore.swift ./TaskMasterSendRuntime.swift ./main.swift
           else
             echo "Using SDK from default toolchain"
-            swiftc -warnings-as-errors -typecheck ./CodexTaskmasterApp.swift ./TaskMasterCore.swift ./TaskMasterSendRuntime.swift ./main.swift
+            xcrun swiftc -warnings-as-errors -typecheck ./CodexTaskmasterApp.swift ./TaskMasterCore.swift ./TaskMasterSendRuntime.swift ./main.swift
           fi
 
       - name: Build app
