@@ -50,11 +50,11 @@ jobs:
           fi
           if [[ -n "$SDK_PATH" ]]; then
             echo "Using SDK: $SDK_PATH"
-            swiftc -sdk "$SDK_PATH" -warnings-as-errors -typecheck ./CodexBianCeZheApp.swift
+            swiftc -sdk "$SDK_PATH" -warnings-as-errors -typecheck ./CodexTaskmasterApp.swift ./TaskMasterCore.swift ./TaskMasterSendRuntime.swift ./main.swift
           else
             echo "Using SDK from default toolchain"
-            swiftc -warnings-as-errors -typecheck ./CodexBianCeZheApp.swift
+            swiftc -warnings-as-errors -typecheck ./CodexTaskmasterApp.swift ./TaskMasterCore.swift ./TaskMasterSendRuntime.swift ./main.swift
           fi
 
       - name: Build app
-        run: bash ./build_codex_biancezhe_app.sh
+        run: bash ./build_codex_taskmaster_app.sh
