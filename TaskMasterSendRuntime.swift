@@ -157,16 +157,6 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
     }
 
     private func focusTerminalWindow(for ttyPath: String) throws {
-        let process = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
-        let stdin = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-", ttyPath]
-        process.standardOutput = stdout
-        process.standardError = stderr
-        process.standardInput = stdin
-
         let script = """
         on run argv
           set targetTTY to item 1 of argv
@@ -213,8 +203,27 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
         """
 
         do {
-            try process.run()
+            let result = try SubprocessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/osascript"),
+                arguments: ["-", ttyPath],
+                standardInputData: script.data(using: .utf8)
+            )
+            guard result.terminationStatus == 0 else {
+                let errText = result.trimmedStderr.isEmpty ? "聚焦 Terminal 失败" : result.trimmedStderr
+                throw NSError(
+                    domain: "CodexTaskmaster",
+                    code: 4,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: errText,
+                        "sendReason": "tty_focus_failed"
+                    ]
+                )
+            }
         } catch {
+            let nsError = error as NSError
+            if nsError.domain == "CodexTaskmaster" {
+                throw nsError
+            }
             throw NSError(
                 domain: "CodexTaskmaster",
                 code: 3,
@@ -225,25 +234,6 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
             )
         }
 
-        if let input = script.data(using: .utf8) {
-            let inputHandle = stdin.fileHandleForWriting
-            inputHandle.write(input)
-            try? inputHandle.close()
-        }
-
-        process.waitUntilExit()
-        if process.terminationStatus != 0 {
-            let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-            let errText = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "聚焦 Terminal 失败"
-            throw NSError(
-                domain: "CodexTaskmaster",
-                code: 4,
-                userInfo: [
-                    NSLocalizedDescriptionKey: errText,
-                    "sendReason": "tty_focus_failed"
-                ]
-            )
-        }
         usleep(120_000)
     }
 
@@ -273,32 +263,24 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
             return trimmed
         }
 
-        let process = Process()
-        let stdout = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", """
-        tell application "Terminal"
-          try
-            return tty of selected tab of front window
-          on error
-            return ""
-          end try
-        end tell
-        """]
-        process.standardOutput = stdout
-
         do {
-            try process.run()
-            process.waitUntilExit()
+            let result = try SubprocessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/osascript"),
+                arguments: ["-e", """
+                tell application "Terminal"
+                  try
+                    return tty of selected tab of front window
+                  on error
+                    return ""
+                  end try
+                end tell
+                """]
+            )
+            let normalized = normalizedTTY(result.trimmedStdout)
+            return normalized.isEmpty ? nil : normalized
         } catch {
             return nil
         }
-
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        let value = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let normalized = normalizedTTY(value)
-        return normalized.isEmpty ? nil : normalized
     }
 
     private func currentFrontmostBundleID() -> String? {
@@ -314,22 +296,21 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
 
     @discardableResult
     private func hideTerminal() -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", """
-        tell application "Terminal"
-          try
-            hide
-            return "ok"
-          on error
-            return "failed"
-          end try
-        end tell
-        """]
         do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
+            let result = try SubprocessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/osascript"),
+                arguments: ["-e", """
+                tell application "Terminal"
+                  try
+                    hide
+                    return "ok"
+                  on error
+                    return "failed"
+                  end try
+                end tell
+                """]
+            )
+            return result.terminationStatus == 0
         } catch {
             return false
         }
@@ -388,14 +369,6 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
             return nil
         }
 
-        let process = Process()
-        let stdout = Pipe()
-        let stdin = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-", normalizedPreferredTTY]
-        process.standardOutput = stdout
-        process.standardInput = stdin
-
         let script = """
         on run argv
           set preferredTTY to item 1 of argv
@@ -423,25 +396,20 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
         """
 
         do {
-            try process.run()
-            if let input = script.data(using: .utf8) {
-                let inputHandle = stdin.fileHandleForWriting
-                inputHandle.write(input)
-                try? inputHandle.close()
+            let result = try SubprocessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/osascript"),
+                arguments: ["-", normalizedPreferredTTY],
+                standardInputData: script.data(using: .utf8)
+            )
+            usleep(120_000)
+            guard result.terminationStatus == 0, currentFrontmostBundleID() == "com.apple.Terminal" else {
+                return nil
             }
-            process.waitUntilExit()
+            let restoredTTY = normalizedTTY(result.trimmedStdout)
+            return restoredTTY.isEmpty ? nil : restoredTTY
         } catch {
             return nil
         }
-
-        usleep(120_000)
-        guard process.terminationStatus == 0, currentFrontmostBundleID() == "com.apple.Terminal" else {
-            return nil
-        }
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        let restoredTTY = normalizedTTY(String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
-        return restoredTTY.isEmpty ? nil : restoredTTY
     }
 
     private func restoreFocusAfterTerminalSend(previousContext: FrontmostAppContext, targetTTY: String, logger: ((String) -> Void)?) {

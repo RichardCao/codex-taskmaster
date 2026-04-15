@@ -682,30 +682,23 @@ final class AppFocusTracker {
     }
 
     private func currentFrontTerminalTTY() -> String {
-        let process = Process()
-        let stdout = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", """
-        tell application "Terminal"
-          try
-            return tty of selected tab of front window
-          on error
-            return ""
-          end try
-        end tell
-        """]
-        process.standardOutput = stdout
-
         do {
-            try process.run()
-            process.waitUntilExit()
+            let result = try SubprocessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/osascript"),
+                arguments: ["-e", """
+                tell application "Terminal"
+                  try
+                    return tty of selected tab of front window
+                  on error
+                    return ""
+                  end try
+                end tell
+                """]
+            )
+            return result.trimmedStdout
         } catch {
             return ""
         }
-
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 }
 
@@ -737,17 +730,11 @@ final class CodexTaskmasterApp: NSObject, NSApplicationDelegate {
         guard !didRunTerminationCleanup else { return }
         didRunTerminationCleanup = true
 
-        let process = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.executableURL = URL(fileURLWithPath: resolvedHelperPath())
-        process.arguments = ["stop", "--all"]
-        process.standardOutput = stdout
-        process.standardError = stderr
-
         do {
-            try process.run()
-            process.waitUntilExit()
+            _ = try SubprocessRunner.run(
+                executableURL: URL(fileURLWithPath: resolvedHelperPath()),
+                arguments: ["stop", "--all"]
+            )
         } catch {
             return
         }
@@ -3573,14 +3560,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func clearSessionName(threadID: String) -> (success: Bool, error: String) {
-        let process = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        process.arguments = [
-            "-c",
-            """
+        do {
+            let result = try SubprocessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/python3"),
+                arguments: [
+                    "-c",
+                    """
 import json, os, sqlite3, sys, time
 db_path, session_index_path, thread_id = sys.argv[1:]
 
@@ -3617,24 +3602,17 @@ if cur.rowcount != 1:
 conn.commit()
 conn.close()
 """,
-            codexStateDatabasePath,
-            codexSessionIndexPath,
-            threadID
-        ]
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        do {
-            try process.run()
-            process.waitUntilExit()
+                    codexStateDatabasePath,
+                    codexSessionIndexPath,
+                    threadID
+                ]
+            )
+            if result.terminationStatus != 0 {
+                let errText = result.trimmedStderr
+                return (false, errText.isEmpty ? "清空名称失败" : errText)
+            }
         } catch {
             return (false, "启动清空名称失败: \(error.localizedDescription)")
-        }
-
-        let errText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if process.terminationStatus != 0 {
-            return (false, errText.isEmpty ? "清空名称失败" : errText)
         }
 
         return (true, "")
@@ -5542,63 +5520,41 @@ conn.close()
     }
 
     private func runStandardHelper(arguments: [String]) -> (status: Int32, stdout: String, stderr: String) {
-        let process = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: self.helperPath)
-        process.arguments = arguments
-        process.standardOutput = stdout
-        process.standardError = stderr
-
         do {
-            try process.run()
-            process.waitUntilExit()
+            let result = try SubprocessRunner.run(
+                executableURL: URL(fileURLWithPath: self.helperPath),
+                arguments: arguments
+            )
+            return (result.terminationStatus, result.trimmedStdout, result.trimmedStderr)
         } catch {
             return (1, "", "启动失败: \(error.localizedDescription)")
         }
-
-        let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-        let outText = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let errText = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return (process.terminationStatus, outText, errText)
     }
 
     private func runInterruptibleSessionHelper(arguments: [String]) -> (status: Int32, stdout: String, stderr: String) {
-        let process = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: self.helperPath)
-        process.arguments = arguments
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        sessionScanProcessLock.lock()
-        currentSessionScanProcess = process
-        sessionScanProcessLock.unlock()
-
-        defer {
-            sessionScanProcessLock.lock()
-            if currentSessionScanProcess === process {
-                currentSessionScanProcess = nil
-            }
-            sessionScanProcessLock.unlock()
-        }
-
         do {
-            try process.run()
-            process.waitUntilExit()
+            let result = try SubprocessRunner.run(
+                executableURL: URL(fileURLWithPath: self.helperPath),
+                arguments: arguments,
+                onProcessStarted: { [weak self] process in
+                    guard let self else { return }
+                    self.sessionScanProcessLock.lock()
+                    self.currentSessionScanProcess = process
+                    self.sessionScanProcessLock.unlock()
+                },
+                onProcessFinished: { [weak self] process in
+                    guard let self else { return }
+                    self.sessionScanProcessLock.lock()
+                    if self.currentSessionScanProcess === process {
+                        self.currentSessionScanProcess = nil
+                    }
+                    self.sessionScanProcessLock.unlock()
+                }
+            )
+            return (result.terminationStatus, result.trimmedStdout, result.trimmedStderr)
         } catch {
             return (1, "", "启动失败: \(error.localizedDescription)")
         }
-
-        let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-        let outText = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let errText = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return (process.terminationStatus, outText, errText)
     }
 
     private func conflictingLoops(for target: String) -> [LoopSnapshot] {
@@ -5744,18 +5700,27 @@ conn.close()
         }
         isRefreshingLoopsSnapshot = true
         DispatchQueue.global(qos: .utility).async {
-            let process = Process()
-            let stdout = Pipe()
-            let stderr = Pipe()
-
-            process.executableURL = URL(fileURLWithPath: self.helperPath)
-            process.arguments = ["status"]
-            process.standardOutput = stdout
-            process.standardError = stderr
-
             do {
-                try process.run()
-                process.waitUntilExit()
+                let result = try SubprocessRunner.run(
+                    executableURL: URL(fileURLWithPath: self.helperPath),
+                    arguments: ["status"]
+                )
+                DispatchQueue.main.async {
+                    if result.terminationStatus == 0 {
+                        let loops = self.parseStatusOutput(result.trimmedStdout)
+                        let warnings = self.parseWarnings(from: result.trimmedStdout)
+                        self.applyLoopSnapshotResult(loops: loops, warnings: warnings)
+                        self.maybeShowLoopAmbiguityAlerts(loops)
+                    } else {
+                        let stderr = result.trimmedStderr
+                        self.applyLoopSnapshotResult(
+                            loops: [],
+                            warnings: [stderr.isEmpty ? "Failed to load active loops." : stderr],
+                            failureMessage: "加载循环失败"
+                        )
+                    }
+                    self.finishLoopSnapshotRefresh()
+                }
             } catch {
                 DispatchQueue.main.async {
                     self.applyLoopSnapshotResult(
@@ -5765,28 +5730,6 @@ conn.close()
                     )
                     self.finishLoopSnapshotRefresh()
                 }
-                return
-            }
-
-            let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-            let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-            let outText = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let errText = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-            DispatchQueue.main.async {
-                if process.terminationStatus == 0 {
-                    let loops = self.parseStatusOutput(outText)
-                    let warnings = self.parseWarnings(from: outText)
-                    self.applyLoopSnapshotResult(loops: loops, warnings: warnings)
-                    self.maybeShowLoopAmbiguityAlerts(loops)
-                } else {
-                    self.applyLoopSnapshotResult(
-                        loops: [],
-                        warnings: [errText.isEmpty ? "Failed to load active loops." : errText],
-                        failureMessage: "加载循环失败"
-                    )
-                }
-                self.finishLoopSnapshotRefresh()
             }
         }
     }

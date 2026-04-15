@@ -1,4 +1,159 @@
+import Darwin
 import Foundation
+
+struct SubprocessResult {
+    let terminationStatus: Int32
+    let stdout: String
+    let stderr: String
+    let didTimeOut: Bool
+
+    var trimmedStdout: String {
+        stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedStderr: String {
+        stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+enum SubprocessRunnerError: LocalizedError {
+    case launchFailed(String)
+    case timedOut(TimeInterval)
+
+    var errorDescription: String? {
+        switch self {
+        case let .launchFailed(message):
+            return "启动失败: \(message)"
+        case let .timedOut(seconds):
+            return "执行超时: \(Int(seconds.rounded())) 秒"
+        }
+    }
+}
+
+enum SubprocessRunner {
+    static func run(
+        executableURL: URL,
+        arguments: [String] = [],
+        environment: [String: String]? = nil,
+        currentDirectoryURL: URL? = nil,
+        standardInputData: Data? = nil,
+        timeout: TimeInterval? = nil,
+        onProcessStarted: ((Process) -> Void)? = nil,
+        onProcessFinished: ((Process) -> Void)? = nil
+    ) throws -> SubprocessResult {
+        let process = Process()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        let stdoutHandle = stdoutPipe.fileHandleForReading
+        let stderrHandle = stderrPipe.fileHandleForReading
+        let readGroup = DispatchGroup()
+        let bufferLock = NSLock()
+        var stdoutData = Data()
+        var stderrData = Data()
+
+        func installReader(for handle: FileHandle, append: @escaping (Data) -> Void) {
+            readGroup.enter()
+            handle.readabilityHandler = { readableHandle in
+                let chunk = readableHandle.availableData
+                if chunk.isEmpty {
+                    readableHandle.readabilityHandler = nil
+                    readGroup.leave()
+                    return
+                }
+                append(chunk)
+            }
+        }
+
+        installReader(for: stdoutHandle) { chunk in
+            bufferLock.lock()
+            stdoutData.append(chunk)
+            bufferLock.unlock()
+        }
+
+        installReader(for: stderrHandle) { chunk in
+            bufferLock.lock()
+            stderrData.append(chunk)
+            bufferLock.unlock()
+        }
+
+        process.executableURL = executableURL
+        process.arguments = arguments
+        if let environment {
+            process.environment = environment
+        }
+        if let currentDirectoryURL {
+            process.currentDirectoryURL = currentDirectoryURL
+        }
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        var stdinHandle: FileHandle?
+        if standardInputData != nil {
+            let stdinPipe = Pipe()
+            process.standardInput = stdinPipe
+            stdinHandle = stdinPipe.fileHandleForWriting
+        }
+
+        let terminationSemaphore = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in
+            terminationSemaphore.signal()
+        }
+
+        do {
+            try process.run()
+        } catch {
+            stdoutHandle.readabilityHandler = nil
+            stderrHandle.readabilityHandler = nil
+            throw SubprocessRunnerError.launchFailed(error.localizedDescription)
+        }
+
+        onProcessStarted?(process)
+
+        if let standardInputData, let stdinHandle {
+            stdinHandle.write(standardInputData)
+            try? stdinHandle.close()
+        }
+
+        let didTimeOut: Bool
+        if let timeout {
+            let waitResult = terminationSemaphore.wait(timeout: .now() + timeout)
+            didTimeOut = waitResult == .timedOut
+            if didTimeOut {
+                if process.isRunning {
+                    process.terminate()
+                    if terminationSemaphore.wait(timeout: .now() + 0.5) == .timedOut, process.processIdentifier > 0 {
+                        Darwin.kill(process.processIdentifier, SIGKILL)
+                        _ = terminationSemaphore.wait(timeout: .now() + 0.5)
+                    }
+                }
+            }
+        } else {
+            terminationSemaphore.wait()
+            didTimeOut = false
+        }
+
+        onProcessFinished?(process)
+
+        if readGroup.wait(timeout: .now() + 1) == .timedOut {
+            stdoutHandle.readabilityHandler = nil
+            stderrHandle.readabilityHandler = nil
+        }
+
+        let stdoutText = String(decoding: stdoutData, as: UTF8.self)
+        let stderrText = String(decoding: stderrData, as: UTF8.self)
+
+        if didTimeOut {
+            throw SubprocessRunnerError.timedOut(timeout ?? 0)
+        }
+
+        return SubprocessResult(
+            terminationStatus: process.terminationStatus,
+            stdout: stdoutText,
+            stderr: stderrText,
+            didTimeOut: false
+        )
+    }
+}
 
 struct LoopSnapshot {
     let target: String
