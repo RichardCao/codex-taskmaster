@@ -227,6 +227,150 @@ final class RatioSplitView: NSView {
     }
 }
 
+final class VerticalRatioSplitView: NSView {
+    var dividerThickness: CGFloat = 10 {
+        didSet { needsLayout = true }
+    }
+
+    var minTopHeight: CGFloat = 126 {
+        didSet { needsLayout = true }
+    }
+
+    var minBottomHeight: CGFloat = 90 {
+        didSet { needsLayout = true }
+    }
+
+    var ratio: CGFloat = 0.66 {
+        didSet { needsLayout = true }
+    }
+
+    private var topView: NSView?
+    private var bottomView: NSView?
+    private var isDraggingDivider = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        autoresizesSubviews = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(top: NSView, bottom: NSView) {
+        topView?.removeFromSuperview()
+        bottomView?.removeFromSuperview()
+        topView = top
+        bottomView = bottom
+
+        [top, bottom].forEach { view in
+            view.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(view)
+        }
+
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        guard let topView, let bottomView else { return }
+
+        let availableHeight = max(0, bounds.height - dividerThickness)
+        let clamped = clampedRatio(for: ratio)
+        let topHeight = floor(availableHeight * clamped)
+        let bottomHeight = max(0, availableHeight - topHeight)
+        let fullWidth = bounds.width
+
+        bottomView.frame = NSRect(x: 0, y: 0, width: fullWidth, height: bottomHeight)
+        topView.frame = NSRect(x: 0, y: bottomHeight + dividerThickness, width: fullWidth, height: topHeight)
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let rect = dividerRect
+        guard !rect.isEmpty else { return }
+
+        NSColor.windowBackgroundColor.setFill()
+        rect.fill()
+
+        let lineThickness: CGFloat = 1
+        let lineRect = NSRect(
+            x: rect.minX + 2,
+            y: rect.midY - (lineThickness / 2),
+            width: max(0, rect.width - 4),
+            height: lineThickness
+        )
+
+        NSColor.tertiaryLabelColor.withAlphaComponent(0.22).setFill()
+        lineRect.fill()
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(dividerRect.insetBy(dx: 0, dy: -4), cursor: .resizeUpDown)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard dividerRect.insetBy(dx: 0, dy: -4).contains(point) else {
+            super.mouseDown(with: event)
+            return
+        }
+
+        isDraggingDivider = true
+        updateRatio(forY: point.y)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isDraggingDivider else {
+            super.mouseDragged(with: event)
+            return
+        }
+        let point = convert(event.locationInWindow, from: nil)
+        updateRatio(forY: point.y)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isDraggingDivider else {
+            super.mouseUp(with: event)
+            return
+        }
+        isDraggingDivider = false
+        let point = convert(event.locationInWindow, from: nil)
+        updateRatio(forY: point.y)
+    }
+
+    private var dividerRect: NSRect {
+        guard bounds.height > dividerThickness else { return .zero }
+        let availableHeight = max(0, bounds.height - dividerThickness)
+        let topHeight = floor(availableHeight * clampedRatio(for: ratio))
+        let bottomHeight = max(0, availableHeight - topHeight)
+        return NSRect(x: 0, y: bottomHeight, width: bounds.width, height: dividerThickness)
+    }
+
+    private func updateRatio(forY y: CGFloat) {
+        let availableHeight = bounds.height - dividerThickness
+        guard availableHeight > 0 else { return }
+        let topHeight = availableHeight - y
+        ratio = clampedRatio(for: topHeight / availableHeight)
+    }
+
+    private func clampedRatio(for proposedRatio: CGFloat) -> CGFloat {
+        let availableHeight = bounds.height - dividerThickness
+        guard availableHeight > 0 else { return min(max(proposedRatio, 0), 1) }
+
+        let effectiveMinTop = min(minTopHeight, availableHeight)
+        let effectiveMinBottom = min(minBottomHeight, max(0, availableHeight - effectiveMinTop))
+        let minRatio = effectiveMinTop / availableHeight
+        let maxRatio = 1 - (effectiveMinBottom / availableHeight)
+        return min(max(proposedRatio, minRatio), maxRatio)
+    }
+}
+
 protocol SessionStatusHeaderFilterDelegate: AnyObject {
     func sessionHeaderSupportsFilter(for columnIdentifier: String) -> Bool
     func sessionHeaderFilterIsActive(for columnIdentifier: String) -> Bool
@@ -638,15 +782,19 @@ final class CodexTaskmasterApp: NSObject, NSApplicationDelegate {
 final class MainWindowController: NSWindowController {
     init() {
         let contentViewController = MainViewController()
+        contentViewController.loadViewIfNeeded()
+        let minimumContentSize = contentViewController.minimumWindowContentSize
+        let initialContentWidth = max(980, minimumContentSize.width)
+        let initialContentHeight = max(760, minimumContentSize.height)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 980, height: 700),
+            contentRect: NSRect(x: 0, y: 0, width: initialContentWidth, height: initialContentHeight),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Codex Taskmaster"
-        window.minSize = NSSize(width: 760, height: 560)
-        window.contentMinSize = NSSize(width: 760, height: 560)
+        window.minSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: minimumContentSize)).size
+        window.contentMinSize = minimumContentSize
         window.contentMaxSize = NSSize(width: 10_000, height: 10_000)
         window.contentViewController = contentViewController
         super.init(window: window)
@@ -665,8 +813,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         static let headerOuterMargin: CGFloat = 20
         static let headerToContentSpacing: CGFloat = 6
         static let contentBottomMargin: CGFloat = 20
-        static let topPaneMinHeight: CGFloat = 210
-        static let bottomPaneMinHeight: CGFloat = 106
+        static let baseTopPaneMinHeight: CGFloat = 210
+        static let baseBottomPaneMinHeight: CGFloat = 106
     }
 
     private enum HistoryKind: String {
@@ -769,7 +917,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let renameField = NSTextField(string: "")
     private let sessionDetailView = NSTextView()
     private let sessionDetailScrollView = NSScrollView()
-    private let sessionStatusSplitView = AdjustableSplitView()
+    private let sessionStatusSplitView = VerticalRatioSplitView()
+    private let topActionButtonRow = NSStackView()
+    private let sessionScopeRow = NSStackView()
+    private let sessionRenameRow = NSStackView()
+    private let sessionMigrationRow = NSStackView()
     private let topSplitView = RatioSplitView()
     private let contentSplitView = AdjustableSplitView()
     private let activeLoopsPanelView = NSView()
@@ -802,11 +954,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let defaultLoopSortKey = "nextRun"
     private let defaultSessionSortKey = "updatedAt"
     private var lastValidIntervalValue = "600"
-    private var sessionStatusSplitRatio: CGFloat = 0.64
-    private var didApplyInitialSessionStatusSplitRatio = false
-    private var lastSessionStatusSplitHeight: CGFloat = 0
-    private var isApplyingSessionStatusSplitRatio = false
+    private var sessionStatusSplitRatio: CGFloat = 0.66
     private var contentSplitRatio: CGFloat = 0.62
+    private var topPaneMinimumHeight: CGFloat = LayoutMetrics.baseTopPaneMinHeight
+    private var bottomPaneMinimumHeight: CGFloat = LayoutMetrics.baseBottomPaneMinHeight
+    private(set) var minimumWindowContentSize = NSSize(width: 760, height: 630)
     private var didApplyInitialContentSplitRatio = false
     private var lastContentSplitHeight: CGFloat = 0
     private var isApplyingContentSplitRatio = false
@@ -983,12 +1135,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     override func viewDidLayout() {
         super.viewDidLayout()
         applyInitialSplitRatiosIfNeeded()
-        preserveSessionStatusSplitRatioOnResizeIfNeeded()
         preserveContentSplitRatioOnResizeIfNeeded()
-    }
-
-    override func viewDidAppear() {
-        super.viewDidAppear()
     }
 
     deinit {
@@ -1051,11 +1198,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         formGrid.column(at: 0).width = 120
         targetInputRow.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
 
-        let buttonRow = NSStackView(views: [sendButton, startButton, refreshLoopsButton, detectStatusButton, refreshSessionStatusButton, stopButton, resumeLoopButton, deleteLoopButton, stopAllButton])
-        buttonRow.orientation = .horizontal
-        buttonRow.spacing = 8
-        buttonRow.alignment = .centerY
-        buttonRow.heightAnchor.constraint(equalToConstant: 30).isActive = true
+        [sendButton, startButton, refreshLoopsButton, detectStatusButton, refreshSessionStatusButton, stopButton, resumeLoopButton, deleteLoopButton, stopAllButton].forEach {
+            topActionButtonRow.addArrangedSubview($0)
+        }
+        topActionButtonRow.orientation = .horizontal
+        topActionButtonRow.spacing = 8
+        topActionButtonRow.alignment = .centerY
 
         statusLabel.font = .systemFont(ofSize: 12, weight: .medium)
         statusLabel.textColor = .secondaryLabelColor
@@ -1063,7 +1211,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         statusLabel.maximumNumberOfLines = 1
         statusLabel.heightAnchor.constraint(equalToConstant: 16).isActive = true
 
-        let headerStack = NSStackView(views: [formGrid, buttonRow, statusLabel])
+        let headerStack = NSStackView(views: [formGrid, topActionButtonRow, statusLabel])
         headerStack.orientation = .vertical
         headerStack.spacing = 8
         headerStack.alignment = .leading
@@ -1072,12 +1220,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         headerStack.setContentCompressionResistancePriority(.required, for: .vertical)
         view.addSubview(headerStack)
         headerStack.heightAnchor.constraint(equalToConstant: LayoutMetrics.headerHeight).isActive = true
-        buttonRow.widthAnchor.constraint(lessThanOrEqualTo: headerStack.widthAnchor).isActive = true
+        topActionButtonRow.widthAnchor.constraint(lessThanOrEqualTo: headerStack.widthAnchor).isActive = true
         formGrid.setContentHuggingPriority(.required, for: .vertical)
-        buttonRow.setContentHuggingPriority(.required, for: .vertical)
+        topActionButtonRow.setContentHuggingPriority(.required, for: .vertical)
         statusLabel.setContentHuggingPriority(.required, for: .vertical)
         formGrid.setContentCompressionResistancePriority(.required, for: .vertical)
-        buttonRow.setContentCompressionResistancePriority(.required, for: .vertical)
+        topActionButtonRow.setContentCompressionResistancePriority(.required, for: .vertical)
         statusLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
         configureLoopsTable()
@@ -1143,10 +1291,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         migrateSessionProviderButton.toolTip = "将当前选中 session 迁移到当前 config.toml 中的 model_provider"
         migrateAllSessionsProviderButton.toolTip = "将本地所有 session 迁移到当前 config.toml 中的 model_provider"
 
-        let renameRow = NSStackView(views: [renameField, saveRenameButton, archiveSessionButton, restoreSessionButton, deleteSessionButton])
-        renameRow.orientation = .horizontal
-        renameRow.spacing = 8
-        renameRow.alignment = .centerY
+        [renameField, saveRenameButton, archiveSessionButton, restoreSessionButton, deleteSessionButton].forEach {
+            sessionRenameRow.addArrangedSubview($0)
+        }
+        sessionRenameRow.orientation = .horizontal
+        sessionRenameRow.spacing = 8
+        sessionRenameRow.alignment = .centerY
         renameField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         renameField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         saveRenameButton.setContentHuggingPriority(.required, for: .horizontal)
@@ -1158,16 +1308,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         deleteSessionButton.setContentHuggingPriority(.required, for: .horizontal)
         deleteSessionButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let migrationRow = NSStackView(views: [migrateSessionProviderButton, migrateAllSessionsProviderButton])
-        migrationRow.orientation = .horizontal
-        migrationRow.spacing = 8
-        migrationRow.alignment = .centerY
+        [migrateSessionProviderButton, migrateAllSessionsProviderButton].forEach {
+            sessionMigrationRow.addArrangedSubview($0)
+        }
+        sessionMigrationRow.orientation = .horizontal
+        sessionMigrationRow.spacing = 8
+        sessionMigrationRow.alignment = .centerY
         migrateSessionProviderButton.setContentHuggingPriority(.required, for: .horizontal)
         migrateSessionProviderButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         migrateAllSessionsProviderButton.setContentHuggingPriority(.required, for: .horizontal)
         migrateAllSessionsProviderButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let sessionScopeRow = NSStackView(views: [sessionScopeControl, sessionSearchField, sessionPromptSearchCheckbox])
+        [sessionScopeControl, sessionSearchField, sessionPromptSearchCheckbox].forEach {
+            sessionScopeRow.addArrangedSubview($0)
+        }
         sessionScopeRow.orientation = .horizontal
         sessionScopeRow.spacing = 8
         sessionScopeRow.alignment = .centerY
@@ -1233,7 +1387,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionScopeRow.widthAnchor.constraint(equalTo: sessionStatusTopStack.widthAnchor).isActive = true
         sessionStatusScrollView.widthAnchor.constraint(equalTo: sessionStatusTopStack.widthAnchor).isActive = true
 
-        let sessionStatusBottomStack = NSStackView(views: [renameRow, migrationRow, sessionDetailScrollView])
+        let sessionStatusBottomStack = NSStackView(views: [sessionRenameRow, sessionMigrationRow, sessionDetailScrollView])
         sessionStatusBottomStack.orientation = .vertical
         sessionStatusBottomStack.spacing = 8
         sessionStatusBottomStack.alignment = .leading
@@ -1241,18 +1395,18 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionStatusBottomStack.translatesAutoresizingMaskIntoConstraints = false
         sessionStatusBottomStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
         sessionStatusBottomStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        renameRow.widthAnchor.constraint(equalTo: sessionStatusBottomStack.widthAnchor).isActive = true
-        migrationRow.widthAnchor.constraint(equalTo: sessionStatusBottomStack.widthAnchor).isActive = true
+        sessionRenameRow.widthAnchor.constraint(equalTo: sessionStatusBottomStack.widthAnchor).isActive = true
+        sessionMigrationRow.widthAnchor.constraint(equalTo: sessionStatusBottomStack.widthAnchor).isActive = true
         sessionDetailScrollView.widthAnchor.constraint(equalTo: sessionStatusBottomStack.widthAnchor).isActive = true
 
         renameField.widthAnchor.constraint(greaterThanOrEqualToConstant: 96).isActive = true
         renameField.widthAnchor.constraint(lessThanOrEqualToConstant: 180).isActive = true
         sessionScopeRow.setContentHuggingPriority(.required, for: .vertical)
         sessionScopeRow.setContentCompressionResistancePriority(.required, for: .vertical)
-        renameRow.setContentHuggingPriority(.required, for: .vertical)
-        renameRow.setContentCompressionResistancePriority(.required, for: .vertical)
-        migrationRow.setContentHuggingPriority(.required, for: .vertical)
-        migrationRow.setContentCompressionResistancePriority(.required, for: .vertical)
+        sessionRenameRow.setContentHuggingPriority(.required, for: .vertical)
+        sessionRenameRow.setContentCompressionResistancePriority(.required, for: .vertical)
+        sessionMigrationRow.setContentHuggingPriority(.required, for: .vertical)
+        sessionMigrationRow.setContentCompressionResistancePriority(.required, for: .vertical)
         sessionStatusScrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
         sessionStatusScrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         sessionStatusScrollView.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -1261,18 +1415,26 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionDetailScrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         sessionDetailScrollView.setContentHuggingPriority(.defaultLow, for: .horizontal)
         sessionDetailScrollView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        sessionStatusSplitView.isVertical = false
-        sessionStatusSplitView.dividerStyle = .thin
+        let topActionRowMinimumHeight = ceil(max(topActionButtonRow.fittingSize.height, sendButton.fittingSize.height))
+        topActionButtonRow.heightAnchor.constraint(greaterThanOrEqualToConstant: topActionRowMinimumHeight).isActive = true
+
+        let sessionScopeRowMinimumHeight = ceil(sessionScopeRow.fittingSize.height)
+        let sessionRenameRowMinimumHeight = ceil(max(sessionRenameRow.fittingSize.height, saveRenameButton.fittingSize.height, renameField.fittingSize.height))
+        let sessionMigrationRowMinimumHeight = ceil(max(sessionMigrationRow.fittingSize.height, migrateSessionProviderButton.fittingSize.height))
+        let sessionTableMinimumHeight = ceil(max(sessionStatusScrollView.fittingSize.height, 90))
+        let sessionDetailMinimumHeight = ceil(max(sessionDetailScrollView.fittingSize.height, 52))
+        let sessionStatusTopMinimumHeight = sessionScopeRowMinimumHeight + sessionStatusTopStack.spacing + sessionTableMinimumHeight
+        let sessionStatusBottomMinimumHeight = sessionRenameRowMinimumHeight + sessionStatusBottomStack.spacing + sessionMigrationRowMinimumHeight + sessionStatusBottomStack.spacing + sessionDetailMinimumHeight
+        let sessionStatusSplitMinimumHeight = sessionStatusTopMinimumHeight + sessionStatusBottomMinimumHeight + sessionStatusSplitView.dividerThickness
+
         sessionStatusSplitView.translatesAutoresizingMaskIntoConstraints = false
-        sessionStatusSplitView.delegate = self
-        let sessionStatusTopPane = makeSplitPane(contentView: sessionStatusTopStack, minHeight: 110)
-        let sessionStatusBottomPane = makeSplitPane(contentView: sessionStatusBottomStack, minHeight: 108)
-        sessionStatusSplitView.addArrangedSubview(sessionStatusTopPane)
-        sessionStatusSplitView.addArrangedSubview(sessionStatusBottomPane)
-        sessionStatusSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
-        sessionStatusSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
-        let sessionStatusMinHeight = CGFloat(110 + 108) + sessionStatusSplitView.dividerThickness
-        sessionStatusSplitView.heightAnchor.constraint(greaterThanOrEqualToConstant: sessionStatusMinHeight).isActive = true
+        let sessionStatusTopPane = makeSplitPane(contentView: sessionStatusTopStack, minHeight: sessionStatusTopMinimumHeight)
+        let sessionStatusBottomPane = makeSplitPane(contentView: sessionStatusBottomStack, minHeight: sessionStatusBottomMinimumHeight)
+        sessionStatusSplitView.minTopHeight = sessionStatusTopMinimumHeight
+        sessionStatusSplitView.minBottomHeight = sessionStatusBottomMinimumHeight
+        sessionStatusSplitView.ratio = sessionStatusSplitRatio
+        sessionStatusSplitView.configure(top: sessionStatusTopPane, bottom: sessionStatusBottomPane)
+        sessionStatusSplitView.heightAnchor.constraint(greaterThanOrEqualToConstant: sessionStatusSplitMinimumHeight).isActive = true
         let sessionStatusPanel = makePanel(title: "会话状态", metaLabel: sessionStatusMetaLabel, contentView: sessionStatusSplitView, reusePanelView: sessionStatusPanelView)
         let logFilterControls = NSStackView(views: [activityLogSearchField, activityLogFailuresOnlyCheckbox, activityLogSelectedSessionCheckbox, exportSessionLogButton, clearLogButton, saveLogButton])
         logFilterControls.orientation = .horizontal
@@ -1295,10 +1457,25 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         clearLogButton.toolTip = "清空当前日志显示"
         saveLogButton.toolTip = "保存当前日志到文件"
         let logPanel = makePanel(title: "运行日志", metaLabel: activityLogMetaLabel, contentView: outputScrollView, headerAccessoryView: logFilterControls)
-        let activeLoopsPane = makeSplitPane(contentView: activeLoopsPanel, minWidth: 120, minHeight: 100)
-        let sessionStatusPane = makeSplitPane(contentView: sessionStatusPanel, minWidth: 120, minHeight: 100)
-        let topContentPane = makeSplitPane(contentView: topSplitView, minHeight: LayoutMetrics.topPaneMinHeight)
-        let logPane = makeSplitPane(contentView: logPanel, minHeight: LayoutMetrics.bottomPaneMinHeight)
+        let activeLoopsPanelMinimumHeight = ceil(max(activeLoopsPanel.fittingSize.height, 100))
+        let sessionStatusPanelMinimumHeight = ceil(max(sessionStatusPanel.fittingSize.height, sessionStatusSplitMinimumHeight))
+        topPaneMinimumHeight = max(LayoutMetrics.baseTopPaneMinHeight, activeLoopsPanelMinimumHeight, sessionStatusPanelMinimumHeight)
+        bottomPaneMinimumHeight = max(LayoutMetrics.baseBottomPaneMinHeight, ceil(logPanel.fittingSize.height))
+        minimumWindowContentSize = NSSize(
+            width: 760,
+            height: LayoutMetrics.headerOuterMargin
+                + LayoutMetrics.headerHeight
+                + LayoutMetrics.headerToContentSpacing
+                + topPaneMinimumHeight
+                + contentSplitView.dividerThickness
+                + bottomPaneMinimumHeight
+                + LayoutMetrics.contentBottomMargin
+        )
+
+        let activeLoopsPane = makeSplitPane(contentView: activeLoopsPanel, minWidth: 120, minHeight: activeLoopsPanelMinimumHeight)
+        let sessionStatusPane = makeSplitPane(contentView: sessionStatusPanel, minWidth: 120, minHeight: sessionStatusPanelMinimumHeight)
+        let topContentPane = makeSplitPane(contentView: topSplitView, minHeight: topPaneMinimumHeight)
+        let logPane = makeSplitPane(contentView: logPanel, minHeight: bottomPaneMinimumHeight)
         topSplitView.translatesAutoresizingMaskIntoConstraints = false
         topSplitView.minLeadingWidth = 120
         topSplitView.minTrailingWidth = 120
@@ -1314,7 +1491,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         contentSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         contentSplitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
         view.addSubview(contentSplitView)
-        let minimumContentHeight = LayoutMetrics.topPaneMinHeight + LayoutMetrics.bottomPaneMinHeight + contentSplitView.dividerThickness
+        let minimumContentHeight = topPaneMinimumHeight + bottomPaneMinimumHeight + contentSplitView.dividerThickness
         contentSplitView.heightAnchor.constraint(greaterThanOrEqualToConstant: minimumContentHeight).isActive = true
         contentSplitView.setContentHuggingPriority(.defaultLow, for: .vertical)
         contentSplitView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
@@ -3516,14 +3693,6 @@ conn.close()
     }
 
     private func applyInitialSplitRatiosIfNeeded() {
-        if !didApplyInitialSessionStatusSplitRatio,
-           sessionStatusSplitView.subviews.count == 2,
-           sessionStatusSplitView.bounds.height > sessionStatusSplitView.dividerThickness {
-            setSessionStatusSplitRatio(0.64)
-            didApplyInitialSessionStatusSplitRatio = true
-            lastSessionStatusSplitHeight = sessionStatusSplitView.bounds.height
-        }
-
         if !didApplyInitialContentSplitRatio,
            contentSplitView.subviews.count == 2,
            contentSplitView.bounds.height > contentSplitView.dividerThickness {
@@ -3531,18 +3700,6 @@ conn.close()
             didApplyInitialContentSplitRatio = true
             lastContentSplitHeight = contentSplitView.bounds.height
         }
-    }
-
-    private func preserveSessionStatusSplitRatioOnResizeIfNeeded() {
-        guard sessionStatusSplitView.subviews.count == 2 else { return }
-        let currentHeight = sessionStatusSplitView.bounds.height
-        guard currentHeight > sessionStatusSplitView.dividerThickness else { return }
-
-        defer { lastSessionStatusSplitHeight = currentHeight }
-
-        guard didApplyInitialSessionStatusSplitRatio else { return }
-        guard abs(currentHeight - lastSessionStatusSplitHeight) > 0.5 else { return }
-        setSessionStatusSplitRatio(sessionStatusSplitRatio)
     }
 
     private func preserveContentSplitRatioOnResizeIfNeeded() {
@@ -3557,18 +3714,6 @@ conn.close()
         setContentSplitRatio(contentSplitRatio)
     }
 
-    private func setSessionStatusSplitRatio(_ ratio: CGFloat) {
-        guard sessionStatusSplitView.subviews.count == 2 else { return }
-        let availableHeight = sessionStatusSplitView.bounds.height - sessionStatusSplitView.dividerThickness
-        guard availableHeight > 0 else { return }
-
-        let clampedRatio = min(max(ratio, 0.28), 0.82)
-        isApplyingSessionStatusSplitRatio = true
-        sessionStatusSplitView.setPosition(availableHeight * clampedRatio, ofDividerAt: 0)
-        sessionStatusSplitRatio = clampedRatio
-        isApplyingSessionStatusSplitRatio = false
-    }
-
     private func setContentSplitRatio(_ ratio: CGFloat) {
         guard contentSplitView.subviews.count == 2 else { return }
         let availableHeight = contentSplitView.bounds.height - contentSplitView.dividerThickness
@@ -3579,16 +3724,6 @@ conn.close()
         contentSplitView.setPosition(availableHeight * clampedRatio, ofDividerAt: 0)
         contentSplitRatio = clampedRatio
         isApplyingContentSplitRatio = false
-    }
-
-    private func updateSessionStatusSplitRatioFromCurrentLayout() {
-        guard !isApplyingSessionStatusSplitRatio else { return }
-        guard didApplyInitialSessionStatusSplitRatio else { return }
-        guard sessionStatusSplitView.subviews.count == 2 else { return }
-        let availableHeight = sessionStatusSplitView.bounds.height - sessionStatusSplitView.dividerThickness
-        guard availableHeight > 0 else { return }
-        let currentTopHeight = sessionStatusSplitView.subviews[0].frame.height
-        sessionStatusSplitRatio = min(max(currentTopHeight / availableHeight, 0.28), 0.82)
     }
 
     private func updateContentSplitRatioFromCurrentLayout() {
@@ -5680,10 +5815,7 @@ conn.close()
         setStatus("检测会话执行中…", key: "scan")
         appendOutput("执行 检测会话: session-count + probe-all batches")
         invalidateSessionSearch(resetPromptCache: true)
-        allSessionSnapshots = []
-        sessionSnapshots = []
         sessionStatusMetaLabel.stringValue = "视图: 普通 | 正在准备扫描…"
-        sessionStatusTableView.reloadData()
 
         DispatchQueue.global(qos: .userInitiated).async {
             let countResult = self.runInterruptibleSessionHelper(arguments: ["session-count"])
@@ -5698,10 +5830,7 @@ conn.close()
                     self.isSessionScanRunning = false
                     self.activeSessionScanMode = nil
                     self.updateDetectStatusButtonState()
-                    self.allSessionSnapshots = []
-                    self.sessionSnapshots = []
                     self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 检测会话失败: \(countResult.stderr.isEmpty ? countResult.stdout : countResult.stderr)"
-                    self.sessionStatusTableView.reloadData()
                     self.setStatus("检测会话失败", key: "scan", color: .systemRed)
                     if !countResult.stderr.isEmpty {
                         self.appendOutput("stderr: \(countResult.stderr)")
@@ -5717,6 +5846,8 @@ conn.close()
                     self.isSessionScanRunning = false
                     self.activeSessionScanMode = nil
                     self.updateDetectStatusButtonState()
+                    self.allSessionSnapshots = []
+                    self.sessionSnapshots = []
                     self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 没有可扫描的 session。"
                     self.sessionStatusTableView.reloadData()
                     self.setStatus("检测会话完成", key: "scan")
@@ -5732,6 +5863,7 @@ conn.close()
             var scannedCount = 0
             var encounteredFailure = false
             var failureDetail = ""
+            var pendingSnapshots: [SessionSnapshot] = []
 
             while offset < totalCount {
                 if self.sessionScanShouldStop || self.sessionScanGeneration != generation {
@@ -5752,10 +5884,11 @@ conn.close()
 
                 let batchSnapshots = parseProbeAllOutput(batchResult.stdout)
                 scannedCount = min(totalCount, offset + batchSize)
+                pendingSnapshots = mergeSessionSnapshots(existing: pendingSnapshots, newSnapshots: batchSnapshots)
 
                 DispatchQueue.main.async {
                     guard self.sessionScanGeneration == generation else { return }
-                    self.allSessionSnapshots = mergeSessionSnapshots(existing: self.allSessionSnapshots, newSnapshots: batchSnapshots)
+                    self.allSessionSnapshots = pendingSnapshots
                     self.renderSessionSnapshots(scannedCount: scannedCount, totalCount: totalCount, isComplete: scannedCount >= totalCount)
                     if scannedCount < totalCount {
                         self.setStatus("检测会话执行中… \(scannedCount)/\(totalCount)", key: "scan")
@@ -5806,10 +5939,7 @@ conn.close()
         setStatus("读取已归档 session 中…", key: "scan")
         appendOutput("执行 检测会话: thread-list --archived")
         invalidateSessionSearch(resetPromptCache: true)
-        allSessionSnapshots = []
-        sessionSnapshots = []
         sessionStatusMetaLabel.stringValue = "视图: 已归档 | 正在读取列表…"
-        sessionStatusTableView.reloadData()
 
         DispatchQueue.global(qos: .userInitiated).async {
             let result = self.runInterruptibleSessionHelper(arguments: ["thread-list", "--archived"])
@@ -5825,11 +5955,7 @@ conn.close()
                 self.updateDetectStatusButtonState()
 
                 if result.status != 0 {
-                    self.allSessionSnapshots = []
-                    self.sessionSnapshots = []
                     self.sessionStatusMetaLabel.stringValue = "视图: 已归档 | 读取失败: \(result.stderr.isEmpty ? result.stdout : result.stderr)"
-                    self.sessionStatusTableView.reloadData()
-                    self.updateSessionDetailView()
                     self.setStatus("读取已归档 session 失败", key: "scan")
                     if !result.stderr.isEmpty {
                         self.appendOutput("stderr: \(result.stderr)")
@@ -6827,12 +6953,7 @@ conn.close()
 
     func splitViewDidResizeSubviews(_ notification: Notification) {
         guard let splitView = notification.object as? NSSplitView else { return }
-        if splitView == sessionStatusSplitView {
-            let heightDelta = abs(sessionStatusSplitView.bounds.height - lastSessionStatusSplitHeight)
-            if heightDelta <= 0.5 {
-                updateSessionStatusSplitRatioFromCurrentLayout()
-            }
-        } else if splitView == contentSplitView {
+        if splitView == contentSplitView {
             let heightDelta = abs(contentSplitView.bounds.height - lastContentSplitHeight)
             if heightDelta <= 0.5 {
                 updateContentSplitRatioFromCurrentLayout()
@@ -6841,7 +6962,7 @@ conn.close()
     }
 
     func splitView(_ splitView: NSSplitView, effectiveRect proposedEffectiveRect: NSRect, forDrawnRect drawnRect: NSRect, ofDividerAt dividerIndex: Int) -> NSRect {
-        guard splitView == sessionStatusSplitView || splitView == contentSplitView else {
+        guard splitView == contentSplitView else {
             return proposedEffectiveRect
         }
 
@@ -6852,19 +6973,11 @@ conn.close()
     }
 
     func splitView(_ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        if splitView == sessionStatusSplitView {
-            let availableHeight = splitView.bounds.height - splitView.dividerThickness
-            guard availableHeight > 0 else { return proposedPosition }
-            let minTop: CGFloat = 110
-            let minBottom: CGFloat = 92
-            return min(max(proposedPosition, minTop), availableHeight - minBottom)
-        }
-
         if splitView == contentSplitView {
             let availableHeight = splitView.bounds.height - splitView.dividerThickness
             guard availableHeight > 0 else { return proposedPosition }
-            let minTop = LayoutMetrics.topPaneMinHeight
-            let minBottom = LayoutMetrics.bottomPaneMinHeight
+            let minTop = topPaneMinimumHeight
+            let minBottom = bottomPaneMinimumHeight
             return min(max(proposedPosition, minTop), availableHeight - minBottom)
         }
 

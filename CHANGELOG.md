@@ -8,6 +8,7 @@
 - Session 详情区补充 provider、parent、agent 等元数据的展示语义
 - provider 迁移按钮统一为 `迁移当前会话` / `迁移全部会话`
 - 目标 provider 与当前 provider 相同的场景，改为提示“无需迁移”
+- 顶部按钮区和右侧 `Session Status` 面板的最小高度，改为按控件真实 `fittingSize` 推导，避免启动首帧和窗口缩放时出现按钮/详情区被压扁
 
 ### Session 操作
 

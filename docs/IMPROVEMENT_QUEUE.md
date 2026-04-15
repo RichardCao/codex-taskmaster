@@ -2,6 +2,11 @@
 
 本文档用于跟踪当前确定要做的 10 个改进任务。
 
+补充说明：
+
+- 结构性运行时风险、协议收口、控制器拆分和测试补强，统一记录在 [TECH_DEBT_PLAN.md](/Users/create/codex-terminal-app/docs/TECH_DEBT_PLAN.md)
+- 本文档更偏向当前功能改进队列，不单独展开大规模技术债治理项
+
 状态说明：
 
 - `pending`：还未开始
