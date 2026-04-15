@@ -549,6 +549,18 @@ status_all_with_stopped="$("$HELPER" status)"
 assert_contains "$status_all_with_stopped" "target: alpha"
 assert_contains "$status_all_with_stopped" "stopped: yes"
 
+status_without_home="$(
+  env -i \
+    PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+    CODEX_TASKMASTER_STATE_DIR="$STATE_DIR" \
+    CODEX_TASKMASTER_CODEX_STATE_DB_PATH="$STATE_DB" \
+    CODEX_TASKMASTER_CODEX_LOGS_DB_PATH="$LOGS_DB" \
+    CODEX_TASKMASTER_CODEX_SESSION_INDEX_PATH="$SESSION_INDEX" \
+    "$HELPER" status -t alpha
+)"
+assert_contains "$status_without_home" "target: alpha"
+assert_contains "$status_without_home" "stopped: yes"
+
 "$HELPER" loop-save-stopped -t alpha -i 45 -m start-failure -r tty_unavailable >/dev/null
 start_failed_loop_status="$("$HELPER" status -t alpha)"
 assert_contains "$start_failed_loop_status" "stopped: yes"

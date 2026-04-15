@@ -3515,16 +3515,24 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return nil
     }
 
-    private func sessionProviderPlan(threadID: String, targetProvider: String) -> [String: String]? {
-        let result = runStandardHelper(arguments: ["thread-provider-plan", "-t", threadID, "-p", targetProvider])
-        guard result.status == 0 else { return nil }
-        return parseStructuredHelperFields(result.stdout)
+    private func sessionProviderPlanAsync(threadID: String, targetProvider: String, completion: @escaping ([String: String]?) -> Void) {
+        runStandardHelperAsync(arguments: ["thread-provider-plan", "-t", threadID, "-p", targetProvider]) { result in
+            guard result.status == 0 else {
+                completion(nil)
+                return
+            }
+            completion(self.parseStructuredHelperFields(result.stdout))
+        }
     }
 
-    private func allSessionProviderPlan(targetProvider: String) -> [String: String]? {
-        let result = runStandardHelper(arguments: ["thread-provider-plan-all", "-p", targetProvider])
-        guard result.status == 0 else { return nil }
-        return parseStructuredHelperFields(result.stdout)
+    private func allSessionProviderPlanAsync(targetProvider: String, completion: @escaping ([String: String]?) -> Void) {
+        runStandardHelperAsync(arguments: ["thread-provider-plan-all", "-p", targetProvider]) { result in
+            guard result.status == 0 else {
+                completion(nil)
+                return
+            }
+            completion(self.parseStructuredHelperFields(result.stdout))
+        }
     }
 
     private func migrateSessionProvider(threadID: String, targetProvider: String, includeFamily: Bool) -> (success: Bool, detail: String) {
@@ -3645,10 +3653,98 @@ conn.close()
         return (false, detail)
     }
 
-    private func sessionFamilyPlan(threadID: String) -> [String: String]? {
-        let result = runStandardHelper(arguments: ["thread-family-plan", "-t", threadID])
-        guard result.status == 0 else { return nil }
-        return parseStructuredHelperFields(result.stdout)
+    private func sessionFamilyPlanAsync(threadID: String, completion: @escaping ([String: String]?) -> Void) {
+        runStandardHelperAsync(arguments: ["thread-family-plan", "-t", threadID]) { result in
+            guard result.status == 0 else {
+                completion(nil)
+                return
+            }
+            completion(self.parseStructuredHelperFields(result.stdout))
+        }
+    }
+
+    private func promptForSessionDeletion(session: SessionSnapshot, matchingLoopTargets: [String], familyPlan: [String: String]?) -> (includeDescendants: Bool, descendantIDs: [String])? {
+        let parentThreadID = familyPlan?["parent_thread_id"] ?? "-"
+        let directChildCount = Int(familyPlan?["direct_child_count"] ?? "0") ?? 0
+        let descendantIDs = (familyPlan?["descendant_ids"] ?? "")
+            .split(separator: ",")
+            .map { String($0) }
+            .filter { !$0.isEmpty }
+        let descendantCount = Int(familyPlan?["descendant_count"] ?? "\(descendantIDs.count)") ?? descendantIDs.count
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "彻底删除这个 Session？"
+        var informativeText = """
+        这是本地不可恢复删除，不是 Codex 当前公开的原生 archive/unarchive 语义。
+        删除后会尝试同时移除：
+        - state_5.sqlite 中的 thread 记录
+        - 相关的本地扩展状态和结构化 thread 日志
+        - session_index.jsonl 中对应的 rename/name 记录
+        - 当前 rollout 文件（无论在 sessions 还是 archived_sessions）
+
+        已知风险：
+        - 目前没有公开的 Codex 原生永久删除 API，这是一种本地硬删除
+        - 删除后通常无法恢复
+        - 如果未来 Codex 增加了新的本地索引格式，这里可能删不全
+
+        Session ID: \(session.threadID)
+        Name: \(sessionActualName(session).isEmpty ? "-" : sessionActualName(session))
+        当前路径: \(session.rolloutPath.isEmpty ? "-" : session.rolloutPath)
+        """
+        if parentThreadID != "-" {
+            informativeText += """
+
+
+            提示：这条 session 有父 agent：
+            \(parentThreadID)
+            默认不会删除父 agent。
+            """
+        }
+        if directChildCount > 0 || descendantCount > 0 {
+            informativeText += """
+
+
+            这条 session 下还有子 agent 会话。
+            直接子会话数: \(directChildCount)
+            递归子会话总数: \(descendantCount)
+            """
+        }
+        if !matchingLoopTargets.isEmpty {
+            informativeText += """
+
+            
+            警告：当前有循环任务仍可能指向这个 session：
+            \(matchingLoopTargets.joined(separator: ", "))
+            删除后这些循环不会自动停止，后续只会继续失败或延期。
+            """
+        }
+        alert.informativeText = informativeText
+        if descendantCount > 0 {
+            alert.addButton(withTitle: "删除当前和子会话")
+            alert.addButton(withTitle: "只删当前")
+            alert.addButton(withTitle: "取消")
+        } else {
+            alert.addButton(withTitle: "删除")
+            alert.addButton(withTitle: "取消")
+        }
+        alert.buttons.first?.hasDestructiveAction = true
+
+        let response = alert.runModal()
+        if descendantCount > 0 {
+            if response == .alertFirstButtonReturn {
+                return (true, descendantIDs)
+            }
+            if response == .alertSecondButtonReturn {
+                return (false, descendantIDs)
+            }
+            return nil
+        }
+
+        guard response == .alertFirstButtonReturn else {
+            return nil
+        }
+        return (false, [])
     }
 
     private func deleteSessionsRecursively(threadIDs: [String]) -> (success: Bool, detail: String) {
@@ -5252,6 +5348,16 @@ conn.close()
         return true
     }
 
+    private func saveStoppedLoopEntryAsync(target: String, interval: String, message: String, forceSend: Bool, reason: String, completion: ((Bool) -> Void)? = nil) {
+        DispatchQueue.global(qos: .utility).async {
+            let success = self.saveStoppedLoopEntry(target: target, interval: interval, message: message, forceSend: forceSend, reason: reason)
+            guard let completion else { return }
+            DispatchQueue.main.async {
+                completion(success)
+            }
+        }
+    }
+
     private func isAmbiguousTargetError(_ detail: String) -> Bool {
         detail.contains("found multiple matching sessions for target") ||
         detail.contains("found multiple matching thread titles for target") ||
@@ -5281,19 +5387,11 @@ conn.close()
         return true
     }
 
-    private func validateUniqueTarget(_ target: String, actionName: String) -> Bool {
-        let result = runStandardHelper(arguments: ["resolve-thread-id", "-t", target])
-        return handleUniqueTargetValidationResult(result, target: target, actionName: actionName)
-    }
-
     private func validateUniqueTargetAsync(target: String, actionName: String, completion: @escaping (Bool) -> Void) {
         lastTargetValidationFailureReason = nil
         lastTargetValidationFailureDetail = ""
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = self.runStandardHelper(arguments: ["resolve-thread-id", "-t", target])
-            DispatchQueue.main.async {
-                completion(self.handleUniqueTargetValidationResult(result, target: target, actionName: actionName))
-            }
+        runStandardHelperAsync(arguments: ["resolve-thread-id", "-t", target]) { result in
+            completion(self.handleUniqueTargetValidationResult(result, target: target, actionName: actionName))
         }
     }
 
@@ -5531,6 +5629,19 @@ conn.close()
         }
     }
 
+    private func runStandardHelperAsync(
+        arguments: [String],
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping ((status: Int32, stdout: String, stderr: String)) -> Void
+    ) {
+        DispatchQueue.global(qos: qos).async {
+            let result = self.runStandardHelper(arguments: arguments)
+            DispatchQueue.main.async {
+                completion(result)
+            }
+        }
+    }
+
     private func runInterruptibleSessionHelper(arguments: [String]) -> (status: Int32, stdout: String, stderr: String) {
         do {
             let result = try SubprocessRunner.run(
@@ -5633,8 +5744,10 @@ conn.close()
                     self.appendOutput("stderr: \(startResult.stderr)")
                 }
                 if startResult.status != 0, failureText != nil {
-                    _ = self.saveStoppedLoopEntry(target: target, interval: interval, message: message, forceSend: forceSend, reason: "start_failed")
-                    self.appendOutput("已将开始失败的循环保留为停止状态。")
+                    self.saveStoppedLoopEntryAsync(target: target, interval: interval, message: message, forceSend: forceSend, reason: "start_failed") { _ in
+                        self.appendOutput("已将开始失败的循环保留为停止状态。")
+                        self.requestLoopSnapshotRefresh()
+                    }
                 }
                 if startResult.status == 0 {
                     self.recordCurrentInputsInHistory()
@@ -5685,12 +5798,12 @@ conn.close()
     }
 
     private func finishLoopSnapshotRefresh() {
-        if pendingLoopSnapshotRefresh {
-            pendingLoopSnapshotRefresh = false
-            refreshLoopsSnapshot()
-            return
-        }
         isRefreshingLoopsSnapshot = false
+        let shouldRefreshAgain = pendingLoopSnapshotRefresh
+        pendingLoopSnapshotRefresh = false
+        if shouldRefreshAgain {
+            refreshLoopsSnapshot()
+        }
     }
 
     private func refreshLoopsSnapshot() {
@@ -5966,9 +6079,10 @@ conn.close()
         guard sendRequestCoordinator.ensurePermission(prompt: true) else {
             appendOutput("Codex Taskmaster 缺少辅助功能权限，无法处理循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
             setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
-            _ = saveStoppedLoopEntry(target: target, interval: interval, message: currentMessage(), forceSend: isForceSendEnabled(), reason: "missing_accessibility_permission")
+            saveStoppedLoopEntryAsync(target: target, interval: interval, message: currentMessage(), forceSend: isForceSendEnabled(), reason: "missing_accessibility_permission") { _ in
+                self.requestLoopSnapshotRefresh()
+            }
             setStatus("开始循环失败", key: "action", color: .systemRed)
-            requestLoopSnapshotRefresh()
             NSSound.beep()
             return
         }
@@ -5977,9 +6091,10 @@ conn.close()
         validateUniqueTargetAsync(target: target, actionName: "开始循环") { isValid in
             guard isValid else {
                 let reason = self.lastTargetValidationFailureReason ?? "start_failed"
-                _ = self.saveStoppedLoopEntry(target: target, interval: interval, message: self.currentMessage(), forceSend: self.isForceSendEnabled(), reason: reason)
+                self.saveStoppedLoopEntryAsync(target: target, interval: interval, message: self.currentMessage(), forceSend: self.isForceSendEnabled(), reason: reason) { _ in
+                    self.requestLoopSnapshotRefresh()
+                }
                 self.setStatus("开始循环失败", key: "action", color: .systemRed)
-                self.requestLoopSnapshotRefresh()
                 self.setButtonsEnabled(true)
                 return
             }
@@ -6419,135 +6534,67 @@ conn.close()
         }
 
         let session = sessionSnapshots[selectedRow]
-        let familyPlan = sessionFamilyPlan(threadID: session.threadID)
         let matchingLoopTargets = loopTargetsAffectingSession(session)
-        let parentThreadID = familyPlan?["parent_thread_id"] ?? "-"
-        let directChildCount = Int(familyPlan?["direct_child_count"] ?? "0") ?? 0
-        let descendantIDs = (familyPlan?["descendant_ids"] ?? "")
-            .split(separator: ",")
-            .map { String($0) }
-            .filter { !$0.isEmpty }
-        let descendantCount = Int(familyPlan?["descendant_count"] ?? "\(descendantIDs.count)") ?? descendantIDs.count
+        setButtonsEnabled(false)
+        setStatus("读取删除计划中…", key: "action")
 
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "彻底删除这个 Session？"
-        var informativeText = """
-        这是本地不可恢复删除，不是 Codex 当前公开的原生 archive/unarchive 语义。
-        删除后会尝试同时移除：
-        - state_5.sqlite 中的 thread 记录
-        - 相关的本地扩展状态和结构化 thread 日志
-        - session_index.jsonl 中对应的 rename/name 记录
-        - 当前 rollout 文件（无论在 sessions 还是 archived_sessions）
+        sessionFamilyPlanAsync(threadID: session.threadID) { familyPlan in
+            self.setButtonsEnabled(true)
 
-        已知风险：
-        - 目前没有公开的 Codex 原生永久删除 API，这是一种本地硬删除
-        - 删除后通常无法恢复
-        - 如果未来 Codex 增加了新的本地索引格式，这里可能删不全
-
-        Session ID: \(session.threadID)
-        Name: \(sessionActualName(session).isEmpty ? "-" : sessionActualName(session))
-        当前路径: \(session.rolloutPath.isEmpty ? "-" : session.rolloutPath)
-        """
-        if parentThreadID != "-" {
-            informativeText += """
-
-
-            提示：这条 session 有父 agent：
-            \(parentThreadID)
-            默认不会删除父 agent。
-            """
-        }
-        if directChildCount > 0 || descendantCount > 0 {
-            informativeText += """
-
-
-            这条 session 下还有子 agent 会话。
-            直接子会话数: \(directChildCount)
-            递归子会话总数: \(descendantCount)
-            """
-        }
-        if !matchingLoopTargets.isEmpty {
-            informativeText += """
-
-            
-            警告：当前有循环任务仍可能指向这个 session：
-            \(matchingLoopTargets.joined(separator: ", "))
-            删除后这些循环不会自动停止，后续只会继续失败或延期。
-            """
-        }
-        alert.informativeText = informativeText
-        if descendantCount > 0 {
-            alert.addButton(withTitle: "删除当前和子会话")
-            alert.addButton(withTitle: "只删当前")
-            alert.addButton(withTitle: "取消")
-        } else {
-            alert.addButton(withTitle: "删除")
-            alert.addButton(withTitle: "取消")
-        }
-        alert.buttons.first?.hasDestructiveAction = true
-
-        let includeDescendants: Bool
-        let response = alert.runModal()
-        if descendantCount > 0 {
-            if response == .alertFirstButtonReturn {
-                includeDescendants = true
-            } else if response == .alertSecondButtonReturn {
-                includeDescendants = false
-            } else {
+            guard let deletionPlan = self.promptForSessionDeletion(
+                session: session,
+                matchingLoopTargets: matchingLoopTargets,
+                familyPlan: familyPlan
+            ) else {
+                self.setStatus("彻底删除已取消", key: "action")
                 return
             }
-        } else {
-            guard response == .alertFirstButtonReturn else {
-                return
-            }
-            includeDescendants = false
-        }
 
-        saveRenameButton.isEnabled = false
-        archiveSessionButton.isEnabled = false
-        restoreSessionButton.isEnabled = false
-        deleteSessionButton.isEnabled = false
-        migrateSessionProviderButton.isEnabled = false
-        migrateAllSessionsProviderButton.isEnabled = false
-        renameField.isEnabled = false
-        setStatus("彻底删除中…", key: "action")
-        let targetThreadIDs = includeDescendants ? ([session.threadID] + descendantIDs) : [session.threadID]
-        appendOutput("执行 彻底删除: thread_ids=\(targetThreadIDs.joined(separator: ","))")
+            self.saveRenameButton.isEnabled = false
+            self.archiveSessionButton.isEnabled = false
+            self.restoreSessionButton.isEnabled = false
+            self.deleteSessionButton.isEnabled = false
+            self.migrateSessionProviderButton.isEnabled = false
+            self.migrateAllSessionsProviderButton.isEnabled = false
+            self.renameField.isEnabled = false
+            self.setStatus("彻底删除中…", key: "action")
+            let targetThreadIDs = deletionPlan.includeDescendants ? ([session.threadID] + deletionPlan.descendantIDs) : [session.threadID]
+            self.appendOutput("执行 彻底删除: thread_ids=\(targetThreadIDs.joined(separator: ","))")
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            let orderedThreadIDs = includeDescendants ? (descendantIDs.reversed() + [session.threadID]) : [session.threadID]
-            let result = self.deleteSessionsRecursively(threadIDs: orderedThreadIDs)
+            DispatchQueue.global(qos: .userInitiated).async {
+                let orderedThreadIDs = deletionPlan.includeDescendants ? (deletionPlan.descendantIDs.reversed() + [session.threadID]) : [session.threadID]
+                let result = self.deleteSessionsRecursively(threadIDs: orderedThreadIDs)
 
-            DispatchQueue.main.async {
-                if result.success {
-                    let deletedSet = Set(orderedThreadIDs)
-                    self.allSessionSnapshots.removeAll { deletedSet.contains($0.threadID) }
-                    self.sessionSnapshots.removeAll { deletedSet.contains($0.threadID) }
-                    if self.sessionScanTotal > 0 {
-                        self.sessionScanTotal = max(0, self.sessionScanTotal - orderedThreadIDs.count)
-                    }
-                    self.invalidateSessionSearch()
-                    self.renderSessionSnapshots(
-                        scannedCount: self.allSessionSnapshots.count,
-                        totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.allSessionSnapshots.count,
-                        isComplete: true
-                    )
-                    self.setStatus("彻底删除完成", key: "action")
-                    self.appendOutput(result.detail.isEmpty ? "已彻底删除 session: \(orderedThreadIDs.joined(separator: ","))" : "已彻底删除 session: \(result.detail)")
-                    self.refreshLoopsSnapshot()
-                } else {
-                    if let fields = self.parseStructuredHelperFields(result.detail) {
-                        let reason = fields["reason"] ?? ""
-                        if reason == "session_delete_live" || reason == "session_delete_live_ambiguous" {
-                            let detail = fields["detail"] ?? result.detail
-                            self.showSessionActionBlockedAlert(actionLabel: "删除", session: session, detail: detail, ambiguous: reason == "session_delete_live_ambiguous")
+                DispatchQueue.main.async {
+                    if result.success {
+                        let deletedSet = Set(orderedThreadIDs)
+                        self.allSessionSnapshots.removeAll { deletedSet.contains($0.threadID) }
+                        self.sessionSnapshots.removeAll { deletedSet.contains($0.threadID) }
+                        if self.sessionScanTotal > 0 {
+                            self.sessionScanTotal = max(0, self.sessionScanTotal - orderedThreadIDs.count)
                         }
+                        self.invalidateSessionSearch()
+                        self.renderSessionSnapshots(
+                            scannedCount: self.allSessionSnapshots.count,
+                            totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.allSessionSnapshots.count,
+                            isComplete: true
+                        )
+                        self.setStatus("彻底删除完成", key: "action")
+                        self.appendOutput(result.detail.isEmpty ? "已彻底删除 session: \(orderedThreadIDs.joined(separator: ","))" : "已彻底删除 session: \(result.detail)")
+                        self.refreshLoopsSnapshot()
+                    } else {
+                        if let fields = self.parseStructuredHelperFields(result.detail) {
+                            let reason = fields["reason"] ?? ""
+                            if reason == "session_delete_live" || reason == "session_delete_live_ambiguous" {
+                                let detail = fields["detail"] ?? result.detail
+                                self.showSessionActionBlockedAlert(actionLabel: "删除", session: session, detail: detail, ambiguous: reason == "session_delete_live_ambiguous")
+                            }
+                        }
+                        self.updateSessionDetailView()
+                        self.setStatus("彻底删除失败", key: "action")
+                        self.appendOutput("stderr: \(result.detail)")
+                        NSSound.beep()
                     }
-                    self.updateSessionDetailView()
-                    self.setStatus("彻底删除失败", key: "action")
-                    self.appendOutput("stderr: \(result.detail)")
-                    NSSound.beep()
                 }
             }
         }
@@ -6567,98 +6614,109 @@ conn.close()
             NSSound.beep()
             return
         }
-
-        guard let plan = sessionProviderPlan(threadID: session.threadID, targetProvider: targetProvider) else {
-            appendOutput("读取 session provider 迁移计划失败。")
-            setStatus("读取迁移计划失败", key: "action")
-            NSSound.beep()
-            return
-        }
-
-        let isSubagent = (plan["is_subagent"] ?? "no") == "yes"
-        let familyCount = Int(plan["family_count"] ?? "1") ?? 1
-        let familyMigrateNeeded = Int(plan["family_migrate_needed_count"] ?? "0") ?? 0
-        let currentProvider = plan["current_provider"] ?? session.provider
-        let directChildCount = Int(plan["direct_child_count"] ?? "0") ?? 0
-        let currentProviderDisplay = currentProvider.isEmpty ? "-" : currentProvider
-
-        if currentProvider == targetProvider && familyMigrateNeeded == 0 {
-            let alert = NSAlert()
-            alert.alertStyle = .informational
-            alert.messageText = "无需迁移"
-            alert.informativeText = """
-            当前选中会话及其相关会话的 Provider 已经是目标值。
-
-            当前 Provider: \(currentProviderDisplay)
-            目标 Provider: \(targetProvider)
-            相关会话数: \(familyCount)
-            """
-            alert.addButton(withTitle: "确定")
-            alert.runModal()
-            appendOutput("迁移已取消：当前会话及相关会话的 provider 已经是 \(targetProvider)。")
-            setStatus("无需迁移", key: "action")
-            return
-        }
-
-        var includeFamily = false
-        if isSubagent || directChildCount > 0 {
-            let alert = NSAlert()
-            alert.alertStyle = .warning
-            alert.messageText = "迁移相关 Session 到当前 Provider？"
-            alert.informativeText = """
-            当前 Provider: \(targetProvider)
-            选中 Session 当前 Provider: \(currentProviderDisplay)
-            Session ID: \(session.threadID)
-            Type: \(sessionTypeLabel(session))
-
-            这条 session \(isSubagent ? "属于子 agent 会话" : "存在子 agent 会话")。
-            相关会话总数: \(familyCount)
-            需要迁移的相关会话数: \(familyMigrateNeeded)
-
-            你可以只迁移当前这一条，也可以递归迁移整组相关 session。
-            """
-            alert.addButton(withTitle: "迁移相关")
-            alert.addButton(withTitle: "仅迁移当前")
-            alert.addButton(withTitle: "取消")
-            let response = alert.runModal()
-            if response == .alertFirstButtonReturn {
-                includeFamily = true
-            } else if response != .alertSecondButtonReturn {
-                return
-            }
-        } else {
-            let alert = NSAlert()
-            alert.alertStyle = .informational
-            alert.messageText = "迁移当前 Session 到当前 Provider？"
-            alert.informativeText = """
-            当前 Provider: \(targetProvider)
-            选中 Session 当前 Provider: \(currentProviderDisplay)
-            Session ID: \(session.threadID)
-            Type: \(sessionTypeLabel(session))
-            """
-            alert.addButton(withTitle: "迁移")
-            alert.addButton(withTitle: "取消")
-            guard alert.runModal() == .alertFirstButtonReturn else {
-                return
-            }
-        }
-
         setButtonsEnabled(false)
-        setStatus("迁移 Session Provider 中…", key: "action")
-        appendOutput("执行 迁移 Session Provider: thread_id=\(session.threadID) target_provider=\(targetProvider) scope=\(includeFamily ? "family" : "current")")
+        setStatus("读取迁移计划中…", key: "action")
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = self.migrateSessionProvider(threadID: session.threadID, targetProvider: targetProvider, includeFamily: includeFamily)
-            DispatchQueue.main.async {
-                self.setButtonsEnabled(true)
-                if result.success {
-                    self.setStatus("迁移 Session Provider 完成", key: "action")
-                    self.appendOutput(result.detail)
-                    self.detectStatuses()
+        sessionProviderPlanAsync(threadID: session.threadID, targetProvider: targetProvider) { plan in
+            self.setButtonsEnabled(true)
+
+            guard let plan else {
+                self.appendOutput("读取 session provider 迁移计划失败。")
+                self.setStatus("读取迁移计划失败", key: "action")
+                NSSound.beep()
+                return
+            }
+
+            let isSubagent = (plan["is_subagent"] ?? "no") == "yes"
+            let familyCount = Int(plan["family_count"] ?? "1") ?? 1
+            let familyMigrateNeeded = Int(plan["family_migrate_needed_count"] ?? "0") ?? 0
+            let currentProvider = plan["current_provider"] ?? session.provider
+            let directChildCount = Int(plan["direct_child_count"] ?? "0") ?? 0
+            let currentProviderDisplay = currentProvider.isEmpty ? "-" : currentProvider
+
+            if currentProvider == targetProvider && familyMigrateNeeded == 0 {
+                let alert = NSAlert()
+                alert.alertStyle = .informational
+                alert.messageText = "无需迁移"
+                alert.informativeText = """
+                当前选中会话及其相关会话的 Provider 已经是目标值。
+
+                当前 Provider: \(currentProviderDisplay)
+                目标 Provider: \(targetProvider)
+                相关会话数: \(familyCount)
+                """
+                alert.addButton(withTitle: "确定")
+                alert.runModal()
+                self.appendOutput("迁移已取消：当前会话及相关会话的 provider 已经是 \(targetProvider)。")
+                self.setStatus("无需迁移", key: "action")
+                return
+            }
+
+            let includeFamily: Bool
+            if isSubagent || directChildCount > 0 {
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = "迁移相关 Session 到当前 Provider？"
+                alert.informativeText = """
+                当前 Provider: \(targetProvider)
+                选中 Session 当前 Provider: \(currentProviderDisplay)
+                Session ID: \(session.threadID)
+                Type: \(sessionTypeLabel(session))
+
+                这条 session \(isSubagent ? "属于子 agent 会话" : "存在子 agent 会话")。
+                相关会话总数: \(familyCount)
+                需要迁移的相关会话数: \(familyMigrateNeeded)
+
+                你可以只迁移当前这一条，也可以递归迁移整组相关 session。
+                """
+                alert.addButton(withTitle: "迁移相关")
+                alert.addButton(withTitle: "仅迁移当前")
+                alert.addButton(withTitle: "取消")
+                let response = alert.runModal()
+                if response == .alertFirstButtonReturn {
+                    includeFamily = true
+                } else if response == .alertSecondButtonReturn {
+                    includeFamily = false
                 } else {
-                    self.setStatus("迁移 Session Provider 失败", key: "action")
-                    self.appendOutput("stderr: \(result.detail)")
-                    NSSound.beep()
+                    self.setStatus("迁移 Session Provider 已取消", key: "action")
+                    return
+                }
+            } else {
+                let alert = NSAlert()
+                alert.alertStyle = .informational
+                alert.messageText = "迁移当前 Session 到当前 Provider？"
+                alert.informativeText = """
+                当前 Provider: \(targetProvider)
+                选中 Session 当前 Provider: \(currentProviderDisplay)
+                Session ID: \(session.threadID)
+                Type: \(sessionTypeLabel(session))
+                """
+                alert.addButton(withTitle: "迁移")
+                alert.addButton(withTitle: "取消")
+                guard alert.runModal() == .alertFirstButtonReturn else {
+                    self.setStatus("迁移 Session Provider 已取消", key: "action")
+                    return
+                }
+                includeFamily = false
+            }
+
+            self.setButtonsEnabled(false)
+            self.setStatus("迁移 Session Provider 中…", key: "action")
+            self.appendOutput("执行 迁移 Session Provider: thread_id=\(session.threadID) target_provider=\(targetProvider) scope=\(includeFamily ? "family" : "current")")
+
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = self.migrateSessionProvider(threadID: session.threadID, targetProvider: targetProvider, includeFamily: includeFamily)
+                DispatchQueue.main.async {
+                    self.setButtonsEnabled(true)
+                    if result.success {
+                        self.setStatus("迁移 Session Provider 完成", key: "action")
+                        self.appendOutput(result.detail)
+                        self.detectStatuses()
+                    } else {
+                        self.setStatus("迁移 Session Provider 失败", key: "action")
+                        self.appendOutput("stderr: \(result.detail)")
+                        NSSound.beep()
+                    }
                 }
             }
         }
@@ -6672,67 +6730,75 @@ conn.close()
             NSSound.beep()
             return
         }
-        guard let plan = allSessionProviderPlan(targetProvider: targetProvider) else {
-            appendOutput("读取全部 session provider 迁移计划失败。")
-            setStatus("读取迁移计划失败", key: "action")
-            NSSound.beep()
-            return
-        }
-
-        let migrateNeeded = Int(plan["migrate_needed_count"] ?? "0") ?? 0
-        let totalThreads = Int(plan["total_threads"] ?? "0") ?? 0
-
-        if migrateNeeded == 0 {
-            let alert = NSAlert()
-            alert.alertStyle = .informational
-            alert.messageText = "无需迁移"
-            alert.informativeText = """
-            本地所有会话的 Provider 已经是目标值。
-
-            目标 Provider: \(targetProvider)
-            会话总数: \(totalThreads)
-            """
-            alert.addButton(withTitle: "确定")
-            alert.runModal()
-            appendOutput("全部迁移已取消：所有 session 的 provider 已经是 \(targetProvider)。")
-            setStatus("无需迁移", key: "action")
-            return
-        }
-
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "将所有 Session 迁移到当前 Provider？"
-        alert.informativeText = """
-        当前 Provider: \(targetProvider)
-        本地 Session 总数: \(totalThreads)
-        需要迁移的 Session 数: \(migrateNeeded)
-
-        这会直接改写本地 state_5.sqlite 中的 threads.model_provider。
-        不会改写 source，也不会重写 rollout 文件。
-        """
-        alert.addButton(withTitle: "全部迁移")
-        alert.addButton(withTitle: "取消")
-        alert.buttons.first?.hasDestructiveAction = true
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            return
-        }
-
         setButtonsEnabled(false)
-        setStatus("迁移全部 Session Provider 中…", key: "action")
-        appendOutput("执行 全部迁移 Session Provider: target_provider=\(targetProvider)")
+        setStatus("读取迁移计划中…", key: "action")
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = self.migrateAllSessionsProvider(targetProvider: targetProvider)
-            DispatchQueue.main.async {
-                self.setButtonsEnabled(true)
-                if result.success {
-                    self.setStatus("迁移全部 Session Provider 完成", key: "action")
-                    self.appendOutput(result.detail)
-                    self.detectStatuses()
-                } else {
-                    self.setStatus("迁移全部 Session Provider 失败", key: "action")
-                    self.appendOutput("stderr: \(result.detail)")
-                    NSSound.beep()
+        allSessionProviderPlanAsync(targetProvider: targetProvider) { plan in
+            self.setButtonsEnabled(true)
+
+            guard let plan else {
+                self.appendOutput("读取全部 session provider 迁移计划失败。")
+                self.setStatus("读取迁移计划失败", key: "action")
+                NSSound.beep()
+                return
+            }
+
+            let migrateNeeded = Int(plan["migrate_needed_count"] ?? "0") ?? 0
+            let totalThreads = Int(plan["total_threads"] ?? "0") ?? 0
+
+            if migrateNeeded == 0 {
+                let alert = NSAlert()
+                alert.alertStyle = .informational
+                alert.messageText = "无需迁移"
+                alert.informativeText = """
+                本地所有会话的 Provider 已经是目标值。
+
+                目标 Provider: \(targetProvider)
+                会话总数: \(totalThreads)
+                """
+                alert.addButton(withTitle: "确定")
+                alert.runModal()
+                self.appendOutput("全部迁移已取消：所有 session 的 provider 已经是 \(targetProvider)。")
+                self.setStatus("无需迁移", key: "action")
+                return
+            }
+
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "将所有 Session 迁移到当前 Provider？"
+            alert.informativeText = """
+            当前 Provider: \(targetProvider)
+            本地 Session 总数: \(totalThreads)
+            需要迁移的 Session 数: \(migrateNeeded)
+
+            这会直接改写本地 state_5.sqlite 中的 threads.model_provider。
+            不会改写 source，也不会重写 rollout 文件。
+            """
+            alert.addButton(withTitle: "全部迁移")
+            alert.addButton(withTitle: "取消")
+            alert.buttons.first?.hasDestructiveAction = true
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                self.setStatus("迁移全部 Session Provider 已取消", key: "action")
+                return
+            }
+
+            self.setButtonsEnabled(false)
+            self.setStatus("迁移全部 Session Provider 中…", key: "action")
+            self.appendOutput("执行 全部迁移 Session Provider: target_provider=\(targetProvider)")
+
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = self.migrateAllSessionsProvider(targetProvider: targetProvider)
+                DispatchQueue.main.async {
+                    self.setButtonsEnabled(true)
+                    if result.success {
+                        self.setStatus("迁移全部 Session Provider 完成", key: "action")
+                        self.appendOutput(result.detail)
+                        self.detectStatuses()
+                    } else {
+                        self.setStatus("迁移全部 Session Provider 失败", key: "action")
+                        self.appendOutput("stderr: \(result.detail)")
+                        NSSound.beep()
+                    }
                 }
             }
         }

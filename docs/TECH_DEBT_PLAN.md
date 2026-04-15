@@ -19,8 +19,8 @@
 - 每完成一项任务，都保留一个独立 commit，便于回滚和 bisect
 - 当前执行顺序：
   1. `done` `SubprocessRunner`
-  2. `next` helper 后台化
-  3. `pending` UI 状态线程模型收口
+  2. `done` helper 后台化
+  3. `next` UI 状态线程模型收口
   4. `pending` 本地状态写路径统一走 helper
 
 ## 执行顺序
