@@ -5794,12 +5794,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             do {
                 let result = try SubprocessRunner.run(
                     executableURL: URL(fileURLWithPath: self.helperPath),
-                    arguments: ["status"]
+                    arguments: ["status", "--json"]
                 )
                 DispatchQueue.main.async {
-                    if result.terminationStatus == 0 {
-                        let loops = self.parseStatusOutput(result.trimmedStdout)
-                        let warnings = self.parseWarnings(from: result.trimmedStdout)
+                    if result.terminationStatus == 0,
+                       let decoded = parseLoopStatusJSONOutput(result.trimmedStdout) {
+                        let loops = decoded.loops
+                        let warnings = decoded.warnings
                         self.applyLoopSnapshotResult(loops: loops, warnings: warnings)
                         self.maybeShowLoopAmbiguityAlerts(loops)
                     } else {
@@ -5902,7 +5903,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     return
                 }
                 let batchSize = offset == 0 ? min(sessionProbeInitialBatchSize, totalCount) : min(sessionProbeBatchSize, totalCount - offset)
-                let batchResult = self.runInterruptibleSessionHelper(arguments: ["probe-all", "-l", String(batchSize), "-o", String(offset)])
+                let batchResult = self.runInterruptibleSessionHelper(arguments: ["probe-all", "--json", "-l", String(batchSize), "-o", String(offset)])
 
                 if self.shouldAbortSessionScan(generation) {
                     return
@@ -5914,7 +5915,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     break
                 }
 
-                let batchSnapshots = parseProbeAllOutput(batchResult.stdout)
+                let batchSnapshots = parseProbeAllJSONOutput(batchResult.stdout)
                 scannedCount = min(totalCount, offset + batchSize)
                 pendingSnapshots = mergeSessionSnapshots(existing: pendingSnapshots, newSnapshots: batchSnapshots)
 

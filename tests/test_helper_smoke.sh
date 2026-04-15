@@ -208,6 +208,12 @@ assert_contains "$probe_all" "target: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 assert_not_contains "$probe_all" "cccccccc-cccc-cccc-cccc-cccccccccccc"
 assert_not_contains "$probe_all" "gamma"
 
+probe_all_json="$("$HELPER" probe-all --json -l 2 -o 0)"
+probe_all_json_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin)["sessions"]))' <<<"$probe_all_json")"
+probe_all_json_first_target="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["sessions"][0]["target"])' <<<"$probe_all_json")"
+assert_equals "$probe_all_json_count" "2"
+assert_equals "$probe_all_json_first_target" "alpha"
+
 TTY_FIXTURE="${TEST_TMP}/tty-ps.txt"
 cat >"$TTY_FIXTURE" <<'EOF'
 ttys101 codex resume alpha
@@ -548,6 +554,10 @@ assert_contains "$stopped_status" "message: test-message"
 status_all_with_stopped="$("$HELPER" status)"
 assert_contains "$status_all_with_stopped" "target: alpha"
 assert_contains "$status_all_with_stopped" "stopped: yes"
+
+status_all_json="$("$HELPER" status --json)"
+status_all_json_has_alpha="$(python3 -c 'import json,sys; data=json.load(sys.stdin); print("yes" if any(loop.get("target") == "alpha" and loop.get("stopped") == "yes" for loop in data["loops"]) else "no")' <<<"$status_all_json")"
+assert_equals "$status_all_json_has_alpha" "yes"
 
 status_without_home="$(
   env -i \

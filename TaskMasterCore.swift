@@ -202,6 +202,40 @@ struct SendResultSnapshot {
     let updatedAtEpoch: TimeInterval
 }
 
+func parseLoopStatusJSONOutput(_ output: String) -> (loops: [LoopSnapshot], warnings: [String])? {
+    guard let data = output.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return nil
+    }
+
+    let warnings = (object["warnings"] as? [String]) ?? []
+    let loopObjects = (object["loops"] as? [[String: Any]]) ?? []
+    let loops = loopObjects.compactMap { item -> LoopSnapshot? in
+        guard let target = item["target"] as? String else {
+            return nil
+        }
+
+        return LoopSnapshot(
+            target: target,
+            loopDaemonRunning: item["loop_daemon_running"] as? String ?? "unknown",
+            intervalSeconds: item["interval_seconds"] as? String ?? "unknown",
+            forceSend: item["force_send"] as? String ?? "no",
+            message: item["message"] as? String ?? "unknown",
+            nextRunEpoch: item["next_run_epoch"] as? String ?? "unknown",
+            stopped: item["stopped"] as? String ?? "no",
+            stoppedReason: item["stopped_reason"] as? String ?? "",
+            paused: item["paused"] as? String ?? "no",
+            failureCount: item["failure_count"] as? String ?? "0",
+            failureReason: item["failure_reason"] as? String ?? "",
+            pauseReason: item["pause_reason"] as? String ?? "",
+            logPath: item["log"] as? String ?? "-",
+            lastLogLine: item["last_log_line"] as? String ?? ""
+        )
+    }
+
+    return (loops, warnings)
+}
+
 func sessionActualName(_ session: SessionSnapshot) -> String {
     session.name.trimmingCharacters(in: .whitespacesAndNewlines)
 }
@@ -320,6 +354,39 @@ func parseProbeAllOutput(_ output: String) -> [SessionSnapshot] {
 
     flushCurrent()
     return sessions
+}
+
+func parseProbeAllJSONOutput(_ output: String, archived: Bool = false) -> [SessionSnapshot] {
+    guard let data = output.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let items = object["sessions"] as? [[String: Any]] else {
+        return []
+    }
+
+    return items.compactMap { item in
+        guard let threadID = item["thread_id"] as? String else {
+            return nil
+        }
+
+        return SessionSnapshot(
+            name: item["name"] as? String ?? "",
+            target: item["target"] as? String ?? threadID,
+            threadID: threadID,
+            provider: item["provider"] as? String ?? "",
+            source: item["source"] as? String ?? "",
+            parentThreadID: item["parent_thread_id"] as? String ?? "",
+            agentNickname: item["agent_nickname"] as? String ?? "",
+            agentRole: item["agent_role"] as? String ?? "",
+            status: item["status"] as? String ?? "unknown",
+            reason: item["reason"] as? String ?? "",
+            terminalState: item["terminal_state"] as? String ?? "unavailable",
+            tty: item["tty"] as? String ?? "",
+            updatedAtEpoch: item["updated_at_epoch"] as? String ?? "0",
+            rolloutPath: item["rollout_path"] as? String ?? "",
+            preview: "",
+            isArchived: archived
+        )
+    }
 }
 
 func parseThreadListOutput(_ output: String, archived: Bool) -> [SessionSnapshot] {

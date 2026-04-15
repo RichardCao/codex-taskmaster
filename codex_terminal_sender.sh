@@ -1646,7 +1646,7 @@ thread_list() {
   codex_app_server_thread_rpc "list" "" "" "$archived"
 }
 
-probe_all_sessions() {
+probe_all_sessions_text() {
   require_cmd sqlite3
   require_cmd python3
 
@@ -1722,6 +1722,48 @@ for thread_id, updated_at in cur.execute(query, params):
 conn.close()
 PY
   )
+}
+
+probe_all_sessions_json() {
+  local probe_output
+  probe_output="$(probe_all_sessions_text)"
+  python3 - "$probe_output" <<'PY'
+import json
+import sys
+
+text = sys.argv[1]
+sessions = []
+current = {}
+
+def flush_current():
+    global current
+    if "thread_id" in current:
+        sessions.append(current.copy())
+    current.clear()
+
+for raw_line in text.splitlines():
+    line = raw_line.strip()
+    if not line:
+        continue
+    if line == "---":
+        flush_current()
+        continue
+    if ": " in line:
+        key, value = line.split(": ", 1)
+        current[key] = value
+
+flush_current()
+print(json.dumps({"sessions": sessions}, ensure_ascii=False))
+PY
+}
+
+probe_all_sessions() {
+  if [[ "${PROBE_ALL_JSON:-0}" == "1" ]]; then
+    probe_all_sessions_json
+    return 0
+  fi
+
+  probe_all_sessions_text
 }
 
 thread_provider_plan() {
@@ -2867,7 +2909,45 @@ save_loop_stopped() {
   printf 'log: %s\n' "$LOOP_LOG_FILE"
 }
 
-status_one() {
+status_json_from_text() {
+  local status_text="$1"
+  python3 - "$status_text" <<'PY'
+import json
+import sys
+
+text = sys.argv[1]
+loops = []
+warnings = []
+current = {}
+
+def flush_current():
+    global current
+    if "target" in current:
+        loops.append(current.copy())
+    current.clear()
+
+for raw_line in text.splitlines():
+    line = raw_line.strip()
+    if not line:
+        continue
+    if line == "---":
+        flush_current()
+        continue
+    if line in {"no loops", "no active loops"}:
+        continue
+    if line.startswith("warning: "):
+        warnings.append(line)
+        continue
+    if ": " in line:
+        key, value = line.split(": ", 1)
+        current[key] = value
+
+flush_current()
+print(json.dumps({"loops": loops, "warnings": warnings}, ensure_ascii=False))
+PY
+}
+
+status_one_text() {
   local target="$1"
   local key
   key="$(hash_target "$target")"
@@ -2927,7 +3007,26 @@ status_one() {
   fi
 }
 
-status_all() {
+status_one() {
+  local target="$1"
+  if [[ "${STATUS_JSON:-0}" == "1" ]]; then
+    local status_text=""
+    set +e
+    status_text="$(status_one_text "$target" 2>&1)"
+    local exit_code=$?
+    set -e
+    if [[ "$exit_code" -ne 0 ]]; then
+      printf '%s\n' "$status_text" >&2
+      return "$exit_code"
+    fi
+    status_json_from_text "$status_text"
+    return 0
+  fi
+
+  status_one_text "$target"
+}
+
+status_all_text() {
   local loop_file
   local found=0
 
@@ -2937,7 +3036,7 @@ status_all() {
     TARGET=""
     load_kv_file "$loop_file"
     echo "---"
-    status_one "$TARGET"
+    status_one_text "$TARGET"
   done
   shopt -u nullglob
 
@@ -2946,6 +3045,17 @@ status_all() {
   fi
 
   legacy_sender_warning_lines || true
+}
+
+status_all() {
+  if [[ "${STATUS_JSON:-0}" == "1" ]]; then
+    local status_text
+    status_text="$(status_all_text)"
+    status_json_from_text "$status_text"
+    return 0
+  fi
+
+  status_all_text
 }
 
 parse_send_args() {
@@ -3058,15 +3168,34 @@ parse_loop_delete_args() {
 
 parse_status_args() {
   TARGET=""
-  while getopts ":t:h" opt; do
-    case "$opt" in
-      t) TARGET="$OPTARG" ;;
-      h) usage; exit 0 ;;
-      :) die "option -$OPTARG requires an argument" ;;
-      \?) die "unknown option: -$OPTARG" ;;
+  STATUS_JSON=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -t)
+        [[ $# -ge 2 ]] || die "option -t requires an argument"
+        TARGET="$2"
+        shift 2
+        ;;
+      --json)
+        STATUS_JSON=1
+        shift
+        ;;
+      -h)
+        usage
+        exit 0
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -*)
+        die "unknown option: $1"
+        ;;
+      *)
+        break
+        ;;
     esac
   done
-  shift $((OPTIND - 1))
   [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
 }
 
@@ -3088,16 +3217,39 @@ parse_probe_args() {
 parse_probe_all_args() {
   PROBE_LIMIT=""
   PROBE_OFFSET=0
-  while getopts ":l:o:h" opt; do
-    case "$opt" in
-      l) PROBE_LIMIT="$OPTARG" ;;
-      o) PROBE_OFFSET="$OPTARG" ;;
-      h) usage; exit 0 ;;
-      :) die "option -$OPTARG requires an argument" ;;
-      \?) die "unknown option: -$OPTARG" ;;
+  PROBE_ALL_JSON=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -l)
+        [[ $# -ge 2 ]] || die "option -l requires an argument"
+        PROBE_LIMIT="$2"
+        shift 2
+        ;;
+      -o)
+        [[ $# -ge 2 ]] || die "option -o requires an argument"
+        PROBE_OFFSET="$2"
+        shift 2
+        ;;
+      --json)
+        PROBE_ALL_JSON=1
+        shift
+        ;;
+      -h)
+        usage
+        exit 0
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -*)
+        die "unknown option: $1"
+        ;;
+      *)
+        break
+        ;;
     esac
   done
-  shift $((OPTIND - 1))
   [[ -z "$PROBE_LIMIT" || "$PROBE_LIMIT" =~ ^[1-9][0-9]*$ ]] || die "limit must be a positive integer"
   [[ "$PROBE_OFFSET" =~ ^[0-9]+$ ]] || die "offset must be a non-negative integer"
   [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"

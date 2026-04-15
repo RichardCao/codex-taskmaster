@@ -22,6 +22,8 @@
   2. `done` helper 后台化
   3. `done` UI 状态线程模型收口
   4. `done` 本地状态写路径统一走 helper
+  5. `done` helper `--json` 协议与统一 decoder
+  6. `next` 状态 / 原因 / 文案映射收口
 
 ## 执行顺序
 
