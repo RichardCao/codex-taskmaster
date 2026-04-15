@@ -5415,14 +5415,18 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
-    private func runHelper(arguments: [String], actionName: String) {
+    private func runHelper(
+        actionName: String,
+        displayArguments: [String],
+        execution: @escaping (@escaping (HelperCommandResult) -> Void) -> Void
+    ) {
         persistDefaults()
         setStatus("", key: "send")
         setButtonsEnabled(false)
         setStatus("\(actionName)执行中…", key: "action")
-        appendOutput("执行 \(actionName): \(arguments.joined(separator: " "))")
+        appendOutput("执行 \(actionName): \(displayArguments.joined(separator: " "))")
 
-        loopCommandService.runCommandAsync(arguments: arguments) { result in
+        execution { result in
             let accepted = (actionName == "发送一次") && result.status == 2
             if !result.stdout.isEmpty {
                 self.appendOutput(result.stdout)
@@ -5440,16 +5444,16 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.recordCurrentInputsInHistory()
                 }
                 if actionName == "开始循环",
-                   let target = self.helperTargetArgument(from: arguments) {
+                   let target = self.helperTargetArgument(from: displayArguments) {
                     self.optimisticMarkLoopRunning(
                         target: target,
-                        interval: self.helperArgumentValue(flag: "-i", from: arguments),
-                        message: self.helperArgumentValue(flag: "-m", from: arguments),
-                        forceSend: self.helperArgumentHasFlag("-f", in: arguments)
+                        interval: self.helperArgumentValue(flag: "-i", from: displayArguments),
+                        message: self.helperArgumentValue(flag: "-m", from: displayArguments),
+                        forceSend: self.helperArgumentHasFlag("-f", in: displayArguments)
                     )
                     self.scheduleLoopSnapshotRefreshes(after: [1.5, 5.0])
                 } else if actionName == "恢复当前",
-                          let target = self.helperTargetArgument(from: arguments) {
+                          let target = self.helperTargetArgument(from: displayArguments) {
                     let existingSnapshot = self.loopSnapshots.first(where: { $0.target == target })
                     self.optimisticMarkLoopRunning(
                         target: target,
@@ -5460,7 +5464,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.scheduleLoopSnapshotRefreshes(after: [1.5, 5.0])
                 }
                 if actionName == "删除当前",
-                   let deletedTarget = self.helperTargetArgument(from: arguments) {
+                   let deletedTarget = self.helperTargetArgument(from: displayArguments) {
                     self.loopSnapshots.removeAll { $0.target == deletedTarget }
                     if self.preferredLoopSelectionTarget == deletedTarget {
                         self.preferredLoopSelectionTarget = nil
@@ -5486,6 +5490,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             }
             self.setButtonsEnabled(true)
             self.requestLoopSnapshotRefresh()
+        }
+    }
+
+    private func runHelper(arguments: [String], actionName: String) {
+        runHelper(actionName: actionName, displayArguments: arguments) { completion in
+            self.loopCommandService.runCommandAsync(arguments: arguments, completion: completion)
         }
     }
 
@@ -5884,11 +5894,23 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.setButtonsEnabled(true)
                 return
             }
-            var arguments = ["send", "-t", target, "-m", self.currentMessage()]
-            if self.isForceSendEnabled() {
-                arguments.append("-f")
+            let message = self.currentMessage()
+            let forceSend = self.isForceSendEnabled()
+            let displayArguments = {
+                var arguments = ["send", "-t", target, "-m", message]
+                if forceSend {
+                    arguments.append("-f")
+                }
+                return arguments
+            }()
+            self.runHelper(actionName: "发送一次", displayArguments: displayArguments) { completion in
+                self.loopCommandService.sendMessageAsync(
+                    target: target,
+                    message: message,
+                    forceSend: forceSend,
+                    completion: completion
+                )
             }
-            self.runHelper(arguments: arguments, actionName: "发送一次")
         }
     }
 
@@ -5946,14 +5968,24 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 return
             }
 
-            let arguments = {
-                var arguments = ["start", "-t", target, "-i", interval, "-m", self.currentMessage()]
-                if self.isForceSendEnabled() {
+            let message = self.currentMessage()
+            let forceSend = self.isForceSendEnabled()
+            let displayArguments = {
+                var arguments = ["start", "-t", target, "-i", interval, "-m", message]
+                if forceSend {
                     arguments.append("-f")
                 }
                 return arguments
             }()
-            self.runHelper(arguments: arguments, actionName: "开始循环")
+            self.runHelper(actionName: "开始循环", displayArguments: displayArguments) { completion in
+                self.loopCommandService.startLoopAsync(
+                    target: target,
+                    interval: interval,
+                    message: message,
+                    forceSend: forceSend,
+                    completion: completion
+                )
+            }
         }
     }
 
@@ -6020,12 +6052,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
         targetField.stringValue = loop.target
-        runHelper(arguments: ["stop", "-t", loop.target], actionName: "停止当前")
+        let target = loop.target
+        runHelper(actionName: "停止当前", displayArguments: ["stop", "-t", target]) { completion in
+            self.loopCommandService.stopLoopAsync(target: target, completion: completion)
+        }
     }
 
     @objc
     private func stopAllLoops() {
-        runHelper(arguments: ["stop", "--all"], actionName: "全部停止")
+        runHelper(actionName: "全部停止", displayArguments: ["stop", "--all"]) { completion in
+            self.loopCommandService.stopAllLoopsAsync(completion: completion)
+        }
     }
 
     @objc
@@ -6064,7 +6101,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.setButtonsEnabled(true)
                 return
             }
-            self.runHelper(arguments: ["loop-resume", "-t", loop.target], actionName: "恢复当前")
+            self.runHelper(actionName: "恢复当前", displayArguments: ["loop-resume", "-t", loop.target]) { completion in
+                self.loopCommandService.resumeLoopAsync(target: loop.target, completion: completion)
+            }
         }
     }
 
@@ -6078,7 +6117,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
 
         targetField.stringValue = loop.target
-        runHelper(arguments: ["loop-delete", "-t", loop.target], actionName: "删除当前")
+        let target = loop.target
+        runHelper(actionName: "删除当前", displayArguments: ["loop-delete", "-t", target]) { completion in
+            self.loopCommandService.deleteLoopAsync(target: target, completion: completion)
+        }
     }
 
     @objc

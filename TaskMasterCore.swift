@@ -436,20 +436,80 @@ final class LoopCommandService {
         return helperService.run(arguments: arguments)
     }
 
+    func startLoopAsync(
+        target: String,
+        interval: String,
+        message: String,
+        forceSend: Bool,
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping (HelperCommandResult) -> Void
+    ) {
+        var arguments = ["start", "-t", target, "-i", interval, "-m", message]
+        if forceSend {
+            arguments.append("-f")
+        }
+        helperService.runAsync(arguments: arguments, qos: qos, completion: completion)
+    }
+
     func stopLoop(target: String) -> HelperCommandResult {
         helperService.run(arguments: ["stop", "-t", target])
+    }
+
+    func stopLoopAsync(
+        target: String,
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping (HelperCommandResult) -> Void
+    ) {
+        helperService.runAsync(arguments: ["stop", "-t", target], qos: qos, completion: completion)
     }
 
     func stopAllLoops() -> HelperCommandResult {
         helperService.run(arguments: ["stop", "--all"])
     }
 
+    func stopAllLoopsAsync(
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping (HelperCommandResult) -> Void
+    ) {
+        helperService.runAsync(arguments: ["stop", "--all"], qos: qos, completion: completion)
+    }
+
     func resumeLoop(target: String) -> HelperCommandResult {
         helperService.run(arguments: ["loop-resume", "-t", target])
     }
 
+    func resumeLoopAsync(
+        target: String,
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping (HelperCommandResult) -> Void
+    ) {
+        helperService.runAsync(arguments: ["loop-resume", "-t", target], qos: qos, completion: completion)
+    }
+
     func deleteLoop(target: String) -> HelperCommandResult {
         helperService.run(arguments: ["loop-delete", "-t", target])
+    }
+
+    func deleteLoopAsync(
+        target: String,
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping (HelperCommandResult) -> Void
+    ) {
+        helperService.runAsync(arguments: ["loop-delete", "-t", target], qos: qos, completion: completion)
+    }
+
+    func sendMessageAsync(
+        target: String,
+        message: String,
+        forceSend: Bool,
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping (HelperCommandResult) -> Void
+    ) {
+        var arguments = ["send", "-t", target, "-m", message]
+        if forceSend {
+            arguments.append("-f")
+        }
+        helperService.runAsync(arguments: arguments, qos: qos, completion: completion)
     }
 }
 
