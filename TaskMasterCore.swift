@@ -214,6 +214,144 @@ final class HelperCommandService {
     }
 }
 
+final class SessionCommandService {
+    private let helperService: HelperCommandService
+
+    init(helperService: HelperCommandService) {
+        self.helperService = helperService
+    }
+
+    func configuredModelProviderAsync(
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping (String?) -> Void
+    ) {
+        helperService.runAsync(arguments: ["config-model-provider"], qos: qos) { result in
+            guard result.status == 0,
+                  let fields = parseStructuredKeyValueFields(result.stdout),
+                  let modelProvider = fields["model_provider"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !modelProvider.isEmpty else {
+                completion(nil)
+                return
+            }
+            completion(modelProvider)
+        }
+    }
+
+    func sessionProviderPlanAsync(
+        threadID: String,
+        targetProvider: String,
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping ([String: String]?) -> Void
+    ) {
+        helperService.runAsync(arguments: ["thread-provider-plan", "-t", threadID, "-p", targetProvider], qos: qos) { result in
+            guard result.status == 0 else {
+                completion(nil)
+                return
+            }
+            completion(parseStructuredKeyValueFields(result.stdout))
+        }
+    }
+
+    func allSessionProviderPlanAsync(
+        targetProvider: String,
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping ([String: String]?) -> Void
+    ) {
+        helperService.runAsync(arguments: ["thread-provider-plan-all", "-p", targetProvider], qos: qos) { result in
+            guard result.status == 0 else {
+                completion(nil)
+                return
+            }
+            completion(parseStructuredKeyValueFields(result.stdout))
+        }
+    }
+
+    func migrateSessionProvider(threadID: String, targetProvider: String, includeFamily: Bool) -> (success: Bool, detail: String) {
+        var arguments = ["thread-provider-migrate", "-t", threadID, "-p", targetProvider]
+        if includeFamily {
+            arguments.append("--family")
+        }
+        let result = helperService.run(arguments: arguments)
+        if result.status == 0 {
+            return (true, result.stdout)
+        }
+        return (false, [result.stderr, result.stdout].first { !$0.isEmpty } ?? "迁移 provider 失败")
+    }
+
+    func migrateAllSessionsProvider(targetProvider: String) -> (success: Bool, detail: String) {
+        let result = helperService.run(arguments: ["thread-provider-migrate-all", "-p", targetProvider])
+        if result.status == 0 {
+            return (true, result.stdout)
+        }
+        return (false, [result.stderr, result.stdout].first { !$0.isEmpty } ?? "迁移全部 session provider 失败")
+    }
+
+    func updateSessionName(threadID: String, newName: String) -> (success: Bool, error: String) {
+        let result = helperService.run(arguments: ["thread-name-set", "-t", threadID, "-n", newName])
+        if result.status == 0 {
+            return (true, "")
+        }
+        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? (newName.isEmpty ? "清空名称失败" : "重命名失败")
+        return (false, detail)
+    }
+
+    func archiveSession(threadID: String) -> (success: Bool, error: String) {
+        let result = helperService.run(arguments: ["thread-archive", "-t", threadID])
+        if result.status == 0 {
+            return (true, "")
+        }
+        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? "归档 session 失败"
+        return (false, detail)
+    }
+
+    func unarchiveSession(threadID: String) -> (success: Bool, error: String) {
+        let result = helperService.run(arguments: ["thread-unarchive", "-t", threadID])
+        if result.status == 0 {
+            return (true, "")
+        }
+        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? "恢复归档失败"
+        return (false, detail)
+    }
+
+    func deleteSession(threadID: String) -> (success: Bool, fields: [String: String]?, detail: String) {
+        let result = helperService.run(arguments: ["thread-delete", "-t", threadID])
+        let combinedText = result.combinedText
+        let fields = parseStructuredKeyValueFields(combinedText)
+        if result.status == 0 {
+            return (true, fields, result.stdout)
+        }
+        return (false, fields, combinedText.isEmpty ? "彻底删除失败" : combinedText)
+    }
+
+    func sessionDeletePlanAsync(
+        threadID: String,
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping ([String: String]?) -> Void
+    ) {
+        helperService.runAsync(arguments: ["thread-delete-plan", "-t", threadID], qos: qos) { result in
+            guard result.status == 0 else {
+                completion(nil)
+                return
+            }
+            completion(parseStructuredKeyValueFields(result.stdout))
+        }
+    }
+
+    func sessionFamilyPlanAsync(
+        threadID: String,
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping ([String: String]?) -> Void
+    ) {
+        helperService.runAsync(arguments: ["thread-family-plan", "-t", threadID], qos: qos) { result in
+            guard result.status == 0 else {
+                completion(nil)
+                return
+            }
+            completion(parseStructuredKeyValueFields(result.stdout))
+        }
+    }
+}
+
 func parseStructuredKeyValueFields(_ text: String, requireStatusAndReason: Bool = true) -> [String: String]? {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }

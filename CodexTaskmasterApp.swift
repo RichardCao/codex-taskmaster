@@ -810,6 +810,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private let helperPath = resolvedHelperPath()
     private lazy var helperService = HelperCommandService(helperPath: helperPath)
+    private lazy var sessionCommandService = SessionCommandService(helperService: helperService)
 
     private enum SessionListMode {
         case active
@@ -3475,17 +3476,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         updateButtons: Bool = true,
         completion: ((String?) -> Void)? = nil
     ) {
-        runStandardHelperAsync(arguments: ["config-model-provider"]) { result in
-            let provider: String?
-            if result.status == 0,
-               let fields = self.parseStructuredHelperFields(result.stdout),
-               let modelProvider = fields["model_provider"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !modelProvider.isEmpty {
-                provider = modelProvider
-            } else {
-                provider = nil
-            }
-
+        sessionCommandService.configuredModelProviderAsync { provider in
             self.configuredModelProvider = provider
             if updateButtons {
                 self.updateProviderMigrationButtons()
@@ -3495,103 +3486,43 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func sessionProviderPlanAsync(threadID: String, targetProvider: String, completion: @escaping ([String: String]?) -> Void) {
-        runStandardHelperAsync(arguments: ["thread-provider-plan", "-t", threadID, "-p", targetProvider]) { result in
-            guard result.status == 0 else {
-                completion(nil)
-                return
-            }
-            completion(self.parseStructuredHelperFields(result.stdout))
-        }
+        sessionCommandService.sessionProviderPlanAsync(threadID: threadID, targetProvider: targetProvider, completion: completion)
     }
 
     private func allSessionProviderPlanAsync(targetProvider: String, completion: @escaping ([String: String]?) -> Void) {
-        runStandardHelperAsync(arguments: ["thread-provider-plan-all", "-p", targetProvider]) { result in
-            guard result.status == 0 else {
-                completion(nil)
-                return
-            }
-            completion(self.parseStructuredHelperFields(result.stdout))
-        }
+        sessionCommandService.allSessionProviderPlanAsync(targetProvider: targetProvider, completion: completion)
     }
 
     private func migrateSessionProvider(threadID: String, targetProvider: String, includeFamily: Bool) -> (success: Bool, detail: String) {
-        var arguments = ["thread-provider-migrate", "-t", threadID, "-p", targetProvider]
-        if includeFamily {
-            arguments.append("--family")
-        }
-        let result = runStandardHelper(arguments: arguments)
-        if result.status == 0 {
-            return (true, result.stdout)
-        }
-        return (false, [result.stderr, result.stdout].first { !$0.isEmpty } ?? "迁移 provider 失败")
+        sessionCommandService.migrateSessionProvider(threadID: threadID, targetProvider: targetProvider, includeFamily: includeFamily)
     }
 
     private func migrateAllSessionsProvider(targetProvider: String) -> (success: Bool, detail: String) {
-        let result = runStandardHelper(arguments: ["thread-provider-migrate-all", "-p", targetProvider])
-        if result.status == 0 {
-            return (true, result.stdout)
-        }
-        return (false, [result.stderr, result.stdout].first { !$0.isEmpty } ?? "迁移全部 session provider 失败")
+        sessionCommandService.migrateAllSessionsProvider(targetProvider: targetProvider)
     }
 
     private func updateSessionName(threadID: String, newName: String) -> (success: Bool, error: String) {
-        let result = runStandardHelper(arguments: ["thread-name-set", "-t", threadID, "-n", newName])
-        if result.status == 0 {
-            return (true, "")
-        }
-        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? (newName.isEmpty ? "清空名称失败" : "重命名失败")
-        return (false, detail)
+        sessionCommandService.updateSessionName(threadID: threadID, newName: newName)
     }
 
     private func archiveSession(threadID: String) -> (success: Bool, error: String) {
-        let result = runStandardHelper(arguments: ["thread-archive", "-t", threadID])
-        if result.status == 0 {
-            return (true, "")
-        }
-        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? "归档 session 失败"
-        return (false, detail)
+        sessionCommandService.archiveSession(threadID: threadID)
     }
 
     private func unarchiveSession(threadID: String) -> (success: Bool, error: String) {
-        let result = runStandardHelper(arguments: ["thread-unarchive", "-t", threadID])
-        if result.status == 0 {
-            return (true, "")
-        }
-        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? "恢复归档失败"
-        return (false, detail)
+        sessionCommandService.unarchiveSession(threadID: threadID)
     }
 
     private func deleteSessionPermanently(threadID: String) -> (success: Bool, fields: [String: String]?, detail: String) {
-        let result = runStandardHelper(arguments: ["thread-delete", "-t", threadID])
-        let combinedText = [result.stdout, result.stderr]
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
-        let fields = parseStructuredHelperFields(combinedText)
-        if result.status == 0 {
-            return (true, fields, result.stdout)
-        }
-        let detail = combinedText.isEmpty ? "彻底删除失败" : combinedText
-        return (false, fields, detail)
+        sessionCommandService.deleteSession(threadID: threadID)
     }
 
     private func sessionDeletePlanAsync(threadID: String, completion: @escaping ([String: String]?) -> Void) {
-        runStandardHelperAsync(arguments: ["thread-delete-plan", "-t", threadID]) { result in
-            guard result.status == 0 else {
-                completion(nil)
-                return
-            }
-            completion(self.parseStructuredHelperFields(result.stdout))
-        }
+        sessionCommandService.sessionDeletePlanAsync(threadID: threadID, completion: completion)
     }
 
     private func sessionFamilyPlanAsync(threadID: String, completion: @escaping ([String: String]?) -> Void) {
-        runStandardHelperAsync(arguments: ["thread-family-plan", "-t", threadID]) { result in
-            guard result.status == 0 else {
-                completion(nil)
-                return
-            }
-            completion(self.parseStructuredHelperFields(result.stdout))
-        }
+        sessionCommandService.sessionFamilyPlanAsync(threadID: threadID, completion: completion)
     }
 
     private func promptForSessionDeletion(
