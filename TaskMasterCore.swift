@@ -352,6 +352,83 @@ final class SessionCommandService {
     }
 }
 
+final class LoopCommandService {
+    private let helperService: HelperCommandService
+
+    init(helperService: HelperCommandService) {
+        self.helperService = helperService
+    }
+
+    func saveStoppedLoopEntry(target: String, interval: String, message: String, forceSend: Bool, reason: String) -> Bool {
+        var arguments = ["loop-save-stopped", "-t", target, "-i", interval, "-m", message, "-r", reason]
+        if forceSend {
+            arguments.append("-f")
+        }
+        let result = helperService.run(arguments: arguments)
+        return result.status == 0
+    }
+
+    func saveStoppedLoopEntryAsync(
+        target: String,
+        interval: String,
+        message: String,
+        forceSend: Bool,
+        reason: String,
+        qos: DispatchQoS.QoSClass = .utility,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        helperService.runAsync(
+            arguments: {
+                var arguments = ["loop-save-stopped", "-t", target, "-i", interval, "-m", message, "-r", reason]
+                if forceSend {
+                    arguments.append("-f")
+                }
+                return arguments
+            }(),
+            qos: qos
+        ) { result in
+            completion?(result.status == 0)
+        }
+    }
+
+    func validateUniqueTargetAsync(
+        target: String,
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping (HelperCommandResult) -> Void
+    ) {
+        helperService.runAsync(arguments: ["resolve-thread-id", "-t", target], qos: qos, completion: completion)
+    }
+
+    func loopStatusAsync(
+        qos: DispatchQoS.QoSClass = .utility,
+        completion: @escaping ((loops: [LoopSnapshot], warnings: [String])?, String?) -> Void
+    ) {
+        helperService.runAsync(arguments: ["status", "--json"], qos: qos) { result in
+            guard result.status == 0 else {
+                completion(nil, result.stderr.isEmpty ? "Failed to load active loops." : result.stderr)
+                return
+            }
+            guard let decoded = parseLoopStatusJSONOutput(result.stdout) else {
+                completion(nil, "Failed to decode active loops.")
+                return
+            }
+            completion((decoded.loops, decoded.warnings), nil)
+        }
+    }
+
+    func runCommand(arguments: [String]) -> HelperCommandResult {
+        helperService.run(arguments: arguments)
+    }
+
+    func runCommandAsync(
+        arguments: [String],
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping (HelperCommandResult) -> Void
+    ) {
+        helperService.runAsync(arguments: arguments, qos: qos, completion: completion)
+    }
+}
+
 func parseStructuredKeyValueFields(_ text: String, requireStatusAndReason: Bool = true) -> [String: String]? {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }

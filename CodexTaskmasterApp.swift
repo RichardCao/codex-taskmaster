@@ -811,6 +811,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let helperPath = resolvedHelperPath()
     private lazy var helperService = HelperCommandService(helperPath: helperPath)
     private lazy var sessionCommandService = SessionCommandService(helperService: helperService)
+    private lazy var loopCommandService = LoopCommandService(helperService: helperService)
 
     private enum SessionListMode {
         case active
@@ -5223,29 +5224,29 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         if loopSnapshots.contains(where: { $0.target == target && $0.stopped != "yes" }) {
             return false
         }
-        var arguments = ["loop-save-stopped", "-t", target, "-i", interval, "-m", message, "-r", reason]
-        if forceSend {
-            arguments.append("-f")
-        }
-        let result = runStandardHelper(arguments: arguments)
-        if result.status != 0 {
-            let detail = result.stderr.isEmpty ? result.stdout : result.stderr
-            if !detail.isEmpty {
-                appendOutput("stderr: \(detail)")
-            }
+        let success = loopCommandService.saveStoppedLoopEntry(
+            target: target,
+            interval: interval,
+            message: message,
+            forceSend: forceSend,
+            reason: reason
+        )
+        if !success {
+            appendOutput("stderr: 保存停止态 loop 失败: \(target)")
             return false
         }
-        return true
+        return success
     }
 
     private func saveStoppedLoopEntryAsync(target: String, interval: String, message: String, forceSend: Bool, reason: String, completion: ((Bool) -> Void)? = nil) {
-        DispatchQueue.global(qos: .utility).async {
-            let success = self.saveStoppedLoopEntry(target: target, interval: interval, message: message, forceSend: forceSend, reason: reason)
-            guard let completion else { return }
-            DispatchQueue.main.async {
-                completion(success)
-            }
-        }
+        loopCommandService.saveStoppedLoopEntryAsync(
+            target: target,
+            interval: interval,
+            message: message,
+            forceSend: forceSend,
+            reason: reason,
+            completion: completion
+        )
     }
 
     private func isAmbiguousTargetError(_ detail: String) -> Bool {
@@ -5280,7 +5281,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func validateUniqueTargetAsync(target: String, actionName: String, completion: @escaping (Bool) -> Void) {
         lastTargetValidationFailureReason = nil
         lastTargetValidationFailureDetail = ""
-        runStandardHelperAsync(arguments: ["resolve-thread-id", "-t", target]) { result in
+        loopCommandService.validateUniqueTargetAsync(target: target) { result in
             completion(self.handleUniqueTargetValidationResult(result, target: target, actionName: actionName))
         }
     }
@@ -5421,74 +5422,70 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setStatus("\(actionName)执行中…", key: "action")
         appendOutput("执行 \(actionName): \(arguments.joined(separator: " "))")
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = self.runStandardHelper(arguments: arguments)
-
-            DispatchQueue.main.async {
-                let accepted = (actionName == "发送一次") && result.status == 2
-                if !result.stdout.isEmpty {
-                    self.appendOutput(result.stdout)
-                }
-                let structuredSendResult =
-                    actionName == "发送一次" ? self.parseStructuredSendHelperResult(result.stderr) : nil
-                if !result.stderr.isEmpty {
-                    if structuredSendResult == nil {
-                        self.appendOutput(accepted ? result.stderr : "stderr: \(result.stderr)")
-                    }
-                }
-
-                if result.status == 0 || accepted {
-                    if actionName == "发送一次" || actionName == "开始循环" {
-                        self.recordCurrentInputsInHistory()
-                    }
-                    if actionName == "开始循环",
-                       let target = self.helperTargetArgument(from: arguments) {
-                        self.optimisticMarkLoopRunning(
-                            target: target,
-                            interval: self.helperArgumentValue(flag: "-i", from: arguments),
-                            message: self.helperArgumentValue(flag: "-m", from: arguments),
-                            forceSend: self.helperArgumentHasFlag("-f", in: arguments)
-                        )
-                        self.scheduleLoopSnapshotRefreshes(after: [1.5, 5.0])
-                    } else if actionName == "恢复当前",
-                              let target = self.helperTargetArgument(from: arguments) {
-                        let existingSnapshot = self.loopSnapshots.first(where: { $0.target == target })
-                        self.optimisticMarkLoopRunning(
-                            target: target,
-                            interval: existingSnapshot?.intervalSeconds,
-                            message: existingSnapshot?.message,
-                            forceSend: existingSnapshot?.forceSend == "yes"
-                        )
-                        self.scheduleLoopSnapshotRefreshes(after: [1.5, 5.0])
-                    }
-                    if actionName == "删除当前",
-                       let deletedTarget = self.helperTargetArgument(from: arguments) {
-                        self.loopSnapshots.removeAll { $0.target == deletedTarget }
-                        if self.preferredLoopSelectionTarget == deletedTarget {
-                            self.preferredLoopSelectionTarget = nil
-                        }
-                        self.activeLoopsTableView.reloadData()
-                        self.updateLoopActionButtons()
-                        self.refreshTableWrapping(self.activeLoopsTableView)
-                    }
-                    self.setStatus(accepted ? "\(actionName)已受理" : "\(actionName)完成", key: "action")
-                } else {
-                    let combinedErrorDetail = [result.stderr, result.stdout]
-                        .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-                        .joined(separator: "\n")
-                    if let structuredSendResult,
-                       structuredSendResult["reason"] == "ambiguous_target" {
-                        let detail = structuredSendResult["detail"] ?? result.stderr
-                        let target = structuredSendResult["target"] ?? self.currentTarget()
-                        self.showAmbiguousTargetAlert(target: target, detail: detail, actionName: actionName, throttled: false)
-                    } else if let permissionIssue = self.helperPermissionIssueDetail(combinedErrorDetail) {
-                        self.showRuntimePermissionAlert(actionName: actionName, detail: permissionIssue)
-                    }
-                    self.setStatus("\(actionName)失败", key: "action", color: .systemRed)
-                }
-                self.setButtonsEnabled(true)
-                self.requestLoopSnapshotRefresh()
+        loopCommandService.runCommandAsync(arguments: arguments) { result in
+            let accepted = (actionName == "发送一次") && result.status == 2
+            if !result.stdout.isEmpty {
+                self.appendOutput(result.stdout)
             }
+            let structuredSendResult =
+                actionName == "发送一次" ? self.parseStructuredSendHelperResult(result.stderr) : nil
+            if !result.stderr.isEmpty {
+                if structuredSendResult == nil {
+                    self.appendOutput(accepted ? result.stderr : "stderr: \(result.stderr)")
+                }
+            }
+
+            if result.status == 0 || accepted {
+                if actionName == "发送一次" || actionName == "开始循环" {
+                    self.recordCurrentInputsInHistory()
+                }
+                if actionName == "开始循环",
+                   let target = self.helperTargetArgument(from: arguments) {
+                    self.optimisticMarkLoopRunning(
+                        target: target,
+                        interval: self.helperArgumentValue(flag: "-i", from: arguments),
+                        message: self.helperArgumentValue(flag: "-m", from: arguments),
+                        forceSend: self.helperArgumentHasFlag("-f", in: arguments)
+                    )
+                    self.scheduleLoopSnapshotRefreshes(after: [1.5, 5.0])
+                } else if actionName == "恢复当前",
+                          let target = self.helperTargetArgument(from: arguments) {
+                    let existingSnapshot = self.loopSnapshots.first(where: { $0.target == target })
+                    self.optimisticMarkLoopRunning(
+                        target: target,
+                        interval: existingSnapshot?.intervalSeconds,
+                        message: existingSnapshot?.message,
+                        forceSend: existingSnapshot?.forceSend == "yes"
+                    )
+                    self.scheduleLoopSnapshotRefreshes(after: [1.5, 5.0])
+                }
+                if actionName == "删除当前",
+                   let deletedTarget = self.helperTargetArgument(from: arguments) {
+                    self.loopSnapshots.removeAll { $0.target == deletedTarget }
+                    if self.preferredLoopSelectionTarget == deletedTarget {
+                        self.preferredLoopSelectionTarget = nil
+                    }
+                    self.activeLoopsTableView.reloadData()
+                    self.updateLoopActionButtons()
+                    self.refreshTableWrapping(self.activeLoopsTableView)
+                }
+                self.setStatus(accepted ? "\(actionName)已受理" : "\(actionName)完成", key: "action")
+            } else {
+                let combinedErrorDetail = [result.stderr, result.stdout]
+                    .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                    .joined(separator: "\n")
+                if let structuredSendResult,
+                   structuredSendResult["reason"] == "ambiguous_target" {
+                    let detail = structuredSendResult["detail"] ?? result.stderr
+                    let target = structuredSendResult["target"] ?? self.currentTarget()
+                    self.showAmbiguousTargetAlert(target: target, detail: detail, actionName: actionName, throttled: false)
+                } else if let permissionIssue = self.helperPermissionIssueDetail(combinedErrorDetail) {
+                    self.showRuntimePermissionAlert(actionName: actionName, detail: permissionIssue)
+                }
+                self.setStatus("\(actionName)失败", key: "action", color: .systemRed)
+            }
+            self.setButtonsEnabled(true)
+            self.requestLoopSnapshotRefresh()
         }
     }
 
@@ -5574,7 +5571,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             var failureText: String?
 
             for conflict in conflicts {
-                let stopResult = self.runStandardHelper(arguments: ["stop", "-t", conflict.target])
+                let stopResult = self.loopCommandService.runCommand(arguments: ["stop", "-t", conflict.target])
                 if stopResult.status != 0 {
                     failureText = [stopResult.stderr, stopResult.stdout].first(where: { !$0.isEmpty }) ?? "停止旧循环失败"
                     break
@@ -5589,7 +5586,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 if forceSend {
                     arguments.append("-f")
                 }
-                startResult = self.runStandardHelper(arguments: arguments)
+                startResult = self.loopCommandService.runCommand(arguments: arguments)
             }
 
             DispatchQueue.main.async {
@@ -5667,25 +5664,18 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
         isRefreshingLoopsSnapshot = true
-        DispatchQueue.global(qos: .utility).async {
-            let result = self.helperService.run(arguments: ["status", "--json"])
-            DispatchQueue.main.async {
-                if result.status == 0,
-                   let decoded = parseLoopStatusJSONOutput(result.stdout) {
-                    let loops = decoded.loops
-                    let warnings = decoded.warnings
-                    self.applyLoopSnapshotResult(loops: loops, warnings: warnings)
-                    self.maybeShowLoopAmbiguityAlerts(loops)
-                } else {
-                    let stderr = result.stderr
-                    self.applyLoopSnapshotResult(
-                        loops: [],
-                        warnings: [stderr.isEmpty ? "Failed to load active loops." : stderr],
-                        failureMessage: "加载循环失败"
-                    )
-                }
-                self.finishLoopSnapshotRefresh()
+        loopCommandService.loopStatusAsync { decoded, failureMessage in
+            if let decoded {
+                self.applyLoopSnapshotResult(loops: decoded.loops, warnings: decoded.warnings)
+                self.maybeShowLoopAmbiguityAlerts(decoded.loops)
+            } else {
+                self.applyLoopSnapshotResult(
+                    loops: [],
+                    warnings: [failureMessage ?? "Failed to load active loops."],
+                    failureMessage: "加载循环失败"
+                )
             }
+            self.finishLoopSnapshotRefresh()
         }
     }
 

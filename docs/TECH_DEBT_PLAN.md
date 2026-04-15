@@ -251,6 +251,7 @@
 当前建议的首刀：
 
 - 先把 helper 子进程执行抽成独立 `HelperCommandService`
+- 再把 session / loop 命令 helper 调用分别下沉到 `SessionCommandService` / `LoopCommandService`
 - 再继续把 session / loop / provider migration 语义从控制器中拆出
 
 验收标准：
