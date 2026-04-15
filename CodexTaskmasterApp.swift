@@ -726,15 +726,8 @@ final class CodexTaskmasterApp: NSObject, NSApplicationDelegate {
     private func performTerminationCleanupIfNeeded() {
         guard !didRunTerminationCleanup else { return }
         didRunTerminationCleanup = true
-
-        do {
-            _ = try SubprocessRunner.run(
-                executableURL: URL(fileURLWithPath: resolvedHelperPath()),
-                arguments: ["stop", "--all"]
-            )
-        } catch {
-            return
-        }
+        let helperService = HelperCommandService(helperPath: resolvedHelperPath())
+        _ = helperService.run(arguments: ["stop", "--all"])
     }
 
     private func buildMainMenu() -> NSMenu {
@@ -816,6 +809,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private let helperPath = resolvedHelperPath()
+    private lazy var helperService = HelperCommandService(helperPath: helperPath)
 
     private enum SessionListMode {
         case active
@@ -1067,7 +1061,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             guard let self else {
                 return (status: 1, stdout: "", stderr: "send runtime unavailable")
             }
-            return self.runStandardHelper(arguments: arguments)
+            let result = self.runStandardHelper(arguments: arguments)
+            return (status: result.status, stdout: result.stdout, stderr: result.stderr)
         },
         callbacks: SendRequestProcessorCallbacks(
             logActivity: { [weak self] text in
@@ -5328,7 +5323,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         detail.contains("found multiple matching Terminal ttys for target")
     }
 
-    private func handleUniqueTargetValidationResult(_ result: (status: Int32, stdout: String, stderr: String), target: String, actionName: String) -> Bool {
+    private func handleUniqueTargetValidationResult(_ result: HelperCommandResult, target: String, actionName: String) -> Bool {
         lastTargetValidationFailureReason = nil
         lastTargetValidationFailureDetail = ""
         guard result.status == 0 else {
@@ -5405,22 +5400,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func parseStructuredHelperFields(_ text: String) -> [String: String]? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        var fields: [String: String] = [:]
-        for rawLine in trimmed.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let range = line.range(of: ": ") else { continue }
-            let key = String(line[..<range.lowerBound])
-            let value = String(line[range.upperBound...])
-            fields[key] = value
-        }
-
-        guard fields["status"] != nil, fields["reason"] != nil else {
-            return nil
-        }
-        return fields
+        parseStructuredKeyValueFields(text)
     }
 
     private func showSessionActionBlockedAlert(actionLabel: String, session: SessionSnapshot, detail: String, ambiguous: Bool) {
@@ -5581,55 +5561,36 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
-    private func runStandardHelper(arguments: [String]) -> (status: Int32, stdout: String, stderr: String) {
-        do {
-            let result = try SubprocessRunner.run(
-                executableURL: URL(fileURLWithPath: self.helperPath),
-                arguments: arguments
-            )
-            return (result.terminationStatus, result.trimmedStdout, result.trimmedStderr)
-        } catch {
-            return (1, "", "启动失败: \(error.localizedDescription)")
-        }
+    private func runStandardHelper(arguments: [String]) -> HelperCommandResult {
+        helperService.run(arguments: arguments)
     }
 
     private func runStandardHelperAsync(
         arguments: [String],
         qos: DispatchQoS.QoSClass = .userInitiated,
-        completion: @escaping ((status: Int32, stdout: String, stderr: String)) -> Void
+        completion: @escaping (HelperCommandResult) -> Void
     ) {
-        DispatchQueue.global(qos: qos).async {
-            let result = self.runStandardHelper(arguments: arguments)
-            DispatchQueue.main.async {
-                completion(result)
-            }
-        }
+        helperService.runAsync(arguments: arguments, qos: qos, completion: completion)
     }
 
-    private func runInterruptibleSessionHelper(arguments: [String]) -> (status: Int32, stdout: String, stderr: String) {
-        do {
-            let result = try SubprocessRunner.run(
-                executableURL: URL(fileURLWithPath: self.helperPath),
-                arguments: arguments,
-                onProcessStarted: { [weak self] process in
-                    guard let self else { return }
-                    self.sessionScanProcessLock.lock()
-                    self.currentSessionScanProcess = process
-                    self.sessionScanProcessLock.unlock()
-                },
-                onProcessFinished: { [weak self] process in
-                    guard let self else { return }
-                    self.sessionScanProcessLock.lock()
-                    if self.currentSessionScanProcess === process {
-                        self.currentSessionScanProcess = nil
-                    }
-                    self.sessionScanProcessLock.unlock()
+    private func runInterruptibleSessionHelper(arguments: [String]) -> HelperCommandResult {
+        helperService.run(
+            arguments: arguments,
+            onProcessStarted: { [weak self] process in
+                guard let self else { return }
+                self.sessionScanProcessLock.lock()
+                self.currentSessionScanProcess = process
+                self.sessionScanProcessLock.unlock()
+            },
+            onProcessFinished: { [weak self] process in
+                guard let self else { return }
+                self.sessionScanProcessLock.lock()
+                if self.currentSessionScanProcess === process {
+                    self.currentSessionScanProcess = nil
                 }
-            )
-            return (result.terminationStatus, result.trimmedStdout, result.trimmedStderr)
-        } catch {
-            return (1, "", "启动失败: \(error.localizedDescription)")
-        }
+                self.sessionScanProcessLock.unlock()
+            }
+        )
     }
 
     private func conflictingLoops(for target: String) -> [LoopSnapshot] {
@@ -5689,9 +5650,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 }
             }
 
-            let startResult: (status: Int32, stdout: String, stderr: String)
+            let startResult: HelperCommandResult
             if let failureText {
-                startResult = (1, "", failureText)
+                startResult = HelperCommandResult(status: 1, stdout: "", stderr: failureText)
             } else {
                 var arguments = ["start", "-t", target, "-i", interval, "-m", message]
                 if forceSend {
@@ -5776,37 +5737,23 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
         isRefreshingLoopsSnapshot = true
         DispatchQueue.global(qos: .utility).async {
-            do {
-                let result = try SubprocessRunner.run(
-                    executableURL: URL(fileURLWithPath: self.helperPath),
-                    arguments: ["status", "--json"]
-                )
-                DispatchQueue.main.async {
-                    if result.terminationStatus == 0,
-                       let decoded = parseLoopStatusJSONOutput(result.trimmedStdout) {
-                        let loops = decoded.loops
-                        let warnings = decoded.warnings
-                        self.applyLoopSnapshotResult(loops: loops, warnings: warnings)
-                        self.maybeShowLoopAmbiguityAlerts(loops)
-                    } else {
-                        let stderr = result.trimmedStderr
-                        self.applyLoopSnapshotResult(
-                            loops: [],
-                            warnings: [stderr.isEmpty ? "Failed to load active loops." : stderr],
-                            failureMessage: "加载循环失败"
-                        )
-                    }
-                    self.finishLoopSnapshotRefresh()
-                }
-            } catch {
-                DispatchQueue.main.async {
+            let result = self.helperService.run(arguments: ["status", "--json"])
+            DispatchQueue.main.async {
+                if result.status == 0,
+                   let decoded = parseLoopStatusJSONOutput(result.stdout) {
+                    let loops = decoded.loops
+                    let warnings = decoded.warnings
+                    self.applyLoopSnapshotResult(loops: loops, warnings: warnings)
+                    self.maybeShowLoopAmbiguityAlerts(loops)
+                } else {
+                    let stderr = result.stderr
                     self.applyLoopSnapshotResult(
                         loops: [],
-                        warnings: ["Failed to load active loops: \(error.localizedDescription)"],
+                        warnings: [stderr.isEmpty ? "Failed to load active loops." : stderr],
                         failureMessage: "加载循环失败"
                     )
-                    self.finishLoopSnapshotRefresh()
                 }
+                self.finishLoopSnapshotRefresh()
             }
         }
     }

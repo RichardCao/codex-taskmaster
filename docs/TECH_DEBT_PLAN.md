@@ -248,6 +248,11 @@
 - `SessionStatusFormatter`
 - `LoopStatusFormatter`
 
+当前建议的首刀：
+
+- 先把 helper 子进程执行抽成独立 `HelperCommandService`
+- 再继续把 session / loop / provider migration 语义从控制器中拆出
+
 验收标准：
 
 - UI 文件不再直接承担 helper 调用细节

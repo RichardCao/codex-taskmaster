@@ -155,6 +155,86 @@ enum SubprocessRunner {
     }
 }
 
+struct HelperCommandResult {
+    let status: Int32
+    let stdout: String
+    let stderr: String
+
+    var combinedText: String {
+        [stdout, stderr]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+}
+
+final class HelperCommandService {
+    private let helperURL: URL
+
+    init(helperPath: String) {
+        self.helperURL = URL(fileURLWithPath: helperPath)
+    }
+
+    func run(
+        arguments: [String],
+        onProcessStarted: ((Process) -> Void)? = nil,
+        onProcessFinished: ((Process) -> Void)? = nil
+    ) -> HelperCommandResult {
+        do {
+            let result = try SubprocessRunner.run(
+                executableURL: helperURL,
+                arguments: arguments,
+                onProcessStarted: onProcessStarted,
+                onProcessFinished: onProcessFinished
+            )
+            return HelperCommandResult(
+                status: result.terminationStatus,
+                stdout: result.trimmedStdout,
+                stderr: result.trimmedStderr
+            )
+        } catch {
+            return HelperCommandResult(
+                status: 1,
+                stdout: "",
+                stderr: "启动失败: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    func runAsync(
+        arguments: [String],
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        completion: @escaping (HelperCommandResult) -> Void
+    ) {
+        DispatchQueue.global(qos: qos).async {
+            let result = self.run(arguments: arguments)
+            DispatchQueue.main.async {
+                completion(result)
+            }
+        }
+    }
+}
+
+func parseStructuredKeyValueFields(_ text: String, requireStatusAndReason: Bool = true) -> [String: String]? {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    var fields: [String: String] = [:]
+    for rawLine in trimmed.split(separator: "\n", omittingEmptySubsequences: false) {
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let range = line.range(of: ": ") else { continue }
+        let key = String(line[..<range.lowerBound])
+        let value = String(line[range.upperBound...])
+        fields[key] = value
+    }
+
+    if requireStatusAndReason,
+       (fields["status"] == nil || fields["reason"] == nil) {
+        return nil
+    }
+
+    return fields.isEmpty ? nil : fields
+}
+
 struct LoopSnapshot {
     let target: String
     let loopDaemonRunning: String
