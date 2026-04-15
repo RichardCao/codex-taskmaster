@@ -5582,11 +5582,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             if let failureText {
                 startResult = HelperCommandResult(status: 1, stdout: "", stderr: failureText)
             } else {
-                var arguments = ["start", "-t", target, "-i", interval, "-m", message]
-                if forceSend {
-                    arguments.append("-f")
-                }
-                startResult = self.loopCommandService.runCommand(arguments: arguments)
+                startResult = self.loopCommandService.startLoop(
+                    target: target,
+                    interval: interval,
+                    message: message,
+                    forceSend: forceSend
+                )
             }
 
             DispatchQueue.main.async {
@@ -5945,10 +5946,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 return
             }
 
-            var arguments = ["start", "-t", target, "-i", interval, "-m", self.currentMessage()]
-            if self.isForceSendEnabled() {
-                arguments.append("-f")
-            }
+            let arguments = {
+                var arguments = ["start", "-t", target, "-i", interval, "-m", self.currentMessage()]
+                if self.isForceSendEnabled() {
+                    arguments.append("-f")
+                }
+                return arguments
+            }()
             self.runHelper(arguments: arguments, actionName: "开始循环")
         }
     }

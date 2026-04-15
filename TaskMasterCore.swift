@@ -427,6 +427,30 @@ final class LoopCommandService {
     ) {
         helperService.runAsync(arguments: arguments, qos: qos, completion: completion)
     }
+
+    func startLoop(target: String, interval: String, message: String, forceSend: Bool) -> HelperCommandResult {
+        var arguments = ["start", "-t", target, "-i", interval, "-m", message]
+        if forceSend {
+            arguments.append("-f")
+        }
+        return helperService.run(arguments: arguments)
+    }
+
+    func stopLoop(target: String) -> HelperCommandResult {
+        helperService.run(arguments: ["stop", "-t", target])
+    }
+
+    func stopAllLoops() -> HelperCommandResult {
+        helperService.run(arguments: ["stop", "--all"])
+    }
+
+    func resumeLoop(target: String) -> HelperCommandResult {
+        helperService.run(arguments: ["loop-resume", "-t", target])
+    }
+
+    func deleteLoop(target: String) -> HelperCommandResult {
+        helperService.run(arguments: ["loop-delete", "-t", target])
+    }
 }
 
 func parseStructuredKeyValueFields(_ text: String, requireStatusAndReason: Bool = true) -> [String: String]? {
