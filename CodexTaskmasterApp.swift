@@ -811,6 +811,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let helperPath = resolvedHelperPath()
     private lazy var helperService = HelperCommandService(helperPath: helperPath)
     private lazy var sessionCommandService = SessionCommandService(helperService: helperService)
+    private lazy var sessionScanService = SessionScanService(helperService: helperService)
     private lazy var loopCommandService = LoopCommandService(helperService: helperService)
 
     private enum SessionListMode {
@@ -2617,9 +2618,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     group.leave()
                 }
 
-                let result = self.runStandardHelper(arguments: ["probe", "-t", snapshot.threadID])
-                guard result.status == 0,
-                      let refreshed = parseProbeAllOutput(result.stdout).first else {
+                guard case let .success(refreshed) = self.sessionScanService.probeSession(threadID: snapshot.threadID) else {
                     resultLock.lock()
                     failedThreadIDs.append(snapshot.threadID)
                     resultLock.unlock()
@@ -2681,23 +2680,28 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         let preservedSelectionThreadID = selectedSessionThreadID()
         DispatchQueue.global(qos: .utility).async {
-            let result = self.runStandardHelper(arguments: ["thread-list", "--archived"])
+            let result = self.sessionScanService.threadListArchived()
             DispatchQueue.main.async {
                 guard self.displayedSessionListMode == .archived, !self.isSessionScanRunning else {
                     if showProgress {
-                        self.setStatus(result.status == 0 ? "刷新状态完成" : "刷新状态失败", key: "scan", color: result.status == 0 ? nil : .systemRed)
+                        switch result {
+                        case .success:
+                            self.setStatus("刷新状态完成", key: "scan")
+                        case .failure:
+                            self.setStatus("刷新状态失败", key: "scan", color: .systemRed)
+                        }
                     }
                     return
                 }
 
-                if result.status != 0 {
+                guard case let .success(snapshots) = result else {
                     if showProgress {
                         self.setStatus("刷新状态失败", key: "scan", color: .systemRed)
                     }
                     return
                 }
 
-                self.allSessionSnapshots = parseThreadListOutput(result.stdout, archived: true)
+                self.allSessionSnapshots = snapshots
                 self.sessionScanTotal = self.allSessionSnapshots.count
                 self.clearSessionStatusRefreshState()
                 self.renderSessionSnapshots(
@@ -2737,9 +2741,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     group.leave()
                 }
 
-                let result = self.runStandardHelper(arguments: ["probe", "-t", snapshot.threadID])
-                guard result.status == 0,
-                      let refreshed = parseProbeAllOutput(result.stdout).first else {
+                guard case let .success(refreshed) = self.sessionScanService.probeSession(threadID: snapshot.threadID) else {
                     return
                 }
 
@@ -5081,10 +5083,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         announcedLoopAmbiguitySignatures = currentSignatures
     }
 
-    private func parseSessionCountOutput(_ output: String) -> Int? {
-        Int(output.trimmingCharacters(in: .whitespacesAndNewlines))
-    }
-
     private func formatEpoch(_ rawValue: String) -> String {
         guard let epoch = TimeInterval(rawValue) else { return rawValue }
         return Self.loopTimeFormatter.string(from: Date(timeIntervalSince1970: epoch))
@@ -5503,17 +5501,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         helperService.run(arguments: arguments)
     }
 
-    private func runStandardHelperAsync(
-        arguments: [String],
-        qos: DispatchQoS.QoSClass = .userInitiated,
-        completion: @escaping (HelperCommandResult) -> Void
-    ) {
-        helperService.runAsync(arguments: arguments, qos: qos, completion: completion)
-    }
-
-    private func runInterruptibleSessionHelper(arguments: [String]) -> HelperCommandResult {
-        helperService.run(
-            arguments: arguments,
+    private func sessionScanProcessCallbacks() -> HelperCommandProcessCallbacks {
+        HelperCommandProcessCallbacks(
             onProcessStarted: { [weak self] process in
                 guard let self else { return }
                 self.sessionScanProcessLock.lock()
@@ -5715,22 +5704,30 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionStatusMetaLabel.stringValue = "视图: 普通 | 正在准备扫描…"
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let countResult = self.runInterruptibleSessionHelper(arguments: ["session-count"])
+            let processCallbacks = self.sessionScanProcessCallbacks()
+            let countResult = self.sessionScanService.sessionCount(processCallbacks: processCallbacks)
 
             if self.shouldAbortSessionScan(generation) {
                 return
             }
 
-            guard countResult.status == 0, let totalCount = self.parseSessionCountOutput(countResult.stdout) else {
+            guard case let .success(totalCount) = countResult else {
+                let failureDetail: String
+                switch countResult {
+                case let .failure(error):
+                    failureDetail = error.detail
+                case .success:
+                    failureDetail = ""
+                }
                 DispatchQueue.main.async {
                     guard self.isCurrentSessionScan(generation) else { return }
                     self.isSessionScanRunning = false
                     self.activeSessionScanMode = nil
                     self.updateDetectStatusButtonState()
-                    self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 检测会话失败: \(countResult.stderr.isEmpty ? countResult.stdout : countResult.stderr)"
+                    self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 检测会话失败: \(failureDetail)"
                     self.setStatus("检测会话失败", key: "scan", color: .systemRed)
-                    if !countResult.stderr.isEmpty {
-                        self.appendOutput("stderr: \(countResult.stderr)")
+                    if !failureDetail.isEmpty {
+                        self.appendOutput("stderr: \(failureDetail)")
                     }
                 }
                 return
@@ -5767,19 +5764,27 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     return
                 }
                 let batchSize = offset == 0 ? min(sessionProbeInitialBatchSize, totalCount) : min(sessionProbeBatchSize, totalCount - offset)
-                let batchResult = self.runInterruptibleSessionHelper(arguments: ["probe-all", "--json", "-l", String(batchSize), "-o", String(offset)])
+                let batchResult = self.sessionScanService.probeAllBatch(
+                    limit: batchSize,
+                    offset: offset,
+                    processCallbacks: processCallbacks
+                )
 
                 if self.shouldAbortSessionScan(generation) {
                     return
                 }
 
-                if batchResult.status != 0 {
+                guard case let .success(batchSnapshots) = batchResult else {
                     encounteredFailure = true
-                    failureDetail = batchResult.stderr.isEmpty ? batchResult.stdout : batchResult.stderr
+                    switch batchResult {
+                    case let .failure(error):
+                        failureDetail = error.detail
+                    case .success:
+                        failureDetail = ""
+                    }
                     break
                 }
 
-                let batchSnapshots = parseProbeAllJSONOutput(batchResult.stdout)
                 scannedCount = min(totalCount, offset + batchSize)
                 pendingSnapshots = mergeSessionSnapshots(existing: pendingSnapshots, newSnapshots: batchSnapshots)
 
@@ -5837,7 +5842,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionStatusMetaLabel.stringValue = "视图: 已归档 | 正在读取列表…"
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = self.runInterruptibleSessionHelper(arguments: ["thread-list", "--archived"])
+            let result = self.sessionScanService.threadListArchived(processCallbacks: self.sessionScanProcessCallbacks())
 
             if self.shouldAbortSessionScan(generation) {
                 return
@@ -5849,16 +5854,22 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.activeSessionScanMode = nil
                 self.updateDetectStatusButtonState()
 
-                if result.status != 0 {
-                    self.sessionStatusMetaLabel.stringValue = "视图: 已归档 | 读取失败: \(result.stderr.isEmpty ? result.stdout : result.stderr)"
+                guard case let .success(snapshots) = result else {
+                    let failureDetail: String
+                    switch result {
+                    case let .failure(error):
+                        failureDetail = error.detail
+                    case .success:
+                        failureDetail = ""
+                    }
+                    self.sessionStatusMetaLabel.stringValue = "视图: 已归档 | 读取失败: \(failureDetail)"
                     self.setStatus("读取已归档 session 失败", key: "scan")
-                    if !result.stderr.isEmpty {
-                        self.appendOutput("stderr: \(result.stderr)")
+                    if !failureDetail.isEmpty {
+                        self.appendOutput("stderr: \(failureDetail)")
                     }
                     return
                 }
 
-                let snapshots = parseThreadListOutput(result.stdout, archived: true)
                 self.allSessionSnapshots = snapshots
                 self.sessionScanTotal = snapshots.count
                 self.renderSessionSnapshots(scannedCount: snapshots.count, totalCount: snapshots.count, isComplete: true)

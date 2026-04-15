@@ -167,6 +167,11 @@ struct HelperCommandResult {
     }
 }
 
+struct HelperCommandProcessCallbacks {
+    let onProcessStarted: ((Process) -> Void)?
+    let onProcessFinished: ((Process) -> Void)?
+}
+
 final class HelperCommandService {
     private let helperURL: URL
 
@@ -352,6 +357,67 @@ final class SessionCommandService {
     }
 }
 
+final class SessionScanService {
+    struct Failure: Error {
+        let detail: String
+    }
+
+    private let helperService: HelperCommandService
+
+    init(helperService: HelperCommandService) {
+        self.helperService = helperService
+    }
+
+    func sessionCount(processCallbacks: HelperCommandProcessCallbacks? = nil) -> Result<Int, Failure> {
+        let result = run(arguments: ["session-count"], processCallbacks: processCallbacks)
+        guard result.status == 0 else {
+            return .failure(Failure(detail: result.stderr.isEmpty ? result.stdout : result.stderr))
+        }
+        guard let totalCount = parseSessionCountOutput(result.stdout) else {
+            return .failure(Failure(detail: result.stdout.isEmpty ? "无法解析 session-count 输出" : result.stdout))
+        }
+        return .success(totalCount)
+    }
+
+    func probeAllBatch(limit: Int, offset: Int, processCallbacks: HelperCommandProcessCallbacks? = nil) -> Result<[SessionSnapshot], Failure> {
+        let result = run(
+            arguments: ["probe-all", "--json", "-l", String(limit), "-o", String(offset)],
+            processCallbacks: processCallbacks
+        )
+        guard result.status == 0 else {
+            return .failure(Failure(detail: result.stderr.isEmpty ? result.stdout : result.stderr))
+        }
+        return .success(parseProbeAllJSONOutput(result.stdout))
+    }
+
+    func threadListArchived(processCallbacks: HelperCommandProcessCallbacks? = nil) -> Result<[SessionSnapshot], Failure> {
+        let result = run(arguments: ["thread-list", "--archived"], processCallbacks: processCallbacks)
+        guard result.status == 0 else {
+            return .failure(Failure(detail: result.stderr.isEmpty ? result.stdout : result.stderr))
+        }
+        return .success(parseThreadListOutput(result.stdout, archived: true))
+    }
+
+    func probeSession(threadID: String, processCallbacks: HelperCommandProcessCallbacks? = nil) -> Result<SessionSnapshot, Failure> {
+        let result = run(arguments: ["probe", "-t", threadID], processCallbacks: processCallbacks)
+        guard result.status == 0 else {
+            return .failure(Failure(detail: result.stderr.isEmpty ? result.stdout : result.stderr))
+        }
+        guard let snapshot = parseProbeAllOutput(result.stdout).first else {
+            return .failure(Failure(detail: result.stdout.isEmpty ? "无法解析 session probe 输出" : result.stdout))
+        }
+        return .success(snapshot)
+    }
+
+    private func run(arguments: [String], processCallbacks: HelperCommandProcessCallbacks?) -> HelperCommandResult {
+        helperService.run(
+            arguments: arguments,
+            onProcessStarted: processCallbacks?.onProcessStarted,
+            onProcessFinished: processCallbacks?.onProcessFinished
+        )
+    }
+}
+
 final class LoopCommandService {
     private let helperService: HelperCommandService
 
@@ -532,6 +598,10 @@ func parseStructuredKeyValueFields(_ text: String, requireStatusAndReason: Bool 
     }
 
     return fields.isEmpty ? nil : fields
+}
+
+func parseSessionCountOutput(_ output: String) -> Int? {
+    Int(output.trimmingCharacters(in: .whitespacesAndNewlines))
 }
 
 struct LoopSnapshot {

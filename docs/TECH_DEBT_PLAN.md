@@ -259,11 +259,12 @@
 - `HelperCommandService`
 - `SessionCommandService`
 - `LoopCommandService`
+- `SessionScanService`
 
 下一步建议：
 
-- 继续把 loop / send 的 UI 编排模板收口
-- 再把 session scan / archived list 读取从控制器中拆到独立 service
+- 继续把 session 刷新时的 merge / fallback 规则从控制器中移出
+- 再把 loop / send 的 UI 编排模板继续收口
 
 验收标准：
 
