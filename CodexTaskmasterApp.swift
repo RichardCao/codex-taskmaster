@@ -3566,13 +3566,27 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return (false, detail)
     }
 
-    private func deleteSessionPermanently(threadID: String) -> (success: Bool, detail: String) {
+    private func deleteSessionPermanently(threadID: String) -> (success: Bool, fields: [String: String]?, detail: String) {
         let result = runStandardHelper(arguments: ["thread-delete", "-t", threadID])
+        let combinedText = [result.stdout, result.stderr]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        let fields = parseStructuredHelperFields(combinedText)
         if result.status == 0 {
-            return (true, result.stdout)
+            return (true, fields, result.stdout)
         }
-        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? "彻底删除失败"
-        return (false, detail)
+        let detail = combinedText.isEmpty ? "彻底删除失败" : combinedText
+        return (false, fields, detail)
+    }
+
+    private func sessionDeletePlanAsync(threadID: String, completion: @escaping ([String: String]?) -> Void) {
+        runStandardHelperAsync(arguments: ["thread-delete-plan", "-t", threadID]) { result in
+            guard result.status == 0 else {
+                completion(nil)
+                return
+            }
+            completion(self.parseStructuredHelperFields(result.stdout))
+        }
     }
 
     private func sessionFamilyPlanAsync(threadID: String, completion: @escaping ([String: String]?) -> Void) {
@@ -3585,7 +3599,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
-    private func promptForSessionDeletion(session: SessionSnapshot, matchingLoopTargets: [String], familyPlan: [String: String]?) -> (includeDescendants: Bool, descendantIDs: [String])? {
+    private func promptForSessionDeletion(
+        session: SessionSnapshot,
+        matchingLoopTargets: [String],
+        familyPlan: [String: String]?,
+        deletePlan: [String: String]?
+    ) -> (includeDescendants: Bool, descendantIDs: [String])? {
         let parentThreadID = familyPlan?["parent_thread_id"] ?? "-"
         let directChildCount = Int(familyPlan?["direct_child_count"] ?? "0") ?? 0
         let descendantIDs = (familyPlan?["descendant_ids"] ?? "")
@@ -3593,26 +3612,41 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             .map { String($0) }
             .filter { !$0.isEmpty }
         let descendantCount = Int(familyPlan?["descendant_count"] ?? "\(descendantIDs.count)") ?? descendantIDs.count
+        let rolloutPath = deletePlan?["rollout_path"] ?? session.rolloutPath
+        let rolloutExists = (deletePlan?["rollout_exists"] ?? "no") == "yes"
+        let stateLogRows = Int(deletePlan?["state_log_rows"] ?? "0") ?? 0
+        let logsDBRows = Int(deletePlan?["logs_db_rows"] ?? "0") ?? 0
+        let dynamicToolRows = Int(deletePlan?["dynamic_tool_rows"] ?? "0") ?? 0
+        let stage1OutputRows = Int(deletePlan?["stage1_output_rows"] ?? "0") ?? 0
+        let sessionIndexEntries = Int(deletePlan?["session_index_entries"] ?? "0") ?? 0
 
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "彻底删除这个 Session？"
         var informativeText = """
         这是本地不可恢复删除，不是 Codex 当前公开的原生 archive/unarchive 语义。
-        删除后会尝试同时移除：
-        - state_5.sqlite 中的 thread 记录
-        - 相关的本地扩展状态和结构化 thread 日志
-        - session_index.jsonl 中对应的 rename/name 记录
-        - 当前 rollout 文件（无论在 sessions 还是 archived_sessions）
+        本次删除计划会按固定步骤处理：
+        1. 删除 state_5.sqlite 中的 thread 主记录与相关扩展状态
+        2. 删除日志数据库中的 thread 日志
+        3. 删除 session_index.jsonl 中对应的 rename/name 记录
+        4. 删除当前 rollout 文件并尝试清理空目录
 
         已知风险：
         - 目前没有公开的 Codex 原生永久删除 API，这是一种本地硬删除
         - 删除后通常无法恢复
-        - 如果未来 Codex 增加了新的本地索引格式，这里可能删不全
+        - 如果中途失败，界面会显示失败步骤和 repair 提示，不再静默半成功
 
         Session ID: \(session.threadID)
         Name: \(sessionActualName(session).isEmpty ? "-" : sessionActualName(session))
-        当前路径: \(session.rolloutPath.isEmpty ? "-" : session.rolloutPath)
+        当前路径: \(rolloutPath.isEmpty ? "-" : rolloutPath)
+
+        本次预计删除内容：
+        - state_5.sqlite thread 日志行: \(stateLogRows)
+        - state_5.sqlite 动态工具行: \(dynamicToolRows)
+        - state_5.sqlite stage1 输出行: \(stage1OutputRows)
+        - logs 数据库日志行: \(logsDBRows)
+        - session_index 记录数: \(sessionIndexEntries)
+        - rollout 文件存在: \(rolloutExists ? "是" : "否")
         """
         if parentThreadID != "-" {
             informativeText += """
@@ -3669,17 +3703,25 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return (false, [])
     }
 
-    private func deleteSessionsRecursively(threadIDs: [String]) -> (success: Bool, detail: String) {
+    private func deleteSessionsRecursively(threadIDs: [String]) -> (success: Bool, detail: String, failedFields: [String: String]?) {
         var deletedIDs: [String] = []
+        var resultLines: [String] = []
         for threadID in threadIDs {
             let result = deleteSessionPermanently(threadID: threadID)
             if !result.success {
                 let prefix = deletedIDs.isEmpty ? "" : "已删除: \(deletedIDs.joined(separator: ",")) | "
-                return (false, prefix + result.detail)
+                return (false, prefix + result.detail, result.fields)
             }
             deletedIDs.append(threadID)
+            if let fields = result.fields,
+               let completedSteps = fields["completed_steps"],
+               !completedSteps.isEmpty {
+                resultLines.append("\(threadID): \(completedSteps)")
+            } else {
+                resultLines.append(threadID)
+            }
         }
-        return (true, deletedIDs.joined(separator: ","))
+        return (true, resultLines.joined(separator: " | "), nil)
     }
 
     private func selectSessionRow(threadID: String) {
@@ -6454,61 +6496,71 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setStatus("读取删除计划中…", key: "action")
 
         sessionFamilyPlanAsync(threadID: session.threadID) { familyPlan in
-            self.setButtonsEnabled(true)
+            self.sessionDeletePlanAsync(threadID: session.threadID) { deletePlan in
+                self.setButtonsEnabled(true)
 
-            guard let deletionPlan = self.promptForSessionDeletion(
-                session: session,
-                matchingLoopTargets: matchingLoopTargets,
-                familyPlan: familyPlan
-            ) else {
-                self.setStatus("彻底删除已取消", key: "action")
-                return
-            }
+                guard let deletePlan else {
+                    self.setStatus("读取删除计划失败", key: "action")
+                    self.appendOutput("读取删除计划失败：helper 未返回 thread-delete-plan。")
+                    NSSound.beep()
+                    return
+                }
 
-            self.saveRenameButton.isEnabled = false
-            self.archiveSessionButton.isEnabled = false
-            self.restoreSessionButton.isEnabled = false
-            self.deleteSessionButton.isEnabled = false
-            self.migrateSessionProviderButton.isEnabled = false
-            self.migrateAllSessionsProviderButton.isEnabled = false
-            self.renameField.isEnabled = false
-            self.setStatus("彻底删除中…", key: "action")
-            let targetThreadIDs = deletionPlan.includeDescendants ? ([session.threadID] + deletionPlan.descendantIDs) : [session.threadID]
-            self.appendOutput("执行 彻底删除: thread_ids=\(targetThreadIDs.joined(separator: ","))")
+                guard let deletionPlan = self.promptForSessionDeletion(
+                    session: session,
+                    matchingLoopTargets: matchingLoopTargets,
+                    familyPlan: familyPlan,
+                    deletePlan: deletePlan
+                ) else {
+                    self.setStatus("彻底删除已取消", key: "action")
+                    return
+                }
 
-            DispatchQueue.global(qos: .userInitiated).async {
-                let orderedThreadIDs = deletionPlan.includeDescendants ? (deletionPlan.descendantIDs.reversed() + [session.threadID]) : [session.threadID]
-                let result = self.deleteSessionsRecursively(threadIDs: orderedThreadIDs)
+                self.saveRenameButton.isEnabled = false
+                self.archiveSessionButton.isEnabled = false
+                self.restoreSessionButton.isEnabled = false
+                self.deleteSessionButton.isEnabled = false
+                self.migrateSessionProviderButton.isEnabled = false
+                self.migrateAllSessionsProviderButton.isEnabled = false
+                self.renameField.isEnabled = false
+                self.setStatus("彻底删除中…", key: "action")
+                let targetThreadIDs = deletionPlan.includeDescendants ? ([session.threadID] + deletionPlan.descendantIDs) : [session.threadID]
+                self.appendOutput("执行 彻底删除: thread_ids=\(targetThreadIDs.joined(separator: ","))")
 
-                DispatchQueue.main.async {
-                    if result.success {
-                        let deletedSet = Set(orderedThreadIDs)
-                        self.allSessionSnapshots.removeAll { deletedSet.contains($0.threadID) }
-                        self.sessionSnapshots.removeAll { deletedSet.contains($0.threadID) }
-                        if self.sessionScanTotal > 0 {
-                            self.sessionScanTotal = max(0, self.sessionScanTotal - orderedThreadIDs.count)
-                        }
-                        self.invalidateSessionSearch()
-                        self.renderSessionSnapshots(
-                            scannedCount: self.allSessionSnapshots.count,
-                            totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.allSessionSnapshots.count,
-                            isComplete: true
-                        )
-                        self.setStatus("彻底删除完成", key: "action")
-                        self.appendOutput(result.detail.isEmpty ? "已彻底删除 session: \(orderedThreadIDs.joined(separator: ","))" : "已彻底删除 session: \(result.detail)")
-                        self.refreshLoopsSnapshot()
-                    } else {
-                        if let fields = self.parseStructuredHelperFields(result.detail) {
-                            let reason = fields["reason"] ?? ""
-                            if reason == "session_delete_live" || reason == "session_delete_live_ambiguous" {
-                                let detail = fields["detail"] ?? result.detail
-                                self.showSessionActionBlockedAlert(actionLabel: "删除", session: session, detail: detail, ambiguous: reason == "session_delete_live_ambiguous")
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let orderedThreadIDs = deletionPlan.includeDescendants ? (deletionPlan.descendantIDs.reversed() + [session.threadID]) : [session.threadID]
+                    let result = self.deleteSessionsRecursively(threadIDs: orderedThreadIDs)
+
+                    DispatchQueue.main.async {
+                        if result.success {
+                            let deletedSet = Set(orderedThreadIDs)
+                            self.allSessionSnapshots.removeAll { deletedSet.contains($0.threadID) }
+                            self.sessionSnapshots.removeAll { deletedSet.contains($0.threadID) }
+                            if self.sessionScanTotal > 0 {
+                                self.sessionScanTotal = max(0, self.sessionScanTotal - orderedThreadIDs.count)
                             }
+                            self.invalidateSessionSearch()
+                            self.renderSessionSnapshots(
+                                scannedCount: self.allSessionSnapshots.count,
+                                totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.allSessionSnapshots.count,
+                                isComplete: true
+                            )
+                            self.setStatus("彻底删除完成", key: "action")
+                            self.appendOutput(result.detail.isEmpty ? "已彻底删除 session: \(orderedThreadIDs.joined(separator: ","))" : "已彻底删除 session: \(result.detail)")
+                            self.refreshLoopsSnapshot()
+                        } else {
+                            if let fields = result.failedFields {
+                                let reason = fields["reason"] ?? ""
+                                if reason == "session_delete_live" || reason == "session_delete_live_ambiguous" {
+                                    let detail = fields["detail"] ?? result.detail
+                                    self.showSessionActionBlockedAlert(actionLabel: "删除", session: session, detail: detail, ambiguous: reason == "session_delete_live_ambiguous")
+                                }
+                            }
+                            self.updateSessionDetailView()
+                            self.setStatus("彻底删除失败", key: "action")
+                            self.appendOutput("stderr: \(result.detail)")
+                            NSSound.beep()
                         }
-                        self.updateSessionDetailView()
-                        self.setStatus("彻底删除失败", key: "action")
-                        self.appendOutput("stderr: \(result.detail)")
-                        NSSound.beep()
                     }
                 }
             }

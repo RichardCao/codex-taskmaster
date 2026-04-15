@@ -73,6 +73,7 @@ Usage:
   codex_terminal_sender.sh thread-archive  -t THREAD_ID
   codex_terminal_sender.sh thread-unarchive -t THREAD_ID
   codex_terminal_sender.sh thread-delete -t THREAD_ID
+  codex_terminal_sender.sh thread-delete-plan -t THREAD_ID
   codex_terminal_sender.sh thread-family-plan -t THREAD_ID
   codex_terminal_sender.sh thread-list [--archived]
   codex_terminal_sender.sh thread-provider-plan -t THREAD_ID -p PROVIDER
@@ -109,6 +110,8 @@ Commands:
               Restore an archived session via Codex's native app-server API
   thread-delete
               Permanently delete a session from local Codex state and remove its rollout file
+  thread-delete-plan
+              Inspect which local artifacts would be removed by one permanent delete
   thread-family-plan
               Inspect one session's parent/child relationship in local state
   thread-list
@@ -1595,53 +1598,240 @@ def prune_empty_parent_dirs(path, stop_at):
             break
         current = os.path.dirname(current)
 
-rollout_path = None
+planned_steps = [
+    "state_db_cleanup",
+    "logs_db_cleanup",
+    "session_index_cleanup",
+    "rollout_cleanup",
+]
+completed_steps = []
+failed_step = ""
+error_message = ""
+repair_hint = ""
+rollout_path = ""
 archived = 0
+logs_db_present = os.path.exists(logs_db_path)
+rollout_exists_before = False
+state_thread_deleted = False
+dynamic_tool_rows_removed = 0
+stage1_output_rows_removed = 0
+state_log_rows_removed = 0
+logs_db_rows_removed = 0
+session_index_removed = 0
+rollout_removed = False
 
-state_conn = sqlite3.connect(state_db_path)
-state_cur = state_conn.cursor()
-state_cur.execute(
+def emit(exit_code, status, reason):
+    pending_steps = [step for step in planned_steps if step not in completed_steps and step != failed_step]
+    print(f"status: {status}")
+    print(f"reason: {reason}")
+    print(f"thread_id: {thread_id}")
+    print(f"deleted: {'yes' if status == 'success' else 'no'}")
+    print(f"rollout_path: {rollout_path}")
+    print(f"archived: {'yes' if archived else 'no'}")
+    print(f"logs_db_present: {'yes' if logs_db_present else 'no'}")
+    print(f"rollout_exists_before: {'yes' if rollout_exists_before else 'no'}")
+    print(f"state_thread_deleted: {'yes' if state_thread_deleted else 'no'}")
+    print(f"dynamic_tool_rows_removed: {dynamic_tool_rows_removed}")
+    print(f"stage1_output_rows_removed: {stage1_output_rows_removed}")
+    print(f"state_log_rows_removed: {state_log_rows_removed}")
+    print(f"logs_db_rows_removed: {logs_db_rows_removed}")
+    print(f"session_index_removed: {session_index_removed}")
+    print(f"rollout_removed: {'yes' if rollout_removed else 'no'}")
+    print(f"completed_steps: {','.join(completed_steps)}")
+    print(f"pending_steps: {','.join(pending_steps)}")
+    if failed_step:
+        print(f"failed_step: {failed_step}")
+    if error_message:
+        print(f"detail: {error_message}")
+    if repair_hint:
+        print(f"repair_hint: {repair_hint}")
+    raise SystemExit(exit_code)
+
+try:
+    state_conn = sqlite3.connect(state_db_path)
+    state_cur = state_conn.cursor()
+    row = state_cur.execute(
+        "select rollout_path, archived from threads where id = ?",
+        (thread_id,),
+    ).fetchone()
+    if row is None:
+        failed_step = "state_db_lookup"
+        error_message = f"thread not found: {thread_id}"
+        repair_hint = "会话在主状态库中不存在，无法继续本地永久删除。"
+        emit(1, "failed", "thread_not_found")
+    rollout_path, archived = row
+    rollout_exists_before = bool(rollout_path and os.path.exists(rollout_path))
+
+    try:
+        dynamic_tool_rows_removed = state_cur.execute(
+            "select count(*) from thread_dynamic_tools where thread_id = ?",
+            (thread_id,),
+        ).fetchone()[0]
+        stage1_output_rows_removed = state_cur.execute(
+            "select count(*) from stage1_outputs where thread_id = ?",
+            (thread_id,),
+        ).fetchone()[0]
+        state_log_rows_removed = state_cur.execute(
+            "select count(*) from logs where thread_id = ?",
+            (thread_id,),
+        ).fetchone()[0]
+        state_cur.execute("PRAGMA foreign_keys = ON")
+        state_cur.execute("delete from thread_dynamic_tools where thread_id = ?", (thread_id,))
+        state_cur.execute("delete from stage1_outputs where thread_id = ?", (thread_id,))
+        state_cur.execute("delete from logs where thread_id = ?", (thread_id,))
+        state_cur.execute("delete from threads where id = ?", (thread_id,))
+        if state_cur.rowcount != 1:
+            raise RuntimeError(f"failed to delete thread row: {thread_id}")
+        state_conn.commit()
+        state_thread_deleted = True
+        completed_steps.append("state_db_cleanup")
+    except Exception as exc:
+        state_conn.rollback()
+        failed_step = "state_db_cleanup"
+        error_message = str(exc)
+        repair_hint = "主状态库删除未完成，可以直接重试本地永久删除。"
+        emit(1, "failed", "delete_step_failed")
+    finally:
+        state_conn.close()
+
+    try:
+        if logs_db_present:
+            logs_conn = sqlite3.connect(logs_db_path)
+            logs_cur = logs_conn.cursor()
+            logs_db_rows_removed = logs_cur.execute(
+                "select count(*) from logs where thread_id = ?",
+                (thread_id,),
+            ).fetchone()[0]
+            logs_cur.execute("delete from logs where thread_id = ?", (thread_id,))
+            logs_conn.commit()
+            logs_conn.close()
+        completed_steps.append("logs_db_cleanup")
+    except Exception as exc:
+        failed_step = "logs_db_cleanup"
+        error_message = str(exc)
+        repair_hint = "主状态库已删除；请继续清理 logs 数据库、session_index 和 rollout 文件。"
+        emit(1, "failed", "delete_step_failed")
+
+    try:
+        session_index_removed = remove_session_index_entry(session_index_path, thread_id)
+        completed_steps.append("session_index_cleanup")
+    except Exception as exc:
+        failed_step = "session_index_cleanup"
+        error_message = str(exc)
+        repair_hint = "数据库已删除；请继续清理 session_index 和 rollout 文件。"
+        emit(1, "failed", "delete_step_failed")
+
+    try:
+        if rollout_exists_before:
+            os.remove(rollout_path)
+            rollout_removed = True
+            if archived:
+                prune_empty_parent_dirs(rollout_path, os.path.expanduser("~/.codex/archived_sessions"))
+            else:
+                prune_empty_parent_dirs(rollout_path, os.path.expanduser("~/.codex/sessions"))
+        completed_steps.append("rollout_cleanup")
+    except Exception as exc:
+        failed_step = "rollout_cleanup"
+        error_message = str(exc)
+        repair_hint = "数据库与索引已删除；请手动清理 rollout 文件及空目录。"
+        emit(1, "failed", "delete_step_failed")
+
+    emit(0, "success", "delete_completed")
+except SystemExit:
+    raise
+except Exception as exc:
+    failed_step = failed_step or "unknown"
+    error_message = str(exc)
+    if not repair_hint:
+        repair_hint = "本地永久删除中途失败，请根据 completed_steps 和 pending_steps 手动补清理。"
+    emit(1, "failed", "delete_step_failed")
+PY
+}
+
+thread_delete_plan() {
+  local thread_id="$1"
+  require_cmd python3
+  is_uuid_like "$thread_id" || die "thread id must be a UUID"
+
+  python3 - "$CODEX_STATE_DB_PATH" "$CODEX_LOGS_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "$thread_id" <<'PY'
+import json
+import os
+import sqlite3
+import sys
+
+state_db_path, logs_db_path, session_index_path, thread_id = sys.argv[1:]
+
+def count_session_index_entries(path, target_thread_id):
+    if not os.path.exists(path):
+        return 0
+    count = 0
+    with open(path, "r", encoding="utf-8") as fh:
+        for raw_line in fh:
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            try:
+                obj = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if obj.get("id") == target_thread_id:
+                count += 1
+    return count
+
+conn = sqlite3.connect(state_db_path)
+cur = conn.cursor()
+row = cur.execute(
     "select rollout_path, archived from threads where id = ?",
     (thread_id,),
-)
-row = state_cur.fetchone()
+).fetchone()
 if row is None:
-    raise SystemExit(f"thread not found: {thread_id}")
+    print("status: failed")
+    print("reason: thread_not_found")
+    print(f"thread_id: {thread_id}")
+    raise SystemExit(1)
+
 rollout_path, archived = row
+dynamic_tool_rows = cur.execute(
+    "select count(*) from thread_dynamic_tools where thread_id = ?",
+    (thread_id,),
+).fetchone()[0]
+stage1_output_rows = cur.execute(
+    "select count(*) from stage1_outputs where thread_id = ?",
+    (thread_id,),
+).fetchone()[0]
+state_log_rows = cur.execute(
+    "select count(*) from logs where thread_id = ?",
+    (thread_id,),
+).fetchone()[0]
+conn.close()
 
-state_cur.execute("PRAGMA foreign_keys = ON")
-state_cur.execute("delete from thread_dynamic_tools where thread_id = ?", (thread_id,))
-state_cur.execute("delete from stage1_outputs where thread_id = ?", (thread_id,))
-state_cur.execute("delete from logs where thread_id = ?", (thread_id,))
-state_cur.execute("delete from threads where id = ?", (thread_id,))
-if state_cur.rowcount != 1:
-    raise SystemExit(f"failed to delete thread row: {thread_id}")
-state_conn.commit()
-state_conn.close()
-
-if os.path.exists(logs_db_path):
+logs_db_present = os.path.exists(logs_db_path)
+logs_db_rows = 0
+if logs_db_present:
     logs_conn = sqlite3.connect(logs_db_path)
     logs_cur = logs_conn.cursor()
-    logs_cur.execute("delete from logs where thread_id = ?", (thread_id,))
-    logs_conn.commit()
+    logs_db_rows = logs_cur.execute(
+        "select count(*) from logs where thread_id = ?",
+        (thread_id,),
+    ).fetchone()[0]
     logs_conn.close()
 
-session_index_removed = remove_session_index_entry(session_index_path, thread_id)
+session_index_entries = count_session_index_entries(session_index_path, thread_id)
+rollout_exists = bool(rollout_path and os.path.exists(rollout_path))
 
-rollout_removed = False
-if rollout_path and os.path.exists(rollout_path):
-    os.remove(rollout_path)
-    rollout_removed = True
-    if archived:
-        prune_empty_parent_dirs(rollout_path, os.path.expanduser("~/.codex/archived_sessions"))
-    else:
-        prune_empty_parent_dirs(rollout_path, os.path.expanduser("~/.codex/sessions"))
-
+print("status: success")
+print("reason: delete_plan_ready")
 print(f"thread_id: {thread_id}")
-print("deleted: yes")
 print(f"rollout_path: {rollout_path}")
-print(f"rollout_removed: {'yes' if rollout_removed else 'no'}")
-print(f"session_index_removed: {session_index_removed}")
+print(f"archived: {'yes' if archived else 'no'}")
+print(f"dynamic_tool_rows: {dynamic_tool_rows}")
+print(f"stage1_output_rows: {stage1_output_rows}")
+print(f"state_log_rows: {state_log_rows}")
+print(f"logs_db_present: {'yes' if logs_db_present else 'no'}")
+print(f"logs_db_rows: {logs_db_rows}")
+print(f"session_index_entries: {session_index_entries}")
+print(f"rollout_exists: {'yes' if rollout_exists else 'no'}")
+print("planned_steps: state_db_cleanup,logs_db_cleanup,session_index_cleanup,rollout_cleanup")
 PY
 }
 
@@ -3382,6 +3572,21 @@ parse_thread_delete_args() {
   [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
 }
 
+parse_thread_delete_plan_args() {
+  THREAD_ID=""
+  while getopts ":t:h" opt; do
+    case "$opt" in
+      t) THREAD_ID="$OPTARG" ;;
+      h) usage; exit 0 ;;
+      :) die "option -$OPTARG requires an argument" ;;
+      \?) die "unknown option: -$OPTARG" ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [[ -n "$THREAD_ID" ]] || die "thread-delete-plan requires -t THREAD_ID"
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
 parse_thread_family_plan_args() {
   THREAD_ID=""
   while getopts ":t:h" opt; do
@@ -3591,6 +3796,10 @@ main() {
     thread-delete)
       parse_thread_delete_args "$@"
       thread_delete "$THREAD_ID"
+      ;;
+    thread-delete-plan)
+      parse_thread_delete_plan_args "$@"
+      thread_delete_plan "$THREAD_ID"
       ;;
     thread-family-plan)
       parse_thread_family_plan_args "$@"

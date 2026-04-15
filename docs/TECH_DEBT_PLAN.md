@@ -25,7 +25,8 @@
   5. `done` helper `--json` 协议与统一 decoder
   6. `done` 状态 / 原因 / 文案映射收口
   7. `done` `config.toml` 读取从 UI 层移出
-  8. `next` 删除流程结构化
+  8. `done` 删除流程结构化
+  9. `next` 控制器拆分
 
 ## 执行顺序
 
