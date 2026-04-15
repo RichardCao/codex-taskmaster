@@ -862,6 +862,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let changed: Bool
     }
 
+    private struct SessionScanControlState {
+        var generation = 0
+        var shouldStop = false
+    }
+
     private let targetField: NSTextField = {
         let field = NSTextField()
         field.stringValue = initialTargetValue()
@@ -930,9 +935,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var targetHistory: [String] = []
     private var messageHistory: [String] = []
     private var isSessionScanRunning = false
-    private var sessionScanGeneration = 0
     private var sessionScanTotal = 0
-    private var sessionScanShouldStop = false
     private var displayedSessionListMode: SessionListMode = .active
     private var activeSessionScanMode: SessionListMode?
     private var statusSegments: [String: String] = [:]
@@ -963,6 +966,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var sessionPromptSearchProgressTotal = 0
     private var sessionPromptSearchCache: [String: String] = [:]
     private let sessionPromptSearchCacheLock = NSLock()
+    private let sessionPromptSearchRevisionLock = NSLock()
+    private var sessionPromptSearchRevisionState = 0
     private var lastSessionRenderScannedCount: Int?
     private var lastSessionRenderTotalCount: Int?
     private var lastSessionRenderIsComplete = true
@@ -978,6 +983,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var selectedSessionTTYFilters = Set<String>()
     private let sessionFilterContainerView = NSView()
     private let sessionFilterStackView = NSStackView()
+    private let sessionScanControlLock = NSLock()
+    private var sessionScanControlState = SessionScanControlState()
     private var sessionFilterPanel: NSPanel?
     private var sessionFilterPanelKind: SessionFilterKind?
     private var sessionFilterPanelColumnIdentifier: String?
@@ -2255,6 +2262,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func invalidateSessionSearch(resetPromptCache: Bool = false) {
         sessionSearchRevision += 1
+        sessionPromptSearchRevisionLock.lock()
+        sessionPromptSearchRevisionState = sessionSearchRevision
+        sessionPromptSearchRevisionLock.unlock()
         isSessionPromptSearchRunning = false
         sessionPromptSearchCompletedRevision = nil
         sessionPromptSearchMatchedThreadIDs.removeAll()
@@ -2266,6 +2276,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             sessionPromptSearchCacheLock.unlock()
         }
         updateSessionFilterHeaderIndicators()
+    }
+
+    private func isCurrentSessionPromptSearchRevision(_ revision: Int) -> Bool {
+        sessionPromptSearchRevisionLock.lock()
+        defer { sessionPromptSearchRevisionLock.unlock() }
+        return sessionPromptSearchRevisionState == revision
     }
 
     private func fastSessionMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
@@ -3359,7 +3375,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             var matchedThreadIDs = Set<String>()
 
             for (index, session) in snapshots.enumerated() {
-                if revision != self.sessionSearchRevision {
+                if !self.isCurrentSessionPromptSearchRevision(revision) {
                     return
                 }
 
@@ -3371,7 +3387,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 if (index + 1) % 8 == 0 || index + 1 == snapshots.count {
                     let completed = index + 1
                     DispatchQueue.main.async {
-                        guard revision == self.sessionSearchRevision else { return }
+                        guard self.isCurrentSessionPromptSearchRevision(revision) else { return }
                         self.sessionPromptSearchProgressCompleted = completed
                         self.updateSessionStatusMetaLabel()
                     }
@@ -3379,7 +3395,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             }
 
             DispatchQueue.main.async {
-                guard revision == self.sessionSearchRevision else { return }
+                guard self.isCurrentSessionPromptSearchRevision(revision) else { return }
                 self.isSessionPromptSearchRunning = false
                 self.sessionPromptSearchCompletedRevision = revision
                 self.sessionPromptSearchMatchedThreadIDs = matchedThreadIDs
@@ -3387,6 +3403,33 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.rebuildDisplayedSessionSnapshots(preserveSelectionThreadID: self.selectedSessionThreadID())
             }
         }
+    }
+
+    private func beginSessionScanControl() -> Int {
+        sessionScanControlLock.lock()
+        defer { sessionScanControlLock.unlock() }
+        sessionScanControlState.generation += 1
+        sessionScanControlState.shouldStop = false
+        return sessionScanControlState.generation
+    }
+
+    private func stopSessionScanControl() {
+        sessionScanControlLock.lock()
+        defer { sessionScanControlLock.unlock() }
+        sessionScanControlState.generation += 1
+        sessionScanControlState.shouldStop = true
+    }
+
+    private func isCurrentSessionScan(_ generation: Int) -> Bool {
+        sessionScanControlLock.lock()
+        defer { sessionScanControlLock.unlock() }
+        return sessionScanControlState.generation == generation
+    }
+
+    private func shouldAbortSessionScan(_ generation: Int) -> Bool {
+        sessionScanControlLock.lock()
+        defer { sessionScanControlLock.unlock() }
+        return sessionScanControlState.shouldStop || sessionScanControlState.generation != generation
     }
 
     private func loadPromptHistoryText(for session: SessionSnapshot) -> String {
@@ -5763,8 +5806,7 @@ conn.close()
 
     private func stopSessionStatusScan() {
         guard isSessionScanRunning else { return }
-        sessionScanShouldStop = true
-        sessionScanGeneration += 1
+        stopSessionScanControl()
         let stoppedMode = activeSessionScanMode ?? displayedSessionListMode
 
         sessionScanProcessLock.lock()
@@ -5862,9 +5904,7 @@ conn.close()
         activeSessionScanMode = .active
         displayedSessionListMode = .active
         isSessionScanRunning = true
-        sessionScanShouldStop = false
-        sessionScanGeneration += 1
-        let generation = sessionScanGeneration
+        let generation = beginSessionScanControl()
         sessionScanTotal = 0
         clearSessionStatusRefreshState()
         updateDetectStatusButtonState()
@@ -5876,13 +5916,13 @@ conn.close()
         DispatchQueue.global(qos: .userInitiated).async {
             let countResult = self.runInterruptibleSessionHelper(arguments: ["session-count"])
 
-            if self.sessionScanShouldStop || self.sessionScanGeneration != generation {
+            if self.shouldAbortSessionScan(generation) {
                 return
             }
 
             guard countResult.status == 0, let totalCount = self.parseSessionCountOutput(countResult.stdout) else {
                 DispatchQueue.main.async {
-                    guard self.sessionScanGeneration == generation else { return }
+                    guard self.isCurrentSessionScan(generation) else { return }
                     self.isSessionScanRunning = false
                     self.activeSessionScanMode = nil
                     self.updateDetectStatusButtonState()
@@ -5896,7 +5936,7 @@ conn.close()
             }
 
             DispatchQueue.main.async {
-                guard self.sessionScanGeneration == generation else { return }
+                guard self.isCurrentSessionScan(generation) else { return }
                 self.sessionScanTotal = totalCount
                 if totalCount == 0 {
                     self.isSessionScanRunning = false
@@ -5922,13 +5962,13 @@ conn.close()
             var pendingSnapshots: [SessionSnapshot] = []
 
             while offset < totalCount {
-                if self.sessionScanShouldStop || self.sessionScanGeneration != generation {
+                if self.shouldAbortSessionScan(generation) {
                     return
                 }
                 let batchSize = offset == 0 ? min(sessionProbeInitialBatchSize, totalCount) : min(sessionProbeBatchSize, totalCount - offset)
                 let batchResult = self.runInterruptibleSessionHelper(arguments: ["probe-all", "-l", String(batchSize), "-o", String(offset)])
 
-                if self.sessionScanShouldStop || self.sessionScanGeneration != generation {
+                if self.shouldAbortSessionScan(generation) {
                     return
                 }
 
@@ -5943,7 +5983,7 @@ conn.close()
                 pendingSnapshots = mergeSessionSnapshots(existing: pendingSnapshots, newSnapshots: batchSnapshots)
 
                 DispatchQueue.main.async {
-                    guard self.sessionScanGeneration == generation else { return }
+                    guard self.isCurrentSessionScan(generation) else { return }
                     self.allSessionSnapshots = pendingSnapshots
                     self.renderSessionSnapshots(scannedCount: scannedCount, totalCount: totalCount, isComplete: scannedCount >= totalCount)
                     if scannedCount < totalCount {
@@ -5955,7 +5995,7 @@ conn.close()
             }
 
             DispatchQueue.main.async {
-                guard self.sessionScanGeneration == generation else { return }
+                guard self.isCurrentSessionScan(generation) else { return }
                 self.isSessionScanRunning = false
                 self.activeSessionScanMode = nil
                 self.updateDetectStatusButtonState()
@@ -5986,9 +6026,7 @@ conn.close()
         activeSessionScanMode = .archived
         displayedSessionListMode = .archived
         isSessionScanRunning = true
-        sessionScanShouldStop = false
-        sessionScanGeneration += 1
-        let generation = sessionScanGeneration
+        let generation = beginSessionScanControl()
         sessionScanTotal = 0
         clearSessionStatusRefreshState()
         updateDetectStatusButtonState()
@@ -6000,12 +6038,12 @@ conn.close()
         DispatchQueue.global(qos: .userInitiated).async {
             let result = self.runInterruptibleSessionHelper(arguments: ["thread-list", "--archived"])
 
-            if self.sessionScanShouldStop || self.sessionScanGeneration != generation {
+            if self.shouldAbortSessionScan(generation) {
                 return
             }
 
             DispatchQueue.main.async {
-                guard self.sessionScanGeneration == generation else { return }
+                guard self.isCurrentSessionScan(generation) else { return }
                 self.isSessionScanRunning = false
                 self.activeSessionScanMode = nil
                 self.updateDetectStatusButtonState()
