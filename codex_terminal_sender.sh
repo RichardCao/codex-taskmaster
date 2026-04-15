@@ -50,6 +50,7 @@ LOOP_DAEMON_LOG_FILE="${RUNTIME_DIR}/loop-daemon.log"
 CODEX_STATE_DB_PATH="${CODEX_TASKMASTER_CODEX_STATE_DB_PATH:-${HOME_DIR}/.codex/state_5.sqlite}"
 CODEX_SESSION_INDEX_PATH="${CODEX_TASKMASTER_CODEX_SESSION_INDEX_PATH:-${CODEX_TASKMASTER_SESSION_INDEX_PATH:-${HOME_DIR}/.codex/session_index.jsonl}}"
 CODEX_LOGS_DB_PATH="${CODEX_TASKMASTER_CODEX_LOGS_DB_PATH:-${HOME_DIR}/.codex/logs_1.sqlite}"
+CODEX_CONFIG_PATH="${CODEX_TASKMASTER_CODEX_CONFIG_PATH:-${HOME_DIR}/.codex/config.toml}"
 CODEX_BIN_PATH="${CODEX_TASKMASTER_CODEX_BIN_PATH:-codex}"
 
 mkdir -p "$STATE_DIR" "$REQUESTS_DIR" "$PENDING_REQUEST_DIR" "$PROCESSING_REQUEST_DIR" "$RESULT_REQUEST_DIR" "$LOOPS_DIR" "$RUNTIME_DIR" "$LOOP_STATE_DIR" "$LOOP_LOG_DIR"
@@ -78,6 +79,7 @@ Usage:
   codex_terminal_sender.sh thread-provider-plan-all -p PROVIDER
   codex_terminal_sender.sh thread-provider-migrate -t THREAD_ID -p PROVIDER [--family]
   codex_terminal_sender.sh thread-provider-migrate-all -p PROVIDER
+  codex_terminal_sender.sh config-model-provider
   codex_terminal_sender.sh wait-idle   -t TARGET [-s SECONDS] [-w SECONDS]
   codex_terminal_sender.sh loop-once
   codex_terminal_sender.sh loop-resume -t TARGET
@@ -119,6 +121,8 @@ Commands:
               Migrate one session, or one related family, to one provider in local state
   thread-provider-migrate-all
               Migrate all local sessions to one provider in local state
+  config-model-provider
+              Read model_provider from the current Codex config.toml
   wait-idle   Wait until the target appears stably idle
   loop-once   Internal command: run one loop scheduling tick
   loop-resume Clear a paused loop state and reschedule it immediately
@@ -1766,6 +1770,59 @@ probe_all_sessions() {
   probe_all_sessions_text
 }
 
+config_model_provider() {
+  require_cmd python3
+  python3 - "$CODEX_CONFIG_PATH" <<'PY'
+import os
+import sys
+
+config_path = sys.argv[1]
+
+if not os.path.exists(config_path):
+    print("status: failed")
+    print("reason: config_not_found")
+    print(f"config_path: {config_path}")
+    raise SystemExit(1)
+
+provider = ""
+try:
+    import tomllib
+
+    with open(config_path, "rb") as fh:
+        parsed = tomllib.load(fh)
+    provider = str(parsed.get("model_provider") or "").strip()
+except Exception:
+    try:
+        with open(config_path, "r", encoding="utf-8") as fh:
+            for raw_line in fh:
+                line = raw_line.strip()
+                if not line.startswith("model_provider"):
+                    continue
+                if "=" not in line:
+                    continue
+                raw_value = line.split("=", 1)[1].strip()
+                provider = raw_value.strip("\"'").strip()
+                if provider:
+                    break
+    except Exception:
+        print("status: failed")
+        print("reason: config_read_failed")
+        print(f"config_path: {config_path}")
+        raise SystemExit(1)
+
+if not provider:
+    print("status: failed")
+    print("reason: model_provider_not_found")
+    print(f"config_path: {config_path}")
+    raise SystemExit(1)
+
+print("status: success")
+print("reason: config_loaded")
+print(f"config_path: {config_path}")
+print(f"model_provider: {provider}")
+PY
+}
+
 thread_provider_plan() {
   local thread_id="$1"
   local target_provider="$2"
@@ -3259,6 +3316,10 @@ parse_session_count_args() {
   [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
 }
 
+parse_config_model_provider_args() {
+  [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+}
+
 parse_thread_name_set_args() {
   THREAD_ID=""
   THREAD_NAME=""
@@ -3554,6 +3615,10 @@ main() {
     thread-provider-migrate-all)
       parse_thread_provider_migrate_all_args "$@"
       thread_provider_migrate_all "$THREAD_PROVIDER"
+      ;;
+    config-model-provider)
+      parse_config_model_provider_args "$@"
+      config_model_provider
       ;;
     wait-idle)
       parse_wait_idle_args "$@"

@@ -6,7 +6,6 @@ private let userHomeDirectory = NSHomeDirectory()
 private let autoRefreshInterval: TimeInterval = 3
 private let requestPollInterval: TimeInterval = 0.5
 private let stateDirectoryPath = "\(userHomeDirectory)/.codex-terminal-sender"
-private let codexConfigPath = "\(userHomeDirectory)/.codex/config.toml"
 private let pendingRequestDirectoryPath = "\(stateDirectoryPath)/requests/pending"
 private let processingRequestDirectoryPath = "\(stateDirectoryPath)/requests/processing"
 private let resultRequestDirectoryPath = "\(stateDirectoryPath)/requests/results"
@@ -929,6 +928,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var allSessionSnapshots: [SessionSnapshot] = []
     private var activityLogEntries: [ActivityLogEntry] = []
     private var loopWarnings: [String] = []
+    private var configuredModelProvider: String?
     private var preferredLoopSelectionTarget: String?
     private var targetHistory: [String] = []
     private var messageHistory: [String] = []
@@ -1118,6 +1118,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         installTableSelectionOutsideMonitor()
         appendOutput("Codex Taskmaster 已就绪。")
         appendOutput("循环列表会每 \(Int(autoRefreshInterval)) 秒自动刷新一次。")
+        refreshConfiguredModelProviderCache()
         refreshLoopsSnapshot()
         startAutoRefresh()
         startRequestPump()
@@ -3388,7 +3389,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             restoreSessionButton.isEnabled = false
             deleteSessionButton.isEnabled = false
             migrateSessionProviderButton.isEnabled = false
-            migrateAllSessionsProviderButton.isEnabled = currentConfiguredModelProvider() != nil
+            migrateAllSessionsProviderButton.isEnabled = configuredModelProvider != nil
             let emptyDetailText = "选中一条 session 后，这里会显示完整信息、最近发送结果、相关 Loop 和提示词历史。"
             if sessionDetailView.string != emptyDetailText {
                 sessionDetailView.string = emptyDetailText
@@ -3410,8 +3411,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         archiveSessionButton.isEnabled = !session.isArchived
         restoreSessionButton.isEnabled = session.isArchived
         deleteSessionButton.isEnabled = true
-        migrateSessionProviderButton.isEnabled = currentConfiguredModelProvider() != nil
-        migrateAllSessionsProviderButton.isEnabled = currentConfiguredModelProvider() != nil
+        updateProviderMigrationButtons()
         renameField.placeholderString = session.isArchived
             ? "已归档 session 需先恢复后再改名"
             : "输入新名称，留空可恢复为未 rename 状态"
@@ -3469,21 +3469,34 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
-    private func currentConfiguredModelProvider() -> String? {
-        guard let text = try? String(contentsOfFile: codexConfigPath, encoding: .utf8) else {
-            return nil
-        }
-        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard line.hasPrefix("model_provider") else { continue }
-            guard let equalsIndex = line.firstIndex(of: "=") else { continue }
-            let rawValue = line[line.index(after: equalsIndex)...].trimmingCharacters(in: .whitespacesAndNewlines)
-            let trimmed = rawValue.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-            if !trimmed.isEmpty {
-                return trimmed
+    private func updateProviderMigrationButtons() {
+        let hasProvider = configuredModelProvider != nil
+        let hasSelection = sessionStatusTableView.selectedRow >= 0
+        migrateSessionProviderButton.isEnabled = hasProvider && hasSelection
+        migrateAllSessionsProviderButton.isEnabled = hasProvider
+    }
+
+    private func refreshConfiguredModelProviderCache(
+        updateButtons: Bool = true,
+        completion: ((String?) -> Void)? = nil
+    ) {
+        runStandardHelperAsync(arguments: ["config-model-provider"]) { result in
+            let provider: String?
+            if result.status == 0,
+               let fields = self.parseStructuredHelperFields(result.stdout),
+               let modelProvider = fields["model_provider"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !modelProvider.isEmpty {
+                provider = modelProvider
+            } else {
+                provider = nil
             }
+
+            self.configuredModelProvider = provider
+            if updateButtons {
+                self.updateProviderMigrationButtons()
+            }
+            completion?(provider)
         }
-        return nil
     }
 
     private func sessionProviderPlanAsync(threadID: String, targetProvider: String, completion: @escaping ([String: String]?) -> Void) {
@@ -6207,8 +6220,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.archiveSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                 self.restoreSessionButton.isEnabled = false
                 self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
-                self.migrateSessionProviderButton.isEnabled = self.currentConfiguredModelProvider() != nil && self.sessionStatusTableView.selectedRow >= 0
-                self.migrateAllSessionsProviderButton.isEnabled = self.currentConfiguredModelProvider() != nil
+                self.updateProviderMigrationButtons()
 
                 if result.success {
                     if let index = self.allSessionSnapshots.firstIndex(where: { $0.threadID == session.threadID }) {
@@ -6338,8 +6350,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.archiveSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.restoreSessionButton.isEnabled = false
                     self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
-                    self.migrateSessionProviderButton.isEnabled = self.currentConfiguredModelProvider() != nil && self.sessionStatusTableView.selectedRow >= 0
-                    self.migrateAllSessionsProviderButton.isEnabled = self.currentConfiguredModelProvider() != nil
+                    self.updateProviderMigrationButtons()
                     self.setStatus("归档 Session 失败", key: "action")
                     self.appendOutput("stderr: \(result.error)")
                     NSSound.beep()
@@ -6418,8 +6429,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.archiveSessionButton.isEnabled = false
                     self.restoreSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
-                    self.migrateSessionProviderButton.isEnabled = self.currentConfiguredModelProvider() != nil && self.sessionStatusTableView.selectedRow >= 0
-                    self.migrateAllSessionsProviderButton.isEnabled = self.currentConfiguredModelProvider() != nil
+                    self.updateProviderMigrationButtons()
                     self.setStatus("恢复归档失败", key: "action")
                     self.appendOutput("stderr: \(result.error)")
                     NSSound.beep()
@@ -6513,114 +6523,123 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             NSSound.beep()
             return
         }
-        guard let targetProvider = currentConfiguredModelProvider() else {
-            appendOutput("未能从 ~/.codex/config.toml 读取当前 model_provider。")
-            setStatus("当前 provider 未配置", key: "action")
-            NSSound.beep()
-            return
-        }
         setButtonsEnabled(false)
-        setStatus("读取迁移计划中…", key: "action")
+        setStatus("读取当前 Provider 中…", key: "action")
 
-        sessionProviderPlanAsync(threadID: session.threadID, targetProvider: targetProvider) { plan in
-            self.setButtonsEnabled(true)
-
-            guard let plan else {
-                self.appendOutput("读取 session provider 迁移计划失败。")
-                self.setStatus("读取迁移计划失败", key: "action")
+        refreshConfiguredModelProviderCache(updateButtons: false) { targetProvider in
+            guard let targetProvider else {
+                self.setButtonsEnabled(true)
+                self.updateProviderMigrationButtons()
+                self.appendOutput("未能从 ~/.codex/config.toml 读取当前 model_provider。")
+                self.setStatus("当前 provider 未配置", key: "action")
                 NSSound.beep()
                 return
             }
 
-            let isSubagent = (plan["is_subagent"] ?? "no") == "yes"
-            let familyCount = Int(plan["family_count"] ?? "1") ?? 1
-            let familyMigrateNeeded = Int(plan["family_migrate_needed_count"] ?? "0") ?? 0
-            let currentProvider = plan["current_provider"] ?? session.provider
-            let directChildCount = Int(plan["direct_child_count"] ?? "0") ?? 0
-            let currentProviderDisplay = currentProvider.isEmpty ? "-" : currentProvider
+            self.setStatus("读取迁移计划中…", key: "action")
 
-            if currentProvider == targetProvider && familyMigrateNeeded == 0 {
-                let alert = NSAlert()
-                alert.alertStyle = .informational
-                alert.messageText = "无需迁移"
-                alert.informativeText = """
-                当前选中会话及其相关会话的 Provider 已经是目标值。
+            self.sessionProviderPlanAsync(threadID: session.threadID, targetProvider: targetProvider) { plan in
+                self.setButtonsEnabled(true)
+                self.updateProviderMigrationButtons()
 
-                当前 Provider: \(currentProviderDisplay)
-                目标 Provider: \(targetProvider)
-                相关会话数: \(familyCount)
-                """
-                alert.addButton(withTitle: "确定")
-                alert.runModal()
-                self.appendOutput("迁移已取消：当前会话及相关会话的 provider 已经是 \(targetProvider)。")
-                self.setStatus("无需迁移", key: "action")
-                return
-            }
-
-            let includeFamily: Bool
-            if isSubagent || directChildCount > 0 {
-                let alert = NSAlert()
-                alert.alertStyle = .warning
-                alert.messageText = "迁移相关 Session 到当前 Provider？"
-                alert.informativeText = """
-                当前 Provider: \(targetProvider)
-                选中 Session 当前 Provider: \(currentProviderDisplay)
-                Session ID: \(session.threadID)
-                Type: \(sessionTypeLabel(session))
-
-                这条 session \(isSubagent ? "属于子 agent 会话" : "存在子 agent 会话")。
-                相关会话总数: \(familyCount)
-                需要迁移的相关会话数: \(familyMigrateNeeded)
-
-                你可以只迁移当前这一条，也可以递归迁移整组相关 session。
-                """
-                alert.addButton(withTitle: "迁移相关")
-                alert.addButton(withTitle: "仅迁移当前")
-                alert.addButton(withTitle: "取消")
-                let response = alert.runModal()
-                if response == .alertFirstButtonReturn {
-                    includeFamily = true
-                } else if response == .alertSecondButtonReturn {
-                    includeFamily = false
-                } else {
-                    self.setStatus("迁移 Session Provider 已取消", key: "action")
+                guard let plan else {
+                    self.appendOutput("读取 session provider 迁移计划失败。")
+                    self.setStatus("读取迁移计划失败", key: "action")
+                    NSSound.beep()
                     return
                 }
-            } else {
-                let alert = NSAlert()
-                alert.alertStyle = .informational
-                alert.messageText = "迁移当前 Session 到当前 Provider？"
-                alert.informativeText = """
-                当前 Provider: \(targetProvider)
-                选中 Session 当前 Provider: \(currentProviderDisplay)
-                Session ID: \(session.threadID)
-                Type: \(sessionTypeLabel(session))
-                """
-                alert.addButton(withTitle: "迁移")
-                alert.addButton(withTitle: "取消")
-                guard alert.runModal() == .alertFirstButtonReturn else {
-                    self.setStatus("迁移 Session Provider 已取消", key: "action")
+
+                let isSubagent = (plan["is_subagent"] ?? "no") == "yes"
+                let familyCount = Int(plan["family_count"] ?? "1") ?? 1
+                let familyMigrateNeeded = Int(plan["family_migrate_needed_count"] ?? "0") ?? 0
+                let currentProvider = plan["current_provider"] ?? session.provider
+                let directChildCount = Int(plan["direct_child_count"] ?? "0") ?? 0
+                let currentProviderDisplay = currentProvider.isEmpty ? "-" : currentProvider
+
+                if currentProvider == targetProvider && familyMigrateNeeded == 0 {
+                    let alert = NSAlert()
+                    alert.alertStyle = .informational
+                    alert.messageText = "无需迁移"
+                    alert.informativeText = """
+                    当前选中会话及其相关会话的 Provider 已经是目标值。
+
+                    当前 Provider: \(currentProviderDisplay)
+                    目标 Provider: \(targetProvider)
+                    相关会话数: \(familyCount)
+                    """
+                    alert.addButton(withTitle: "确定")
+                    alert.runModal()
+                    self.appendOutput("迁移已取消：当前会话及相关会话的 provider 已经是 \(targetProvider)。")
+                    self.setStatus("无需迁移", key: "action")
                     return
                 }
-                includeFamily = false
-            }
 
-            self.setButtonsEnabled(false)
-            self.setStatus("迁移 Session Provider 中…", key: "action")
-            self.appendOutput("执行 迁移 Session Provider: thread_id=\(session.threadID) target_provider=\(targetProvider) scope=\(includeFamily ? "family" : "current")")
+                let includeFamily: Bool
+                if isSubagent || directChildCount > 0 {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = "迁移相关 Session 到当前 Provider？"
+                    alert.informativeText = """
+                    当前 Provider: \(targetProvider)
+                    选中 Session 当前 Provider: \(currentProviderDisplay)
+                    Session ID: \(session.threadID)
+                    Type: \(sessionTypeLabel(session))
 
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = self.migrateSessionProvider(threadID: session.threadID, targetProvider: targetProvider, includeFamily: includeFamily)
-                DispatchQueue.main.async {
-                    self.setButtonsEnabled(true)
-                    if result.success {
-                        self.setStatus("迁移 Session Provider 完成", key: "action")
-                        self.appendOutput(result.detail)
-                        self.detectStatuses()
+                    这条 session \(isSubagent ? "属于子 agent 会话" : "存在子 agent 会话")。
+                    相关会话总数: \(familyCount)
+                    需要迁移的相关会话数: \(familyMigrateNeeded)
+
+                    你可以只迁移当前这一条，也可以递归迁移整组相关 session。
+                    """
+                    alert.addButton(withTitle: "迁移相关")
+                    alert.addButton(withTitle: "仅迁移当前")
+                    alert.addButton(withTitle: "取消")
+                    let response = alert.runModal()
+                    if response == .alertFirstButtonReturn {
+                        includeFamily = true
+                    } else if response == .alertSecondButtonReturn {
+                        includeFamily = false
                     } else {
-                        self.setStatus("迁移 Session Provider 失败", key: "action")
-                        self.appendOutput("stderr: \(result.detail)")
-                        NSSound.beep()
+                        self.setStatus("迁移 Session Provider 已取消", key: "action")
+                        return
+                    }
+                } else {
+                    let alert = NSAlert()
+                    alert.alertStyle = .informational
+                    alert.messageText = "迁移当前 Session 到当前 Provider？"
+                    alert.informativeText = """
+                    当前 Provider: \(targetProvider)
+                    选中 Session 当前 Provider: \(currentProviderDisplay)
+                    Session ID: \(session.threadID)
+                    Type: \(sessionTypeLabel(session))
+                    """
+                    alert.addButton(withTitle: "迁移")
+                    alert.addButton(withTitle: "取消")
+                    guard alert.runModal() == .alertFirstButtonReturn else {
+                        self.setStatus("迁移 Session Provider 已取消", key: "action")
+                        return
+                    }
+                    includeFamily = false
+                }
+
+                self.setButtonsEnabled(false)
+                self.setStatus("迁移 Session Provider 中…", key: "action")
+                self.appendOutput("执行 迁移 Session Provider: thread_id=\(session.threadID) target_provider=\(targetProvider) scope=\(includeFamily ? "family" : "current")")
+
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let result = self.migrateSessionProvider(threadID: session.threadID, targetProvider: targetProvider, includeFamily: includeFamily)
+                    DispatchQueue.main.async {
+                        self.setButtonsEnabled(true)
+                        self.updateProviderMigrationButtons()
+                        if result.success {
+                            self.setStatus("迁移 Session Provider 完成", key: "action")
+                            self.appendOutput(result.detail)
+                            self.detectStatuses()
+                        } else {
+                            self.setStatus("迁移 Session Provider 失败", key: "action")
+                            self.appendOutput("stderr: \(result.detail)")
+                            NSSound.beep()
+                        }
                     }
                 }
             }
@@ -6629,80 +6648,89 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     @objc
     private func migrateAllSessionsToCurrentProvider() {
-        guard let targetProvider = currentConfiguredModelProvider() else {
-            appendOutput("未能从 ~/.codex/config.toml 读取当前 model_provider。")
-            setStatus("当前 provider 未配置", key: "action")
-            NSSound.beep()
-            return
-        }
         setButtonsEnabled(false)
-        setStatus("读取迁移计划中…", key: "action")
+        setStatus("读取当前 Provider 中…", key: "action")
 
-        allSessionProviderPlanAsync(targetProvider: targetProvider) { plan in
-            self.setButtonsEnabled(true)
-
-            guard let plan else {
-                self.appendOutput("读取全部 session provider 迁移计划失败。")
-                self.setStatus("读取迁移计划失败", key: "action")
+        refreshConfiguredModelProviderCache(updateButtons: false) { targetProvider in
+            guard let targetProvider else {
+                self.setButtonsEnabled(true)
+                self.updateProviderMigrationButtons()
+                self.appendOutput("未能从 ~/.codex/config.toml 读取当前 model_provider。")
+                self.setStatus("当前 provider 未配置", key: "action")
                 NSSound.beep()
                 return
             }
 
-            let migrateNeeded = Int(plan["migrate_needed_count"] ?? "0") ?? 0
-            let totalThreads = Int(plan["total_threads"] ?? "0") ?? 0
+            self.setStatus("读取迁移计划中…", key: "action")
 
-            if migrateNeeded == 0 {
+            self.allSessionProviderPlanAsync(targetProvider: targetProvider) { plan in
+                self.setButtonsEnabled(true)
+                self.updateProviderMigrationButtons()
+
+                guard let plan else {
+                    self.appendOutput("读取全部 session provider 迁移计划失败。")
+                    self.setStatus("读取迁移计划失败", key: "action")
+                    NSSound.beep()
+                    return
+                }
+
+                let migrateNeeded = Int(plan["migrate_needed_count"] ?? "0") ?? 0
+                let totalThreads = Int(plan["total_threads"] ?? "0") ?? 0
+
+                if migrateNeeded == 0 {
+                    let alert = NSAlert()
+                    alert.alertStyle = .informational
+                    alert.messageText = "无需迁移"
+                    alert.informativeText = """
+                    本地所有会话的 Provider 已经是目标值。
+
+                    目标 Provider: \(targetProvider)
+                    会话总数: \(totalThreads)
+                    """
+                    alert.addButton(withTitle: "确定")
+                    alert.runModal()
+                    self.appendOutput("全部迁移已取消：所有 session 的 provider 已经是 \(targetProvider)。")
+                    self.setStatus("无需迁移", key: "action")
+                    return
+                }
+
                 let alert = NSAlert()
-                alert.alertStyle = .informational
-                alert.messageText = "无需迁移"
+                alert.alertStyle = .warning
+                alert.messageText = "将所有 Session 迁移到当前 Provider？"
                 alert.informativeText = """
-                本地所有会话的 Provider 已经是目标值。
+                当前 Provider: \(targetProvider)
+                本地 Session 总数: \(totalThreads)
+                需要迁移的 Session 数: \(migrateNeeded)
 
-                目标 Provider: \(targetProvider)
-                会话总数: \(totalThreads)
+                这会直接改写本地 state_5.sqlite 中的 threads.model_provider。
+                不会改写 source，也不会重写 rollout 文件。
                 """
-                alert.addButton(withTitle: "确定")
-                alert.runModal()
-                self.appendOutput("全部迁移已取消：所有 session 的 provider 已经是 \(targetProvider)。")
-                self.setStatus("无需迁移", key: "action")
-                return
-            }
+                alert.addButton(withTitle: "全部迁移")
+                alert.addButton(withTitle: "取消")
+                alert.buttons.first?.hasDestructiveAction = true
+                guard alert.runModal() == .alertFirstButtonReturn else {
+                    self.setStatus("迁移全部 Session Provider 已取消", key: "action")
+                    return
+                }
 
-            let alert = NSAlert()
-            alert.alertStyle = .warning
-            alert.messageText = "将所有 Session 迁移到当前 Provider？"
-            alert.informativeText = """
-            当前 Provider: \(targetProvider)
-            本地 Session 总数: \(totalThreads)
-            需要迁移的 Session 数: \(migrateNeeded)
+                self.setButtonsEnabled(false)
+                self.setStatus("迁移全部 Session Provider 中…", key: "action")
+                self.appendOutput("执行 全部迁移 Session Provider: target_provider=\(targetProvider)")
 
-            这会直接改写本地 state_5.sqlite 中的 threads.model_provider。
-            不会改写 source，也不会重写 rollout 文件。
-            """
-            alert.addButton(withTitle: "全部迁移")
-            alert.addButton(withTitle: "取消")
-            alert.buttons.first?.hasDestructiveAction = true
-            guard alert.runModal() == .alertFirstButtonReturn else {
-                self.setStatus("迁移全部 Session Provider 已取消", key: "action")
-                return
-            }
-
-            self.setButtonsEnabled(false)
-            self.setStatus("迁移全部 Session Provider 中…", key: "action")
-            self.appendOutput("执行 全部迁移 Session Provider: target_provider=\(targetProvider)")
-
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = self.migrateAllSessionsProvider(targetProvider: targetProvider)
-                DispatchQueue.main.async {
-                    self.setButtonsEnabled(true)
-                    if result.success {
-                        self.setStatus("迁移全部 Session Provider 完成", key: "action")
-                        self.appendOutput(result.detail)
-                        self.detectStatuses()
-                    } else {
-                        self.setStatus("迁移全部 Session Provider 失败", key: "action")
-                        self.appendOutput("stderr: \(result.detail)")
-                        NSSound.beep()
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let result = self.migrateAllSessionsProvider(targetProvider: targetProvider)
+                    DispatchQueue.main.async {
+                        self.setButtonsEnabled(true)
+                        self.updateProviderMigrationButtons()
+                        if result.success {
+                            self.setStatus("迁移全部 Session Provider 完成", key: "action")
+                            self.appendOutput(result.detail)
+                            self.detectStatuses()
+                        } else {
+                            self.setStatus("迁移全部 Session Provider 失败", key: "action")
+                            self.appendOutput("stderr: \(result.detail)")
+                            NSSound.beep()
+                        }
                     }
                 }
             }

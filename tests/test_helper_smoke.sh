@@ -43,6 +43,7 @@ mkdir -p "$CODEX_DIR" "$STATE_DIR"
 STATE_DB="${TEST_TMP}/state.sqlite"
 LOGS_DB="${TEST_TMP}/logs.sqlite"
 SESSION_INDEX="${TEST_TMP}/session_index.jsonl"
+CONFIG_PATH="${CODEX_DIR}/config.toml"
 ROLLOUT_A="${CODEX_DIR}/sessions/2026/03/31/rollout-a.jsonl"
 ROLLOUT_B="${CODEX_DIR}/sessions/2026/03/31/rollout-b.jsonl"
 ROLLOUT_C="${CODEX_DIR}/archived_sessions/rollout-c.jsonl"
@@ -67,6 +68,10 @@ EOF
 cat >"$ROLLOUT_D" <<'EOF'
 {"timestamp":"2026-03-31T13:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"delete me"}}
 {"timestamp":"2026-03-31T13:00:01Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"d"}}
+EOF
+
+cat >"$CONFIG_PATH" <<'EOF'
+model_provider = "openai"
 EOF
 
 sqlite3 "$STATE_DB" <<EOF
@@ -160,6 +165,7 @@ export CODEX_TASKMASTER_STATE_DIR="$STATE_DIR"
 export CODEX_TASKMASTER_CODEX_STATE_DB_PATH="$STATE_DB"
 export CODEX_TASKMASTER_CODEX_SESSION_INDEX_PATH="$SESSION_INDEX"
 export CODEX_TASKMASTER_CODEX_LOGS_DB_PATH="$LOGS_DB"
+export CODEX_TASKMASTER_CODEX_CONFIG_PATH="$CONFIG_PATH"
 
 sqlite3 "$LOGS_DB" <<'EOF'
 insert into logs(ts, level, target, message, thread_id, estimated_bytes) values
@@ -169,6 +175,10 @@ EOF
 
 count_output="$("$HELPER" session-count)"
 [[ "$count_output" == "3" ]]
+
+config_provider_output="$("$HELPER" config-model-provider)"
+assert_contains "$config_provider_output" "status: success"
+assert_contains "$config_provider_output" "model_provider: openai"
 
 probe_named="$("$HELPER" probe -t alpha)"
 assert_contains "$probe_named" "thread_id: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"

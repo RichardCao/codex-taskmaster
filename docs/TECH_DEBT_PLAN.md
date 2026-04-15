@@ -24,7 +24,8 @@
   4. `done` 本地状态写路径统一走 helper
   5. `done` helper `--json` 协议与统一 decoder
   6. `done` 状态 / 原因 / 文案映射收口
-  7. `next` `config.toml` 读取从 UI 层移出
+  7. `done` `config.toml` 读取从 UI 层移出
+  8. `next` 删除流程结构化
 
 ## 执行顺序
 
