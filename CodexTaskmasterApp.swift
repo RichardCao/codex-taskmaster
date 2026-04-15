@@ -1078,7 +1078,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 DispatchQueue.main.async {
                     guard let self else { return }
                     self.setStatus(
-                        self.sendOutcomeStatusText(
+                        formattedSendOutcomeStatusText(
                             kind: kind,
                             target: target,
                             reason: reason,
@@ -1702,35 +1702,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return value.isEmpty ? nil : value
     }
 
-    private func localizedProbeStatus(_ status: String) -> String {
-        switch status.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase {
-        case "idle_stable":
-            return "空闲稳定"
-        case "interrupted_idle":
-            return "中断后空闲"
-        case "idle_with_residual_input":
-            return "空闲但有残留输入"
-        case "busy_turn_open":
-            return "回合进行中"
-        case "post_finalizing":
-            return "正在收尾"
-        case "busy_with_stream_issue":
-            return "忙碌且流异常"
-        case "interrupted_or_aborting":
-            return "中断或终止中"
-        case "idle_prompt_visible_rollout_stale":
-            return "提示符已回到可见但回合状态滞后"
-        case "archived":
-            return "已归档"
-        case "unknown":
-            return "未知"
-        case "":
-            return ""
-        default:
-            return status
-        }
-    }
-
     private func loopLastOutcome(_ loop: LoopSnapshot) -> (status: String, reason: String, probeStatus: String, terminalState: String, line: String) {
         let line = loop.lastLogLine
         return (
@@ -1902,13 +1873,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return localizedSendReason(loop.pauseReason.isEmpty ? loop.failureReason : loop.pauseReason)
         }
         let outcome = loopLastOutcome(loop)
-        let baseReason = localizedSendReason(outcome.reason)
-        let probeLabel = localizedProbeStatus(outcome.probeStatus)
-        let terminalLabel = localizedLoopTerminalState(outcome.terminalState)
-
-        let fragments = [baseReason, probeLabel, terminalLabel].filter { !$0.isEmpty }
-        if !fragments.isEmpty {
-            return fragments.joined(separator: " | ")
+        let outcomeReason = formattedLoopOutcomeReason(
+            reason: outcome.reason,
+            probeStatus: outcome.probeStatus,
+            terminalState: outcome.terminalState
+        )
+        if !outcomeReason.isEmpty {
+            return outcomeReason
         }
         let fallbackReason = loopFailureReasonFallback(loop)
         if !fallbackReason.isEmpty {
@@ -5222,29 +5193,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return nil
         }
         return currentInterval()
-    }
-
-    private func sendStatusContextText(probeStatus: String?, terminalState: String?) -> String {
-        let probeLabel = localizedProbeStatus(probeStatus ?? "")
-        let terminalLabel = localizedLoopTerminalState(terminalState ?? "")
-        let parts = [probeLabel, terminalLabel].filter { !$0.isEmpty }
-        return parts.joined(separator: " | ")
-    }
-
-    private func sendOutcomeStatusText(kind: String, target: String, reason: String, probeStatus: String?, terminalState: String?) -> String {
-        let localizedReason = localizedSendReason(reason)
-        let contextText = sendStatusContextText(probeStatus: probeStatus, terminalState: terminalState)
-        let suffix = [localizedReason, contextText].filter { !$0.isEmpty }.joined(separator: " | ")
-        switch kind {
-        case "success":
-            return suffix.isEmpty ? "发送成功: \(target)" : "发送成功: \(target) | \(suffix)"
-        case "accepted":
-            return suffix.isEmpty ? "发送已受理: \(target)" : "发送已受理: \(target) | \(suffix)"
-        case "failed":
-            return suffix.isEmpty ? "发送失败: \(target)" : "发送失败: \(target) | \(suffix)"
-        default:
-            return "发送状态更新: \(target)"
-        }
     }
 
     private func isStructuredSendHelperResult(_ text: String) -> Bool {

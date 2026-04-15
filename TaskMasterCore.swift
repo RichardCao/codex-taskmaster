@@ -1141,6 +1141,35 @@ func localizedSendReason(_ reason: String) -> String {
     return mappings[trimmed] ?? trimmed
 }
 
+func localizedProbeStatus(_ status: String) -> String {
+    switch status.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase {
+    case "idle_stable":
+        return "空闲稳定"
+    case "interrupted_idle":
+        return "中断后空闲"
+    case "idle_with_residual_input":
+        return "空闲但有残留输入"
+    case "busy_turn_open":
+        return "回合进行中"
+    case "post_finalizing":
+        return "正在收尾"
+    case "busy_with_stream_issue":
+        return "忙碌且流异常"
+    case "interrupted_or_aborting":
+        return "中断或终止中"
+    case "idle_prompt_visible_rollout_stale":
+        return "提示符已回到可见但回合状态滞后"
+    case "archived":
+        return "已归档"
+    case "unknown":
+        return "未知"
+    case "":
+        return ""
+    default:
+        return status
+    }
+}
+
 func localizedLoopTerminalState(_ state: String) -> String {
     switch state.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase {
     case "prompt_ready":
@@ -1164,4 +1193,34 @@ func localizedLoopTerminalState(_ state: String) -> String {
     default:
         return state
     }
+}
+
+func formattedSendStatusContextText(probeStatus: String?, terminalState: String?) -> String {
+    let probeLabel = localizedProbeStatus(probeStatus ?? "")
+    let terminalLabel = localizedLoopTerminalState(terminalState ?? "")
+    return [probeLabel, terminalLabel].filter { !$0.isEmpty }.joined(separator: " | ")
+}
+
+func formattedSendOutcomeStatusText(kind: String, target: String, reason: String, probeStatus: String?, terminalState: String?) -> String {
+    let localizedReason = localizedSendReason(reason)
+    let contextText = formattedSendStatusContextText(probeStatus: probeStatus, terminalState: terminalState)
+    let suffix = [localizedReason, contextText].filter { !$0.isEmpty }.joined(separator: " | ")
+
+    switch kind {
+    case "success":
+        return suffix.isEmpty ? "发送成功: \(target)" : "发送成功: \(target) | \(suffix)"
+    case "accepted":
+        return suffix.isEmpty ? "发送已受理: \(target)" : "发送已受理: \(target) | \(suffix)"
+    case "failed":
+        return suffix.isEmpty ? "发送失败: \(target)" : "发送失败: \(target) | \(suffix)"
+    default:
+        return "发送状态更新: \(target)"
+    }
+}
+
+func formattedLoopOutcomeReason(reason: String, probeStatus: String, terminalState: String) -> String {
+    let baseReason = localizedSendReason(reason)
+    let probeLabel = localizedProbeStatus(probeStatus)
+    let terminalLabel = localizedLoopTerminalState(terminalState)
+    return [baseReason, probeLabel, terminalLabel].filter { !$0.isEmpty }.joined(separator: " | ")
 }

@@ -262,11 +262,12 @@
 - `SessionScanService`
 - session 刷新 merge / fallback 规则下沉到 core
 - session 状态自动刷新调度边界下沉到独立 coordinator
+- send / loop 结果展示文案拼装继续下沉到 core formatter
 
 下一步建议：
 
-- 继续把 loop / send 的 UI 编排模板继续收口
-- 再把 session / loop formatter 与展示文案边界继续收口
+- 继续把 session / loop formatter 与展示文案边界继续收口
+- 再把 loop / send 的 UI 编排模板继续收口
 
 验收标准：
 
