@@ -1096,6 +1096,20 @@ func localizedSessionReason(_ reason: String) -> String {
     return trimmed
 }
 
+func sessionProviderDisplayValue(_ session: SessionSnapshot) -> String {
+    let provider = session.provider.trimmingCharacters(in: .whitespacesAndNewlines)
+    return provider.isEmpty ? "-" : provider
+}
+
+func sessionTerminalDisplayValue(_ session: SessionSnapshot) -> String {
+    localizedTerminalState(session.terminalState)
+}
+
+func sessionTTYDisplayValue(_ session: SessionSnapshot) -> String {
+    let tty = session.tty.trimmingCharacters(in: .whitespacesAndNewlines)
+    return tty.isEmpty ? "-" : tty
+}
+
 func localizedSendStatusLabel(_ status: String) -> String {
     switch status {
     case "success":

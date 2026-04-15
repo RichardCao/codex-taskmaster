@@ -1983,15 +1983,15 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         case "type":
             return sessionTypeLabel(session)
         case "provider":
-            return session.provider.isEmpty ? "-" : session.provider
+            return sessionProviderDisplayValue(session)
         case "threadID":
             return session.threadID
         case "status":
             return "● \(localizedSessionStatusLabel(session))"
         case "terminalState":
-            return localizedTerminalState(session.terminalState)
+            return sessionTerminalDisplayValue(session)
         case "tty":
-            return session.tty.isEmpty ? "-" : session.tty
+            return sessionTTYDisplayValue(session)
         case "updatedAt":
             return formatEpoch(session.updatedAtEpoch)
         case "reason":
@@ -2214,7 +2214,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func matchesSessionFilters(_ session: SessionSnapshot) -> Bool {
-        let providerValue = session.provider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : session.provider
+        let providerValue = sessionProviderDisplayValue(session)
         if !selectedSessionProviderFilters.isEmpty && !selectedSessionProviderFilters.contains(providerValue) {
             return false
         }
@@ -2229,12 +2229,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return false
         }
 
-        let terminalValue = localizedTerminalState(session.terminalState)
+        let terminalValue = sessionTerminalDisplayValue(session)
         if !selectedSessionTerminalFilters.isEmpty && !selectedSessionTerminalFilters.contains(terminalValue) {
             return false
         }
 
-        let ttyValue = session.tty.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : session.tty
+        let ttyValue = sessionTTYDisplayValue(session)
         if !selectedSessionTTYFilters.isEmpty && !selectedSessionTTYFilters.contains(ttyValue) {
             return false
         }
@@ -2253,10 +2253,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func sessionFilterOptions(for kind: SessionFilterKind) -> [String] {
         switch kind {
         case .provider:
-            var values = Set(allSessionSnapshots.map { snapshot in
-                let provider = snapshot.provider.trimmingCharacters(in: .whitespacesAndNewlines)
-                return provider.isEmpty ? "-" : provider
-            })
+            var values = Set(allSessionSnapshots.map(sessionProviderDisplayValue(_:)))
             values.insert("-")
             return values.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         case .type:
@@ -2274,14 +2271,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         case .terminal:
             let base = sessionTerminalOptionBaseOrder()
             guard !allSessionSnapshots.isEmpty else { return base }
-            let seen = Set(allSessionSnapshots.map { localizedTerminalState($0.terminalState) })
+            let seen = Set(allSessionSnapshots.map(sessionTerminalDisplayValue(_:)))
             let extras = seen.subtracting(base).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
             return base + extras
         case .tty:
-            var ttyValues = Set(allSessionSnapshots.map { snapshot in
-                let tty = snapshot.tty.trimmingCharacters(in: .whitespacesAndNewlines)
-                return tty.isEmpty ? "-" : tty
-            })
+            var ttyValues = Set(allSessionSnapshots.map(sessionTTYDisplayValue(_:)))
             ttyValues.insert("-")
             return ttyValues.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         }
@@ -2901,9 +2895,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             case "status":
                 orderedAscending = localizedSessionStatusLabel(lhs).localizedStandardCompare(localizedSessionStatusLabel(rhs)) == .orderedAscending
             case "terminalState":
-                orderedAscending = localizedTerminalState(lhs.terminalState).localizedStandardCompare(localizedTerminalState(rhs.terminalState)) == .orderedAscending
+                orderedAscending = sessionTerminalDisplayValue(lhs).localizedStandardCompare(sessionTerminalDisplayValue(rhs)) == .orderedAscending
             case "tty":
-                orderedAscending = lhs.tty.localizedStandardCompare(rhs.tty) == .orderedAscending
+                orderedAscending = sessionTTYDisplayValue(lhs).localizedStandardCompare(sessionTTYDisplayValue(rhs)) == .orderedAscending
             case "updatedAt":
                 orderedAscending = (TimeInterval(lhs.updatedAtEpoch) ?? 0) < (TimeInterval(rhs.updatedAtEpoch) ?? 0)
             case "reason":
@@ -2930,9 +2924,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         case "status":
             return localizedSessionStatusLabel(lhs) == localizedSessionStatusLabel(rhs)
         case "terminalState":
-            return localizedTerminalState(lhs.terminalState) == localizedTerminalState(rhs.terminalState)
+            return sessionTerminalDisplayValue(lhs) == sessionTerminalDisplayValue(rhs)
         case "tty":
-            return lhs.tty == rhs.tty
+            return sessionTTYDisplayValue(lhs) == sessionTTYDisplayValue(rhs)
         case "updatedAt":
             return lhs.updatedAtEpoch == rhs.updatedAtEpoch
         case "reason":
@@ -2969,11 +2963,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             "Name: \(name.isEmpty ? "-" : name)",
             "Session ID: \(session.threadID)",
             "Type: \(sessionTypeLabel(session))",
-            "Provider: \(session.provider.isEmpty ? "-" : session.provider)",
+            "Provider: \(sessionProviderDisplayValue(session))",
             "Archived: \(session.isArchived ? "yes" : "no")",
             "Status: \(localizedSessionStatusLabel(session))",
-            "Terminal: \(localizedTerminalState(session.terminalState))",
-            "TTY: \(session.tty.isEmpty ? "-" : session.tty)",
+            "Terminal: \(sessionTerminalDisplayValue(session))",
+            "TTY: \(sessionTTYDisplayValue(session))",
             "Updated: \(formatEpoch(session.updatedAtEpoch))",
             "原因: \(localizedSessionReason(session.reason))"
         ]

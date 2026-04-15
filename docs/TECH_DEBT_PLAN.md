@@ -263,6 +263,7 @@
 - session 刷新 merge / fallback 规则下沉到 core
 - session 状态自动刷新调度边界下沉到独立 coordinator
 - send / loop 结果展示文案拼装继续下沉到 core formatter
+- session provider / terminal / tty 显示值 fallback 下沉到 core formatter
 
 下一步建议：
 
