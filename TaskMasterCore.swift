@@ -884,6 +884,27 @@ func parseThreadListOutput(_ output: String, archived: Bool) -> [SessionSnapshot
     }
 }
 
+func mergeSessionSnapshotAfterStatusRefresh(previous: SessionSnapshot, refreshed: SessionSnapshot) -> SessionSnapshot {
+    SessionSnapshot(
+        name: refreshed.name.isEmpty ? previous.name : refreshed.name,
+        target: refreshed.target.isEmpty ? previous.target : refreshed.target,
+        threadID: previous.threadID,
+        provider: refreshed.provider.isEmpty ? previous.provider : refreshed.provider,
+        source: refreshed.source.isEmpty ? previous.source : refreshed.source,
+        parentThreadID: refreshed.parentThreadID.isEmpty ? previous.parentThreadID : refreshed.parentThreadID,
+        agentNickname: refreshed.agentNickname.isEmpty ? previous.agentNickname : refreshed.agentNickname,
+        agentRole: refreshed.agentRole.isEmpty ? previous.agentRole : refreshed.agentRole,
+        status: refreshed.status,
+        reason: refreshed.reason,
+        terminalState: refreshed.terminalState,
+        tty: refreshed.tty,
+        updatedAtEpoch: refreshed.updatedAtEpoch == "0" ? previous.updatedAtEpoch : refreshed.updatedAtEpoch,
+        rolloutPath: refreshed.rolloutPath.isEmpty ? previous.rolloutPath : refreshed.rolloutPath,
+        preview: refreshed.preview.isEmpty ? previous.preview : refreshed.preview,
+        isArchived: previous.isArchived || refreshed.isArchived
+    )
+}
+
 func mergeSessionSnapshots(existing: [SessionSnapshot], newSnapshots: [SessionSnapshot]) -> [SessionSnapshot] {
     guard !newSnapshots.isEmpty else { return existing }
 

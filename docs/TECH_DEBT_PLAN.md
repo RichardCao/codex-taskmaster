@@ -260,11 +260,12 @@
 - `SessionCommandService`
 - `LoopCommandService`
 - `SessionScanService`
+- session 刷新 merge / fallback 规则下沉到 core
 
 下一步建议：
 
-- 继续把 session 刷新时的 merge / fallback 规则从控制器中移出
-- 再把 loop / send 的 UI 编排模板继续收口
+- 继续把 loop / send 的 UI 编排模板继续收口
+- 再把 session 刷新调度边界从控制器中收口
 
 验收标准：
 
