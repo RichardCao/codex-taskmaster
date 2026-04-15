@@ -905,6 +905,69 @@ func mergeSessionSnapshotAfterStatusRefresh(previous: SessionSnapshot, refreshed
     )
 }
 
+final class SessionStatusRefreshCoordinator {
+    private let connectedRefreshInterval: TimeInterval
+    private let disconnectedRefreshInterval: TimeInterval
+    private let lock = NSLock()
+    private var inFlightThreadIDs: Set<String> = []
+    private var nextAllowedAt: [String: Date] = [:]
+
+    init(connectedRefreshInterval: TimeInterval, disconnectedRefreshInterval: TimeInterval) {
+        self.connectedRefreshInterval = connectedRefreshInterval
+        self.disconnectedRefreshInterval = disconnectedRefreshInterval
+    }
+
+    func prune(to snapshots: [SessionSnapshot]) {
+        let activeThreadIDs = Set(snapshots.filter { !$0.isArchived }.map(\.threadID))
+        lock.lock()
+        inFlightThreadIDs = inFlightThreadIDs.filter { activeThreadIDs.contains($0) }
+        nextAllowedAt = nextAllowedAt.filter { activeThreadIDs.contains($0.key) }
+        lock.unlock()
+    }
+
+    func clear() {
+        lock.lock()
+        inFlightThreadIDs.removeAll()
+        nextAllowedAt.removeAll()
+        lock.unlock()
+    }
+
+    func scheduleNext(for snapshot: SessionSnapshot, from completionDate: Date) {
+        let nextAllowed = completionDate.addingTimeInterval(refreshInterval(for: snapshot))
+        lock.lock()
+        nextAllowedAt[snapshot.threadID] = nextAllowed
+        inFlightThreadIDs.remove(snapshot.threadID)
+        lock.unlock()
+    }
+
+    func claim(_ snapshots: [SessionSnapshot], requireDue: Bool, referenceDate: Date) -> [SessionSnapshot] {
+        guard !snapshots.isEmpty else { return [] }
+        lock.lock()
+        defer { lock.unlock() }
+
+        var claimed: [SessionSnapshot] = []
+        for snapshot in snapshots {
+            let threadID = snapshot.threadID
+            guard !threadID.isEmpty else { continue }
+            guard !inFlightThreadIDs.contains(threadID) else { continue }
+            if requireDue,
+               let nextAllowed = nextAllowedAt[threadID],
+               nextAllowed > referenceDate {
+                continue
+            }
+            inFlightThreadIDs.insert(threadID)
+            claimed.append(snapshot)
+        }
+        return claimed
+    }
+
+    private func refreshInterval(for snapshot: SessionSnapshot) -> TimeInterval {
+        localizedSessionStatusLabel(snapshot) == "断联"
+            ? disconnectedRefreshInterval
+            : connectedRefreshInterval
+    }
+}
+
 func mergeSessionSnapshots(existing: [SessionSnapshot], newSnapshots: [SessionSnapshot]) -> [SessionSnapshot] {
     guard !newSnapshots.isEmpty else { return existing }
 

@@ -1006,11 +1006,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var isRefreshingLoopsSnapshot = false
     private var pendingLoopSnapshotRefresh = false
     private var sessionStatusRefreshTimer: Timer?
-    private let sessionStatusRefreshLock = NSLock()
-    private var sessionStatusRefreshInFlightThreadIDs: Set<String> = []
-    private var sessionStatusRefreshNextAllowedAt: [String: Date] = [:]
     private let sessionStatusConnectedRefreshInterval: TimeInterval = 15
     private let sessionStatusDisconnectedRefreshInterval: TimeInterval = 60
+    private lazy var sessionStatusRefreshCoordinator = SessionStatusRefreshCoordinator(
+        connectedRefreshInterval: sessionStatusConnectedRefreshInterval,
+        disconnectedRefreshInterval: sessionStatusDisconnectedRefreshInterval
+    )
     private let sessionStatusRefreshSchedulerInterval: TimeInterval = 2
     private let sessionStatusRefreshMaxConcurrentJobs = 4
 
@@ -2465,59 +2466,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionStatusMetaLabel.stringValue = parts.joined(separator: " | ")
     }
 
-    private func sessionStatusAutoRefreshInterval(for snapshot: SessionSnapshot) -> TimeInterval {
-        localizedSessionStatusLabel(snapshot) == "断联"
-            ? sessionStatusDisconnectedRefreshInterval
-            : sessionStatusConnectedRefreshInterval
-    }
-
     private func loadedActiveSessionSnapshotsForStatusRefresh() -> [SessionSnapshot] {
         guard displayedSessionListMode == .active else { return [] }
         return allSessionSnapshots.filter { !$0.isArchived }
-    }
-
-    private func pruneSessionStatusRefreshState(to snapshots: [SessionSnapshot]) {
-        let activeThreadIDs = Set(snapshots.filter { !$0.isArchived }.map(\.threadID))
-        sessionStatusRefreshLock.lock()
-        sessionStatusRefreshInFlightThreadIDs = sessionStatusRefreshInFlightThreadIDs.filter { activeThreadIDs.contains($0) }
-        sessionStatusRefreshNextAllowedAt = sessionStatusRefreshNextAllowedAt.filter { activeThreadIDs.contains($0.key) }
-        sessionStatusRefreshLock.unlock()
-    }
-
-    private func clearSessionStatusRefreshState() {
-        sessionStatusRefreshLock.lock()
-        sessionStatusRefreshInFlightThreadIDs.removeAll()
-        sessionStatusRefreshNextAllowedAt.removeAll()
-        sessionStatusRefreshLock.unlock()
-    }
-
-    private func scheduleNextSessionStatusRefresh(for snapshot: SessionSnapshot, from completionDate: Date) {
-        let nextAllowed = completionDate.addingTimeInterval(sessionStatusAutoRefreshInterval(for: snapshot))
-        sessionStatusRefreshLock.lock()
-        sessionStatusRefreshNextAllowedAt[snapshot.threadID] = nextAllowed
-        sessionStatusRefreshInFlightThreadIDs.remove(snapshot.threadID)
-        sessionStatusRefreshLock.unlock()
-    }
-
-    private func claimSessionStatusRefreshSnapshots(_ snapshots: [SessionSnapshot], requireDue: Bool, referenceDate: Date) -> [SessionSnapshot] {
-        guard !snapshots.isEmpty else { return [] }
-        sessionStatusRefreshLock.lock()
-        defer { sessionStatusRefreshLock.unlock() }
-
-        var claimed: [SessionSnapshot] = []
-        for snapshot in snapshots {
-            let threadID = snapshot.threadID
-            guard !threadID.isEmpty else { continue }
-            guard !sessionStatusRefreshInFlightThreadIDs.contains(threadID) else { continue }
-            if requireDue,
-               let nextAllowed = sessionStatusRefreshNextAllowedAt[threadID],
-               nextAllowed > referenceDate {
-                continue
-            }
-            sessionStatusRefreshInFlightThreadIDs.insert(threadID)
-            claimed.append(snapshot)
-        }
-        return claimed
     }
 
     private func applyRefreshedSessionSnapshots(_ refreshedSnapshots: [SessionSnapshot], preserveSelectionThreadID: String?) {
@@ -2539,7 +2490,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
 
         allSessionSnapshots = updatedSnapshots
-        pruneSessionStatusRefreshState(to: allSessionSnapshots)
+        sessionStatusRefreshCoordinator.prune(to: allSessionSnapshots)
         renderSessionSnapshots(
             scannedCount: lastSessionRenderScannedCount ?? allSessionSnapshots.count,
             totalCount: lastSessionRenderTotalCount ?? allSessionSnapshots.count,
@@ -2569,7 +2520,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
 
-        let claimedSnapshots = claimSessionStatusRefreshSnapshots(snapshots, requireDue: false, referenceDate: Date())
+        let claimedSnapshots = sessionStatusRefreshCoordinator.claim(snapshots, requireDue: false, referenceDate: Date())
         guard !claimedSnapshots.isEmpty else {
             if showProgress {
                 setStatus("当前会话状态刷新仍在进行中", key: "scan", color: .systemOrange)
@@ -2616,7 +2567,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             let refreshedByThreadID = Dictionary(uniqueKeysWithValues: refreshedSnapshots.map { ($0.threadID, $0) })
             for snapshot in claimedSnapshots {
                 let resolved = refreshedByThreadID[snapshot.threadID] ?? snapshot
-                self.scheduleNextSessionStatusRefresh(for: resolved, from: completionDate)
+                self.sessionStatusRefreshCoordinator.scheduleNext(for: resolved, from: completionDate)
             }
 
             guard self.displayedSessionListMode == .active, !self.isSessionScanRunning else {
@@ -2682,7 +2633,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
                 self.allSessionSnapshots = snapshots
                 self.sessionScanTotal = self.allSessionSnapshots.count
-                self.clearSessionStatusRefreshState()
+                self.sessionStatusRefreshCoordinator.clear()
                 self.renderSessionSnapshots(
                     scannedCount: self.allSessionSnapshots.count,
                     totalCount: self.allSessionSnapshots.count,
@@ -2698,7 +2649,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func scheduleDueSessionStatusRefreshes() {
         guard !isSessionScanRunning, displayedSessionListMode == .active else { return }
-        let dueSnapshots = claimSessionStatusRefreshSnapshots(
+        let dueSnapshots = sessionStatusRefreshCoordinator.claim(
             loadedActiveSessionSnapshotsForStatusRefresh(),
             requireDue: true,
             referenceDate: Date()
@@ -2736,7 +2687,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             let refreshedByThreadID = Dictionary(uniqueKeysWithValues: refreshedSnapshots.map { ($0.threadID, $0) })
             for snapshot in dueSnapshots {
                 let resolved = refreshedByThreadID[snapshot.threadID] ?? snapshot
-                self.scheduleNextSessionStatusRefresh(for: resolved, from: completionDate)
+                self.sessionStatusRefreshCoordinator.scheduleNext(for: resolved, from: completionDate)
             }
 
             guard self.displayedSessionListMode == .active, !self.isSessionScanRunning else { return }
@@ -5675,7 +5626,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         isSessionScanRunning = true
         let generation = beginSessionScanControl()
         sessionScanTotal = 0
-        clearSessionStatusRefreshState()
+        sessionStatusRefreshCoordinator.clear()
         updateDetectStatusButtonState()
         setStatus("检测会话执行中…", key: "scan")
         appendOutput("执行 检测会话: session-count + probe-all batches")
@@ -5796,10 +5747,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 }
 
                 self.renderSessionSnapshots(scannedCount: scannedCount, totalCount: totalCount, isComplete: true)
-                self.pruneSessionStatusRefreshState(to: self.allSessionSnapshots)
+                self.sessionStatusRefreshCoordinator.prune(to: self.allSessionSnapshots)
                 let completionDate = Date()
                 for snapshot in self.loadedActiveSessionSnapshotsForStatusRefresh() {
-                    self.scheduleNextSessionStatusRefresh(for: snapshot, from: completionDate)
+                    self.sessionStatusRefreshCoordinator.scheduleNext(for: snapshot, from: completionDate)
                 }
                 self.setStatus("检测会话完成", key: "scan")
                 self.appendOutput("检测到 \(self.sessionSnapshots.count) 个 session 状态。")
@@ -5813,7 +5764,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         isSessionScanRunning = true
         let generation = beginSessionScanControl()
         sessionScanTotal = 0
-        clearSessionStatusRefreshState()
+        sessionStatusRefreshCoordinator.clear()
         updateDetectStatusButtonState()
         setStatus("读取已归档 session 中…", key: "scan")
         appendOutput("执行 检测会话: thread-list --archived")
