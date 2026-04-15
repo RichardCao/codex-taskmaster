@@ -26,7 +26,7 @@
   6. `done` 状态 / 原因 / 文案映射收口
   7. `done` `config.toml` 读取从 UI 层移出
   8. `done` 删除流程结构化
-  9. `next` 控制器拆分
+  9. `in_progress` 控制器拆分
 
 ## 执行顺序
 
@@ -253,6 +253,17 @@
 - 先把 helper 子进程执行抽成独立 `HelperCommandService`
 - 再把 session / loop 命令 helper 调用分别下沉到 `SessionCommandService` / `LoopCommandService`
 - 再继续把 session / loop / provider migration 语义从控制器中拆出
+
+当前已完成：
+
+- `HelperCommandService`
+- `SessionCommandService`
+- `LoopCommandService`
+
+下一步建议：
+
+- 继续把 loop / send 的 UI 编排模板收口
+- 再把 session scan / archived list 读取从控制器中拆到独立 service
 
 验收标准：
 
