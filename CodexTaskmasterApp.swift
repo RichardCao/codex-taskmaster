@@ -6,9 +6,7 @@ private let userHomeDirectory = NSHomeDirectory()
 private let autoRefreshInterval: TimeInterval = 3
 private let requestPollInterval: TimeInterval = 0.5
 private let stateDirectoryPath = "\(userHomeDirectory)/.codex-terminal-sender"
-private let codexStateDatabasePath = "\(userHomeDirectory)/.codex/state_5.sqlite"
 private let codexConfigPath = "\(userHomeDirectory)/.codex/config.toml"
-private let codexSessionIndexPath = "\(userHomeDirectory)/.codex/session_index.jsonl"
 private let pendingRequestDirectoryPath = "\(stateDirectoryPath)/requests/pending"
 private let processingRequestDirectoryPath = "\(stateDirectoryPath)/requests/processing"
 private let resultRequestDirectoryPath = "\(stateDirectoryPath)/requests/results"
@@ -3599,74 +3597,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func updateSessionName(threadID: String, newName: String) -> (success: Bool, error: String) {
-        if newName.isEmpty {
-            return clearSessionName(threadID: threadID)
-        }
         let result = runStandardHelper(arguments: ["thread-name-set", "-t", threadID, "-n", newName])
         if result.status == 0 {
             return (true, "")
         }
-        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? "重命名失败"
+        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? (newName.isEmpty ? "清空名称失败" : "重命名失败")
         return (false, detail)
-    }
-
-    private func clearSessionName(threadID: String) -> (success: Bool, error: String) {
-        do {
-            let result = try SubprocessRunner.run(
-                executableURL: URL(fileURLWithPath: "/usr/bin/python3"),
-                arguments: [
-                    "-c",
-                    """
-import json, os, sqlite3, sys, time
-db_path, session_index_path, thread_id = sys.argv[1:]
-
-entries = []
-if os.path.exists(session_index_path):
-    with open(session_index_path, "r", encoding="utf-8") as fh:
-        for raw_line in fh:
-            raw_line = raw_line.strip()
-            if not raw_line:
-                continue
-            try:
-                obj = json.loads(raw_line)
-            except json.JSONDecodeError:
-                continue
-            if obj.get("id") == thread_id:
-                continue
-            entries.append(obj)
-
-os.makedirs(os.path.dirname(session_index_path), exist_ok=True)
-tmp_index_path = session_index_path + ".tmp"
-with open(tmp_index_path, "w", encoding="utf-8") as fh:
-    for entry in entries:
-        fh.write(json.dumps(entry, ensure_ascii=False) + "\\n")
-os.replace(tmp_index_path, session_index_path)
-
-conn = sqlite3.connect(db_path)
-cur = conn.cursor()
-cur.execute(
-    "update threads set updated_at = ? where id = ?",
-    (int(time.time()), thread_id),
-)
-if cur.rowcount != 1:
-    raise SystemExit("session not found")
-conn.commit()
-conn.close()
-""",
-                    codexStateDatabasePath,
-                    codexSessionIndexPath,
-                    threadID
-                ]
-            )
-            if result.terminationStatus != 0 {
-                let errText = result.trimmedStderr
-                return (false, errText.isEmpty ? "清空名称失败" : errText)
-            }
-        } catch {
-            return (false, "启动清空名称失败: \(error.localizedDescription)")
-        }
-
-        return (true, "")
     }
 
     private func archiveSession(threadID: String) -> (success: Bool, error: String) {

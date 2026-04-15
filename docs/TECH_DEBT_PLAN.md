@@ -21,7 +21,7 @@
   1. `done` `SubprocessRunner`
   2. `done` helper 后台化
   3. `done` UI 状态线程模型收口
-  4. `next` 本地状态写路径统一走 helper
+  4. `done` 本地状态写路径统一走 helper
 
 ## 执行顺序
 
