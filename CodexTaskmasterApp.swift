@@ -1731,63 +1731,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
-    private func localizedSendReason(_ reason: String) -> String {
-        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "" }
-
-        let mappings: [String: String] = [
-            "sent": "已发送",
-            "forced_sent": "强制发送成功",
-            "queued_pending_feedback": "消息已排队",
-            "verification_pending": "等待确认",
-            "request_still_processing": "请求仍在处理",
-            "request_already_inflight": "相同请求已在队列中",
-            "ambiguous_target": "目标对应多个同名 Session",
-            "tty_unavailable": "TTY 不可用",
-            "tty_focus_failed": "TTY 聚焦失败",
-            "terminal_focus_script_launch_failed": "Terminal 聚焦脚本启动失败",
-            "keyboard_event_source_failed": "键盘事件源创建失败",
-            "keyboard_event_creation_failed": "键盘事件创建失败",
-            "probe_failed": "状态探测失败",
-            "not_sendable": "当前状态不可发送",
-            "send_interrupted": "发送过程被中断",
-            "send_unverified": "发送后未看到确认",
-            "send_unverified_after_tty_fallback": "TTY 回退后仍未确认",
-            "invalid_request": "请求内容无效",
-            "missing_accessibility_permission": "缺少辅助功能权限",
-            "stopped_by_user": "已手动停止",
-            "start_failed": "启动失败",
-            "loop_conflict_active_session": "同一 Session 已有其他运行中的 Loop"
-        ]
-
-        return mappings[trimmed] ?? trimmed
-    }
-
-    private func localizedLoopTerminalState(_ state: String) -> String {
-        switch state.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase {
-        case "prompt_ready":
-            return "提示符就绪"
-        case "prompt_with_input":
-            return "提示符上有输入"
-        case "queued_messages_pending":
-            return "消息已排队待处理"
-        case "no_visible_prompt":
-            return "未看到可用提示符"
-        case "busy":
-            return "忙碌"
-        case "unavailable":
-            return "TTY 不可达"
-        case "archived":
-            return "已归档"
-        case "unknown":
-            return "未知"
-        case "":
-            return ""
-        default:
-            return state
-        }
-    }
-
     private func loopLastOutcome(_ loop: LoopSnapshot) -> (status: String, reason: String, probeStatus: String, terminalState: String, line: String) {
         let line = loop.lastLogLine
         return (
@@ -3147,19 +3090,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             lines.append("Preview: \(preview)")
         }
         return lines.joined(separator: "\n")
-    }
-
-    private func localizedSendStatusLabel(_ status: String) -> String {
-        switch status {
-        case "success":
-            return "成功"
-        case "accepted":
-            return "已受理"
-        case "failed":
-            return "失败"
-        default:
-            return status.isEmpty ? "-" : status
-        }
     }
 
     private func matchingLoopSnapshots(for session: SessionSnapshot) -> [LoopSnapshot] {

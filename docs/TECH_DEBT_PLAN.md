@@ -23,7 +23,8 @@
   3. `done` UI 状态线程模型收口
   4. `done` 本地状态写路径统一走 helper
   5. `done` helper `--json` 协议与统一 decoder
-  6. `next` 状态 / 原因 / 文案映射收口
+  6. `done` 状态 / 原因 / 文案映射收口
+  7. `next` `config.toml` 读取从 UI 层移出
 
 ## 执行顺序
 
