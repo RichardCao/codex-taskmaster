@@ -264,6 +264,7 @@
 - session 状态自动刷新调度边界下沉到独立 coordinator
 - send / loop 结果展示文案拼装继续下沉到 core formatter
 - session provider / terminal / tty 显示值 fallback 下沉到 core formatter
+- session 详情区基础文案与最近发送统计文案继续下沉到 core formatter
 
 下一步建议：
 

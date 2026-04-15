@@ -2958,33 +2958,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func sessionDetailText(for session: SessionSnapshot) -> String {
-        let name = sessionActualName(session)
-        var lines = [
-            "Name: \(name.isEmpty ? "-" : name)",
-            "Session ID: \(session.threadID)",
-            "Type: \(sessionTypeLabel(session))",
-            "Provider: \(sessionProviderDisplayValue(session))",
-            "Archived: \(session.isArchived ? "yes" : "no")",
-            "Status: \(localizedSessionStatusLabel(session))",
-            "Terminal: \(sessionTerminalDisplayValue(session))",
-            "TTY: \(sessionTTYDisplayValue(session))",
-            "Updated: \(formatEpoch(session.updatedAtEpoch))",
-            "原因: \(localizedSessionReason(session.reason))"
-        ]
-        if !session.parentThreadID.isEmpty {
-            lines.append("Parent Session ID: \(session.parentThreadID)")
-        }
-        if !session.agentNickname.isEmpty {
-            lines.append("Agent Nickname: \(session.agentNickname)")
-        }
-        if !session.agentRole.isEmpty {
-            lines.append("Agent Role: \(session.agentRole)")
-        }
-        let preview = session.preview.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !preview.isEmpty {
-            lines.append("Preview: \(preview)")
-        }
-        return lines.joined(separator: "\n")
+        formattedSessionDetailText(session: session, updatedText: formatEpoch(session.updatedAtEpoch))
     }
 
     private func matchingLoopSnapshots(for session: SessionSnapshot) -> [LoopSnapshot] {
@@ -3048,69 +3022,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func recentSendStatsText(for results: [SendResultSnapshot]) -> String {
-        guard !results.isEmpty else {
-            return "最近发送统计\n暂无匹配该 session 的发送结果。"
-        }
-
-        let successCount = results.filter { $0.status == "success" }.count
-        let acceptedCount = results.filter { $0.status == "accepted" }.count
-        let failedResults = results.filter { $0.status == "failed" }
-        let failedCount = failedResults.count
-
-        var reasonCounts: [String: Int] = [:]
-        for result in failedResults {
-            let key = localizedSendReason(result.reason)
-            reasonCounts[key, default: 0] += 1
-        }
-
-        let topReasons = reasonCounts
-            .sorted { lhs, rhs in
-                if lhs.value == rhs.value {
-                    return lhs.key.localizedStandardCompare(rhs.key) == .orderedAscending
-                }
-                return lhs.value > rhs.value
-            }
-            .prefix(3)
-            .map { "\($0.key) (\($0.value))" }
-            .joined(separator: "，")
-
-        let latest = results[0]
-        var lines = [
-            "最近发送统计",
-            "共 \(results.count) 次 | 成功 \(successCount) | 已受理 \(acceptedCount) | 失败 \(failedCount)",
-            "最近一次: \(localizedSendStatusLabel(latest.status)) | \(localizedSendReason(latest.reason)) | \(formatEpoch(String(Int(latest.updatedAtEpoch))))"
-        ]
-        if !topReasons.isEmpty {
-            lines.append("失败原因: \(topReasons)")
-        }
-        return lines.joined(separator: "\n")
+        formattedRecentSendStatsText(results: results, formatEpoch: formatEpoch(_:))
     }
 
     private func recentSendResultsText(for results: [SendResultSnapshot]) -> String {
-        guard !results.isEmpty else {
-            return "最近发送结果\n暂无匹配该 session 的发送记录。"
-        }
-
-        return results.enumerated().map { index, result in
-            var lines = [
-                "结果 \(index + 1)",
-                "时间: \(formatEpoch(String(Int(result.updatedAtEpoch))))",
-                "Target: \(result.target)",
-                "状态: \(localizedSendStatusLabel(result.status))",
-                "原因: \(localizedSendReason(result.reason))",
-                "模式: \(result.forceSend ? "force" : "idle")"
-            ]
-            if !result.probeStatus.isEmpty {
-                lines.append("Probe: \(result.probeStatus)")
-            }
-            if !result.terminalState.isEmpty {
-                lines.append("Terminal: \(localizedTerminalState(result.terminalState))")
-            }
-            if !result.detail.isEmpty {
-                lines.append("Detail: \(result.detail)")
-            }
-            return lines.joined(separator: "\n")
-        }.joined(separator: "\n\n")
+        formattedRecentSendResultsText(results: results, formatEpoch: formatEpoch(_:))
     }
 
     private func loopOccupancyText(for session: SessionSnapshot) -> String {
