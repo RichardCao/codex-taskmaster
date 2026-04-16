@@ -283,6 +283,7 @@
 - session 扫描 UI 收尾状态收口为控制器单点 helper
 - session 扫描流程 stderr 输出保护收口为控制器单点 helper
 - session 扫描入口默认文案与按钮标题下沉到 core formatter
+- Session Status 双击填充目标提示文案下沉到 core formatter
 
 下一步建议：
 

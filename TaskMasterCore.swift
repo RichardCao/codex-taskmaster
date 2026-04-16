@@ -1840,6 +1840,14 @@ func detectSessionButtonTitle(isRunning: Bool) -> String {
     isRunning ? "停止检测" : "检测会话"
 }
 
+func sessionStatusFillTargetStatusText(value: String) -> String {
+    "已从 Session Status 填入 \(value)"
+}
+
+func sessionStatusFillTargetLogText(value: String, usedName: Bool) -> String {
+    usedName ? "Session Status 双击填入 Name: \(value)" : "Session Status 双击填入 ID: \(value)"
+}
+
 func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
     guard !normalizedQuery.isEmpty else { return true }
     let candidates = [

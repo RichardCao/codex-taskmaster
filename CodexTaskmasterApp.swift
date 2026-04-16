@@ -5491,12 +5491,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let value = preferredTargetValue(for: session)
         targetField.stringValue = value
         addHistoryValue(value, kind: .target)
-        setStatus("已从 Session Status 填入 \(value)")
-        if sessionActualName(session).isEmpty {
-            appendOutput("Session Status 双击填入 ID: \(value)")
-        } else {
-            appendOutput("Session Status 双击填入 Name: \(value)")
-        }
+        let usedName = !sessionActualName(session).isEmpty
+        setStatus(sessionStatusFillTargetStatusText(value: value))
+        appendOutput(sessionStatusFillTargetLogText(value: value, usedName: usedName))
     }
 
     @objc
