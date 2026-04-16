@@ -1251,7 +1251,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         migrateAllSessionsProviderButton.contentTintColor = .systemPurple
         saveRenameButton.toolTip = "保存当前 session 的名称"
         archiveSessionButton.toolTip = "按 Codex 原生语义归档当前 session"
-        restoreSessionButton.toolTip = "恢复当前已归档 session"
+        restoreSessionButton.toolTip = archivedSessionRestoreTooltipText()
         deleteSessionButton.toolTip = "从本地状态中彻底删除当前 session"
         migrateSessionProviderButton.toolTip = "将当前选中 session 迁移到当前 config.toml 中的 model_provider"
         migrateAllSessionsProviderButton.toolTip = "将本地所有 session 迁移到当前 config.toml 中的 model_provider"
@@ -2812,7 +2812,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         deleteSessionButton.isEnabled = true
         updateProviderMigrationButtons()
         renameField.placeholderString = session.isArchived
-            ? "已归档 session 需先恢复后再改名"
+            ? archivedSessionRenamePlaceholderText()
             : "输入新名称，留空可恢复为未 rename 状态"
         let sendResults = recentSendResults(for: session)
         let initialDetailText = formattedSessionDetailPreviewDocument(
@@ -5508,7 +5508,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         let session = sessionSnapshots[selectedRow]
         guard !session.isArchived else {
-            appendOutput("已归档 session 不能直接改名，请先恢复归档。")
+            appendOutput(archivedSessionRenameBlockedLogText())
             setStatus("请先恢复归档", key: "action")
             NSSound.beep()
             return
@@ -5648,7 +5648,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                         isComplete: true
                     )
                     self.setStatus("归档 Session 完成", key: "action")
-                    self.appendOutput("已归档 session: \(session.threadID)")
+                    self.appendOutput(archivedSessionCompletionLogText(threadID: session.threadID))
                     self.refreshLoopsSnapshot()
                 } else {
                     if let fields = self.parseStructuredHelperFields(result.error) {
@@ -5676,7 +5676,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func restoreSelectedSession() {
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
-            appendOutput("请先选择一条已归档 session，再恢复。")
+            appendOutput(archivedSessionRestoreSelectionRequiredLogText())
             setStatus("请选择一个 session")
             NSSound.beep()
             return
@@ -5685,7 +5685,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let session = sessionSnapshots[selectedRow]
         guard session.isArchived else {
             appendOutput("当前选择的 session 不在已归档列表中。")
-            setStatus("请选择已归档 session", key: "action")
+            setStatus(archivedSessionRestoreSelectionRequiredStatusText(), key: "action")
             NSSound.beep()
             return
         }

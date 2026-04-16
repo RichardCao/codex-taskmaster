@@ -1848,6 +1848,30 @@ func sessionStatusFillTargetLogText(value: String, usedName: Bool) -> String {
     usedName ? "Session Status 双击填入 Name: \(value)" : "Session Status 双击填入 ID: \(value)"
 }
 
+func archivedSessionRestoreTooltipText() -> String {
+    "恢复当前已归档 session"
+}
+
+func archivedSessionRenamePlaceholderText() -> String {
+    "已归档 session 需先恢复后再改名"
+}
+
+func archivedSessionRenameBlockedLogText() -> String {
+    "已归档 session 不能直接改名，请先恢复归档。"
+}
+
+func archivedSessionCompletionLogText(threadID: String) -> String {
+    "已归档 session: \(threadID)"
+}
+
+func archivedSessionRestoreSelectionRequiredLogText() -> String {
+    "请先选择一条已归档 session，再恢复。"
+}
+
+func archivedSessionRestoreSelectionRequiredStatusText() -> String {
+    "请选择已归档 session"
+}
+
 func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
     guard !normalizedQuery.isEmpty else { return true }
     let candidates = [
