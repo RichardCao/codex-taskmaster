@@ -1617,3 +1617,70 @@ func formattedSessionDetailDocument(
         "提示词历史\n\(historyText)"
     ].joined(separator: "\n\n")
 }
+
+func sessionScopeDisplayText(isArchived: Bool) -> String {
+    isArchived ? "已归档" : "普通"
+}
+
+func sessionEmptyStateText(isArchived: Bool) -> String {
+    isArchived
+        ? "视图: 已归档 | 未加载归档 session。点击“检测会话”读取列表。"
+        : "视图: 普通 | 未加载 session 状态。点击“检测会话”开始扫描。"
+}
+
+func formattedSessionSearchSummary(
+    query: String,
+    hitCount: Int,
+    promptSearchEnabled: Bool,
+    sessionScanRunning: Bool,
+    promptSearchRunning: Bool,
+    promptSearchCompleted: Bool,
+    promptSearchProgressCompleted: Int,
+    promptSearchProgressTotal: Int
+) -> String? {
+    guard !query.isEmpty else { return nil }
+
+    var parts = ["搜索: \(query)", "命中: \(hitCount)"]
+    if promptSearchEnabled {
+        if sessionScanRunning {
+            parts.append("近提示词检索待扫描完成后继续")
+        } else if promptSearchRunning {
+            parts.append("近提示词检索: \(promptSearchProgressCompleted)/\(promptSearchProgressTotal)")
+        } else if promptSearchCompleted {
+            parts.append("近提示词已检索")
+        }
+    }
+    return parts.joined(separator: " | ")
+}
+
+func formattedSessionStatusMetaText(
+    allSessionCount: Int,
+    scopeText: String,
+    emptyStateText: String,
+    sessionScanRunning: Bool,
+    scannedCount: Int?,
+    totalCount: Int?,
+    isComplete: Bool,
+    searchSummary: String?,
+    refreshText: String
+) -> String {
+    if allSessionCount == 0 {
+        if sessionScanRunning, let scannedCount, let totalCount {
+            return (["视图: \(scopeText)", "正在扫描 \(scannedCount)/\(totalCount)…"] + [searchSummary].compactMap { $0 })
+                .joined(separator: " | ")
+        }
+        return emptyStateText
+    }
+
+    var parts = ["视图: \(scopeText)", "已加载: \(allSessionCount)"]
+    if let scannedCount, let totalCount {
+        let progressText = isComplete ? "已扫描: \(scannedCount)/\(totalCount)" : "扫描中: \(scannedCount)/\(totalCount)"
+        parts.append(progressText)
+        parts.append("总数: \(totalCount)")
+    }
+    if let searchSummary {
+        parts.append(searchSummary)
+    }
+    parts.append("刷新: \(refreshText)")
+    return parts.joined(separator: " | ")
+}

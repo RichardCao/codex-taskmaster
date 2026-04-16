@@ -269,6 +269,7 @@
 - session 详情区的 loop 占用文案下沉到 core formatter
 - session 详情区预览/完整段落拼装下沉到 core formatter
 - session 详情区剩余包装函数从控制器中移除，直接消费 core formatter
+- session scope / empty state / search summary / meta label 文案下沉到 core formatter
 
 下一步建议：
 

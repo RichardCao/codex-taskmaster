@@ -1109,7 +1109,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         normalizeInitialIntervalValue()
         configureSessionFilterPopover()
         updateSessionFilterHeaderIndicators()
-        sessionStatusMetaLabel.stringValue = sessionEmptyStateText()
+        sessionStatusMetaLabel.stringValue = displayedSessionEmptyStateText()
         updateDetectStatusButtonState()
         stopButton.isEnabled = false
         resumeLoopButton.isEnabled = false
@@ -1923,7 +1923,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func sessionScopeText(for mode: SessionListMode) -> String {
-        mode == .archived ? "已归档" : "普通"
+        sessionScopeDisplayText(isArchived: mode == .archived)
     }
 
     private func requestedSessionScopeText() -> String {
@@ -1934,13 +1934,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionScopeText(for: displayedSessionListMode)
     }
 
-    private func sessionEmptyStateText() -> String {
-        switch displayedSessionListMode {
-        case .active:
-            return "视图: 普通 | 未加载 session 状态。点击“检测会话”开始扫描。"
-        case .archived:
-            return "视图: 已归档 | 未加载归档 session。点击“检测会话”读取列表。"
-        }
+    private func displayedSessionEmptyStateText() -> String {
+        sessionEmptyStateText(isArchived: displayedSessionListMode == .archived)
     }
 
     private func currentSessionSearchQuery() -> String {
@@ -2168,46 +2163,30 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func sessionSearchSummary() -> String? {
-        let query = currentSessionSearchQuery()
-        guard !query.isEmpty else { return nil }
-        var parts = ["搜索: \(query)", "命中: \(sessionSnapshots.count)"]
-        if isSessionPromptSearchEnabled() {
-            if isSessionScanRunning {
-                parts.append("近提示词检索待扫描完成后继续")
-            } else if isSessionPromptSearchRunning {
-                parts.append("近提示词检索: \(sessionPromptSearchProgressCompleted)/\(sessionPromptSearchProgressTotal)")
-            } else if sessionPromptSearchCompletedRevision == sessionSearchRevision {
-                parts.append("近提示词已检索")
-            }
-        }
-        return parts.joined(separator: " | ")
+        formattedSessionSearchSummary(
+            query: currentSessionSearchQuery(),
+            hitCount: sessionSnapshots.count,
+            promptSearchEnabled: isSessionPromptSearchEnabled(),
+            sessionScanRunning: isSessionScanRunning,
+            promptSearchRunning: isSessionPromptSearchRunning,
+            promptSearchCompleted: sessionPromptSearchCompletedRevision == sessionSearchRevision,
+            promptSearchProgressCompleted: sessionPromptSearchProgressCompleted,
+            promptSearchProgressTotal: sessionPromptSearchProgressTotal
+        )
     }
 
     private func updateSessionStatusMetaLabel() {
-        if allSessionSnapshots.isEmpty {
-            if isSessionScanRunning, let scannedCount = lastSessionRenderScannedCount, let totalCount = lastSessionRenderTotalCount {
-                var parts = ["视图: \(displayedSessionScopeText())", "正在扫描 \(scannedCount)/\(totalCount)…"]
-                if let searchSummary = sessionSearchSummary() {
-                    parts.append(searchSummary)
-                }
-                sessionStatusMetaLabel.stringValue = parts.joined(separator: " | ")
-            } else {
-                sessionStatusMetaLabel.stringValue = sessionEmptyStateText()
-            }
-            return
-        }
-
-        var parts = ["视图: \(displayedSessionScopeText())", "已加载: \(allSessionSnapshots.count)"]
-        if let scannedCount = lastSessionRenderScannedCount, let totalCount = lastSessionRenderTotalCount {
-            let progressText = lastSessionRenderIsComplete ? "已扫描: \(scannedCount)/\(totalCount)" : "扫描中: \(scannedCount)/\(totalCount)"
-            parts.append(progressText)
-            parts.append("总数: \(totalCount)")
-        }
-        if let searchSummary = sessionSearchSummary() {
-            parts.append(searchSummary)
-        }
-        parts.append("刷新: \(Self.timestampFormatter.string(from: Date()))")
-        sessionStatusMetaLabel.stringValue = parts.joined(separator: " | ")
+        sessionStatusMetaLabel.stringValue = formattedSessionStatusMetaText(
+            allSessionCount: allSessionSnapshots.count,
+            scopeText: displayedSessionScopeText(),
+            emptyStateText: displayedSessionEmptyStateText(),
+            sessionScanRunning: isSessionScanRunning,
+            scannedCount: lastSessionRenderScannedCount,
+            totalCount: lastSessionRenderTotalCount,
+            isComplete: lastSessionRenderIsComplete,
+            searchSummary: sessionSearchSummary(),
+            refreshText: Self.timestampFormatter.string(from: Date())
+        )
     }
 
     private func loadedActiveSessionSnapshotsForStatusRefresh() -> [SessionSnapshot] {
