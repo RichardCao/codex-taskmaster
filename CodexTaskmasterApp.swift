@@ -4985,7 +4985,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             renderSessionSnapshots(scannedCount: allSessionSnapshots.count, totalCount: sessionScanTotal, isComplete: false)
             sessionStatusMetaLabel.stringValue += " | 已停止"
         } else {
-            sessionStatusMetaLabel.stringValue = "视图: \(sessionScopeDisplayText(isArchived: stoppedMode == .archived)) | 检测已停止。"
+            sessionStatusMetaLabel.stringValue = sessionScanStoppedMetaText(isArchived: stoppedMode == .archived)
             sessionStatusTableView.reloadData()
         }
         activeSessionScanMode = nil
@@ -5051,7 +5051,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setStatus("检测会话执行中…", key: "scan")
         appendOutput("执行 检测会话: session-count + probe-all batches")
         invalidateSessionSearch(resetPromptCache: true)
-        sessionStatusMetaLabel.stringValue = "视图: 普通 | 正在准备扫描…"
+        sessionStatusMetaLabel.stringValue = sessionScanPreparingMetaText()
 
         DispatchQueue.global(qos: .userInitiated).async {
             let processCallbacks = self.sessionScanProcessCallbacks()
@@ -5074,7 +5074,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.isSessionScanRunning = false
                     self.activeSessionScanMode = nil
                     self.updateDetectStatusButtonState()
-                    self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 检测会话失败: \(failureDetail)"
+                    self.sessionStatusMetaLabel.stringValue = sessionScanFailureMetaText(detail: failureDetail)
                     self.setStatus("检测会话失败", key: "scan", color: .systemRed)
                     if !failureDetail.isEmpty {
                         self.appendOutput("stderr: \(failureDetail)")
@@ -5092,11 +5092,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.updateDetectStatusButtonState()
                     self.allSessionSnapshots = []
                     self.sessionSnapshots = []
-                    self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 没有可扫描的 session。"
+                    self.sessionStatusMetaLabel.stringValue = sessionScanEmptyMetaText()
                     self.sessionStatusTableView.reloadData()
                     self.setStatus("检测会话完成", key: "scan")
                 } else {
-                    self.sessionStatusMetaLabel.stringValue = "视图: 普通 | 正在扫描 0/\(totalCount)…"
+                    self.sessionStatusMetaLabel.stringValue = sessionScanProgressMetaText(scannedCount: 0, totalCount: totalCount)
                     self.sessionStatusTableView.reloadData()
                 }
             }
@@ -5158,7 +5158,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
                 if encounteredFailure {
                     self.renderSessionSnapshots(scannedCount: scannedCount, totalCount: totalCount, isComplete: false)
-                    self.sessionStatusMetaLabel.stringValue += " | 部分失败"
+                    self.sessionStatusMetaLabel.stringValue += sessionScanPartialFailureSuffix()
                     self.setStatus("检测会话部分失败", key: "scan", color: .systemOrange)
                     if !failureDetail.isEmpty {
                         self.appendOutput("stderr: \(failureDetail)")
@@ -5189,7 +5189,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setStatus("读取已归档 session 中…", key: "scan")
         appendOutput("执行 检测会话: thread-list --archived")
         invalidateSessionSearch(resetPromptCache: true)
-        sessionStatusMetaLabel.stringValue = "视图: 已归档 | 正在读取列表…"
+        sessionStatusMetaLabel.stringValue = archivedSessionLoadingMetaText()
 
         DispatchQueue.global(qos: .userInitiated).async {
             let result = self.sessionScanService.threadListArchived(processCallbacks: self.sessionScanProcessCallbacks())
@@ -5212,7 +5212,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     case .success:
                         failureDetail = ""
                     }
-                    self.sessionStatusMetaLabel.stringValue = "视图: 已归档 | 读取失败: \(failureDetail)"
+                    self.sessionStatusMetaLabel.stringValue = archivedSessionFailureMetaText(detail: failureDetail)
                     self.setStatus("读取已归档 session 失败", key: "scan")
                     if !failureDetail.isEmpty {
                         self.appendOutput("stderr: \(failureDetail)")

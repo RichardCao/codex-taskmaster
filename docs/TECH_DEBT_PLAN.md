@@ -275,6 +275,7 @@
 - session filter 面板哨兵项、标题和选中切换规则下沉到 core
 - session filter kind 类型、列映射与按 kind 取筛选项规则下沉到 core
 - session filter 选中状态收口为 core `SessionFilterSelections`
+- session 扫描 meta label 文案下沉到 core formatter
 
 下一步建议：
 

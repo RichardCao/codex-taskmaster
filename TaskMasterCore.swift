@@ -1685,6 +1685,38 @@ func formattedSessionStatusMetaText(
     return parts.joined(separator: " | ")
 }
 
+func sessionScanStoppedMetaText(isArchived: Bool) -> String {
+    "视图: \(sessionScopeDisplayText(isArchived: isArchived)) | 检测已停止。"
+}
+
+func sessionScanPreparingMetaText() -> String {
+    "视图: 普通 | 正在准备扫描…"
+}
+
+func sessionScanFailureMetaText(detail: String) -> String {
+    "视图: 普通 | 检测会话失败: \(detail)"
+}
+
+func sessionScanEmptyMetaText() -> String {
+    "视图: 普通 | 没有可扫描的 session。"
+}
+
+func sessionScanProgressMetaText(scannedCount: Int, totalCount: Int) -> String {
+    "视图: 普通 | 正在扫描 \(scannedCount)/\(totalCount)…"
+}
+
+func sessionScanPartialFailureSuffix() -> String {
+    " | 部分失败"
+}
+
+func archivedSessionLoadingMetaText() -> String {
+    "视图: 已归档 | 正在读取列表…"
+}
+
+func archivedSessionFailureMetaText(detail: String) -> String {
+    "视图: 已归档 | 读取失败: \(detail)"
+}
+
 func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
     guard !normalizedQuery.isEmpty else { return true }
     let candidates = [
