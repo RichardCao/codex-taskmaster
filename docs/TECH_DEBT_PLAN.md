@@ -279,6 +279,7 @@
 - session 扫描流程中的状态栏 / 日志文案下沉到 core formatter
 - session 状态刷新与 session scope 切换提示文案下沉到 core formatter
 - session 状态刷新结果分类收口为 core `SessionStatusRefreshResultKind`
+- session 状态刷新结果的 UI 状态应用收口为控制器单点 helper
 
 下一步建议：
 
