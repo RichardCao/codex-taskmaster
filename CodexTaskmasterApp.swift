@@ -2268,6 +2268,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         updateProviderMigrationButtons()
     }
 
+    private func beginProviderMigrationExecution(runningStatusText: String, startLogText: String) {
+        setButtonsEnabled(false)
+        setStatus(runningStatusText, key: "action")
+        appendOutput(startLogText)
+    }
+
     private func applyProviderMigrationExecutionResult(
         success: Bool,
         detail: String,
@@ -5881,10 +5887,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     includeFamily = false
                 }
 
-                self.setButtonsEnabled(false)
-                self.setStatus(sessionProviderMigrationRunningStatusText(), key: "action")
-                self.appendOutput(
-                    sessionProviderMigrationStartLogText(
+                self.beginProviderMigrationExecution(
+                    runningStatusText: sessionProviderMigrationRunningStatusText(),
+                    startLogText: sessionProviderMigrationStartLogText(
                         threadID: session.threadID,
                         targetProvider: targetProvider,
                         includeFamily: includeFamily
@@ -5960,9 +5965,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     return
                 }
 
-                self.setButtonsEnabled(false)
-                self.setStatus(allSessionProviderMigrationRunningStatusText(), key: "action")
-                self.appendOutput(allSessionProviderMigrationStartLogText(targetProvider: targetProvider))
+                self.beginProviderMigrationExecution(
+                    runningStatusText: allSessionProviderMigrationRunningStatusText(),
+                    startLogText: allSessionProviderMigrationStartLogText(targetProvider: targetProvider)
+                )
 
                 DispatchQueue.global(qos: .userInitiated).async {
                     let result = self.migrateAllSessionsProvider(targetProvider: targetProvider)
