@@ -2077,7 +2077,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func refreshLoadedSessionStatusesInBackground(showProgress: Bool) {
         guard !isSessionScanRunning else {
             if showProgress {
-                setStatus("检测会话进行中，请稍后再刷新状态", key: "scan", color: .systemOrange)
+                setStatus(sessionStatusRefreshBlockedByScanText(), key: "scan", color: .systemOrange)
             }
             return
         }
@@ -2098,13 +2098,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let claimedSnapshots = sessionStatusRefreshCoordinator.claim(snapshots, requireDue: false, referenceDate: Date())
         guard !claimedSnapshots.isEmpty else {
             if showProgress {
-                setStatus("当前会话状态刷新仍在进行中", key: "scan", color: .systemOrange)
+                setStatus(sessionStatusRefreshAlreadyRunningText(), key: "scan", color: .systemOrange)
             }
             return
         }
 
         if showProgress {
-            setStatus("刷新状态执行中…", key: "scan")
+            setStatus(sessionStatusRefreshRunningText(), key: "scan")
         }
 
         let preservedSelectionThreadID = selectedSessionThreadID()
@@ -2147,12 +2147,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
             guard self.displayedSessionListMode == .active, !self.isSessionScanRunning else {
                 if showProgress {
+                    let text = sessionStatusRefreshCompletionText(failedCount: failedThreadIDs.count, totalCount: claimedSnapshots.count)
                     if failedThreadIDs.isEmpty {
-                        self.setStatus("刷新状态完成", key: "scan")
+                        self.setStatus(text, key: "scan")
                     } else if failedThreadIDs.count == claimedSnapshots.count {
-                        self.setStatus("刷新状态失败", key: "scan", color: .systemRed)
+                        self.setStatus(text, key: "scan", color: .systemRed)
                     } else {
-                        self.setStatus("刷新状态部分失败", key: "scan", color: .systemOrange)
+                        self.setStatus(text, key: "scan", color: .systemOrange)
                     }
                 }
                 return
@@ -2160,12 +2161,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
             self.applyRefreshedSessionSnapshots(refreshedSnapshots, preserveSelectionThreadID: preservedSelectionThreadID)
             if showProgress {
+                let text = sessionStatusRefreshCompletionText(failedCount: failedThreadIDs.count, totalCount: claimedSnapshots.count)
                 if failedThreadIDs.isEmpty {
-                    self.setStatus("刷新状态完成", key: "scan")
+                    self.setStatus(text, key: "scan")
                 } else if failedThreadIDs.count == claimedSnapshots.count {
-                    self.setStatus("刷新状态失败", key: "scan", color: .systemRed)
+                    self.setStatus(text, key: "scan", color: .systemRed)
                 } else {
-                    self.setStatus("刷新状态部分失败", key: "scan", color: .systemOrange)
+                    self.setStatus(text, key: "scan", color: .systemOrange)
                 }
             }
         }
@@ -2174,13 +2176,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func refreshArchivedSessionsInBackground(showProgress: Bool) {
         guard !isSessionScanRunning else {
             if showProgress {
-                setStatus("检测会话进行中，请稍后再刷新状态", key: "scan", color: .systemOrange)
+                setStatus(sessionStatusRefreshBlockedByScanText(), key: "scan", color: .systemOrange)
             }
             return
         }
 
         if showProgress {
-            setStatus("刷新状态执行中…", key: "scan")
+            setStatus(sessionStatusRefreshRunningText(), key: "scan")
         }
 
         let preservedSelectionThreadID = selectedSessionThreadID()
@@ -2191,9 +2193,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     if showProgress {
                         switch result {
                         case .success:
-                            self.setStatus("刷新状态完成", key: "scan")
+                            self.setStatus(sessionStatusRefreshCompletionText(failedCount: 0, totalCount: 1), key: "scan")
                         case .failure:
-                            self.setStatus("刷新状态失败", key: "scan", color: .systemRed)
+                            self.setStatus(sessionStatusRefreshCompletionText(failedCount: 1, totalCount: 1), key: "scan", color: .systemRed)
                         }
                     }
                     return
@@ -2201,7 +2203,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
                 guard case let .success(snapshots) = result else {
                     if showProgress {
-                        self.setStatus("刷新状态失败", key: "scan", color: .systemRed)
+                        self.setStatus(sessionStatusRefreshCompletionText(failedCount: 1, totalCount: 1), key: "scan", color: .systemRed)
                     }
                     return
                 }
@@ -2216,7 +2218,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 )
                 self.restoreSessionSelection(preferredThreadID: preservedSelectionThreadID)
                 if showProgress {
-                    self.setStatus("刷新状态完成", key: "scan")
+                    self.setStatus(sessionStatusRefreshCompletionText(failedCount: 0, totalCount: 1), key: "scan")
                 }
             }
         }
@@ -5381,13 +5383,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         if isSessionScanRunning {
             let activeMode = activeSessionScanMode ?? displayedSessionListMode
             sessionScopeControl.selectedSegment = activeMode == .archived ? 1 : 0
-            setStatus("请等待当前检测完成或手动停止后再切换", key: "scan", color: .systemOrange)
-            appendOutput("检测会话仍在进行中，已保持当前视图为\(sessionScopeDisplayText(isArchived: activeMode == .archived))。")
+            let activeScopeText = sessionScopeDisplayText(isArchived: activeMode == .archived)
+            setStatus(sessionScopeChangeBlockedStatusText(), key: "scan", color: .systemOrange)
+            appendOutput(sessionScopeChangeBlockedLogText(activeScopeText: activeScopeText))
             return
         }
 
         guard requestedMode != displayedSessionListMode else {
-            setStatus("当前视图切换为\(sessionScopeDisplayText(isArchived: displayedSessionListMode == .archived))", key: "scan")
+            setStatus(sessionScopeAlreadySelectedStatusText(scopeText: sessionScopeDisplayText(isArchived: displayedSessionListMode == .archived)), key: "scan")
             return
         }
 
@@ -5396,8 +5399,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         updateSessionDetailView()
         let requestedScopeText = sessionScopeDisplayText(isArchived: requestedMode == .archived)
         let displayedScopeText = sessionScopeDisplayText(isArchived: displayedSessionListMode == .archived)
-        setStatus("已切换到\(requestedScopeText)视图，点击“检测会话”刷新", key: "scan", color: .systemOrange)
-        appendOutput("已切换 Session Status 视图到\(requestedScopeText)；当前列表仍显示上次\(displayedScopeText)检测结果，点击“检测会话”后刷新。")
+        setStatus(sessionScopeChangedStatusText(requestedScopeText: requestedScopeText), key: "scan", color: .systemOrange)
+        appendOutput(sessionScopeChangedLogText(requestedScopeText: requestedScopeText, displayedScopeText: displayedScopeText))
     }
 
     @objc

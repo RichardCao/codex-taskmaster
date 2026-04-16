@@ -1773,6 +1773,48 @@ func archivedSessionCompletionLogText(count: Int) -> String {
     "检测到 \(count) 个已归档 session。"
 }
 
+func sessionStatusRefreshBlockedByScanText() -> String {
+    "检测会话进行中，请稍后再刷新状态"
+}
+
+func sessionStatusRefreshAlreadyRunningText() -> String {
+    "当前会话状态刷新仍在进行中"
+}
+
+func sessionStatusRefreshRunningText() -> String {
+    "刷新状态执行中…"
+}
+
+func sessionStatusRefreshCompletionText(failedCount: Int, totalCount: Int) -> String {
+    if failedCount == 0 {
+        return "刷新状态完成"
+    }
+    if failedCount == totalCount {
+        return "刷新状态失败"
+    }
+    return "刷新状态部分失败"
+}
+
+func sessionScopeChangeBlockedStatusText() -> String {
+    "请等待当前检测完成或手动停止后再切换"
+}
+
+func sessionScopeChangeBlockedLogText(activeScopeText: String) -> String {
+    "检测会话仍在进行中，已保持当前视图为\(activeScopeText)。"
+}
+
+func sessionScopeAlreadySelectedStatusText(scopeText: String) -> String {
+    "当前视图切换为\(scopeText)"
+}
+
+func sessionScopeChangedStatusText(requestedScopeText: String) -> String {
+    "已切换到\(requestedScopeText)视图，点击“检测会话”刷新"
+}
+
+func sessionScopeChangedLogText(requestedScopeText: String, displayedScopeText: String) -> String {
+    "已切换 Session Status 视图到\(requestedScopeText)；当前列表仍显示上次\(displayedScopeText)检测结果，点击“检测会话”后刷新。"
+}
+
 func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
     guard !normalizedQuery.isEmpty else { return true }
     let candidates = [
