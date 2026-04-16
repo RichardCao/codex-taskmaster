@@ -281,6 +281,7 @@
 - session 状态刷新结果分类收口为 core `SessionStatusRefreshResultKind`
 - session 状态刷新结果的 UI 状态应用收口为控制器单点 helper
 - session 扫描 UI 收尾状态收口为控制器单点 helper
+- session 扫描流程 stderr 输出保护收口为控制器单点 helper
 
 下一步建议：
 

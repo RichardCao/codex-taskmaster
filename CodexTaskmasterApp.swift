@@ -2218,6 +2218,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         updateDetectStatusButtonState()
     }
 
+    private func appendStderrDetailIfPresent(_ detail: String) {
+        guard !detail.isEmpty else { return }
+        appendOutput("stderr: \(detail)")
+    }
+
     private func applySessionStatusRefreshResult(_ resultKind: SessionStatusRefreshResultKind) {
         switch resultKind {
         case .success:
@@ -5079,9 +5084,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.finishSessionScanUIState()
                     self.sessionStatusMetaLabel.stringValue = sessionScanFailureMetaText(detail: failureDetail)
                     self.setStatus(sessionScanFailureStatusText(), key: "scan", color: .systemRed)
-                    if !failureDetail.isEmpty {
-                        self.appendOutput("stderr: \(failureDetail)")
-                    }
+                    self.appendStderrDetailIfPresent(failureDetail)
                 }
                 return
             }
@@ -5159,9 +5162,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.renderSessionSnapshots(scannedCount: scannedCount, totalCount: totalCount, isComplete: false)
                     self.sessionStatusMetaLabel.stringValue += sessionScanPartialFailureSuffix()
                     self.setStatus(sessionScanPartialFailureStatusText(), key: "scan", color: .systemOrange)
-                    if !failureDetail.isEmpty {
-                        self.appendOutput("stderr: \(failureDetail)")
-                    }
+                    self.appendStderrDetailIfPresent(failureDetail)
                     return
                 }
 
@@ -5211,9 +5212,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     }
                     self.sessionStatusMetaLabel.stringValue = archivedSessionFailureMetaText(detail: failureDetail)
                     self.setStatus(archivedSessionFailureStatusText(), key: "scan")
-                    if !failureDetail.isEmpty {
-                        self.appendOutput("stderr: \(failureDetail)")
-                    }
+                    self.appendStderrDetailIfPresent(failureDetail)
                     return
                 }
 
