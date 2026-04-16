@@ -290,6 +290,7 @@
 - 当前 session provider 迁移动作文案与确认框文案下沉到 core formatter
 - 全部 session provider 迁移动作文案与确认框文案下沉到 core formatter
 - session provider 迁移按钮标题与 tooltip 下沉到 core formatter
+- session action 通用选择提示与操作区禁用状态收口到 core formatter / 控制器 helper
 
 下一步建议：
 

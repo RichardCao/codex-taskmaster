@@ -1237,13 +1237,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         renameField.placeholderString = sessionRenamePlaceholderText(isArchived: false)
         renameField.translatesAutoresizingMaskIntoConstraints = false
-        renameField.isEnabled = false
-        saveRenameButton.isEnabled = false
-        archiveSessionButton.isEnabled = false
-        restoreSessionButton.isEnabled = false
-        deleteSessionButton.isEnabled = false
-        migrateSessionProviderButton.isEnabled = false
-        migrateAllSessionsProviderButton.isEnabled = false
+        disableSelectedSessionActionControls()
         archiveSessionButton.contentTintColor = .systemOrange
         restoreSessionButton.contentTintColor = .systemBlue
         deleteSessionButton.contentTintColor = .systemRed
@@ -2218,6 +2212,16 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         updateDetectStatusButtonState()
     }
 
+    private func disableSelectedSessionActionControls() {
+        saveRenameButton.isEnabled = false
+        archiveSessionButton.isEnabled = false
+        restoreSessionButton.isEnabled = false
+        deleteSessionButton.isEnabled = false
+        migrateSessionProviderButton.isEnabled = false
+        migrateAllSessionsProviderButton.isEnabled = false
+        renameField.isEnabled = false
+    }
+
     private func appendStderrDetailIfPresent(_ detail: String) {
         guard !detail.isEmpty else { return }
         appendOutput("stderr: \(detail)")
@@ -2782,12 +2786,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
             renameField.stringValue = ""
-            renameField.isEnabled = false
-            saveRenameButton.isEnabled = false
-            archiveSessionButton.isEnabled = false
-            restoreSessionButton.isEnabled = false
-            deleteSessionButton.isEnabled = false
-            migrateSessionProviderButton.isEnabled = false
+            disableSelectedSessionActionControls()
             migrateAllSessionsProviderButton.isEnabled = configuredModelProvider != nil
             let emptyDetailText = "选中一条 session 后，这里会显示完整信息、最近发送结果、相关 Loop 和提示词历史。"
             if sessionDetailView.string != emptyDetailText {
@@ -5461,7 +5460,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
             appendOutput(sessionRenameSelectionRequiredLogText())
-            setStatus("请选择一个 session")
+            setStatus(sessionSelectionRequiredStatusText())
             NSSound.beep()
             return
         }
@@ -5474,13 +5473,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
         let newName = renameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        saveRenameButton.isEnabled = false
-        archiveSessionButton.isEnabled = false
-        restoreSessionButton.isEnabled = false
-        deleteSessionButton.isEnabled = false
-        migrateSessionProviderButton.isEnabled = false
-        migrateAllSessionsProviderButton.isEnabled = false
-        renameField.isEnabled = false
+        disableSelectedSessionActionControls()
         setStatus(sessionRenameRunningStatusText(), key: "action")
         appendOutput(sessionRenameStartLogText(threadID: session.threadID, newName: newName))
 
@@ -5540,7 +5533,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
             appendOutput(sessionArchiveSelectionRequiredLogText())
-            setStatus("请选择一个 session")
+            setStatus(sessionSelectionRequiredStatusText())
             NSSound.beep()
             return
         }
@@ -5569,13 +5562,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
 
-        saveRenameButton.isEnabled = false
-        archiveSessionButton.isEnabled = false
-        restoreSessionButton.isEnabled = false
-        deleteSessionButton.isEnabled = false
-        migrateSessionProviderButton.isEnabled = false
-        migrateAllSessionsProviderButton.isEnabled = false
-        renameField.isEnabled = false
+        disableSelectedSessionActionControls()
         setStatus(sessionArchiveRunningStatusText(), key: "action")
         appendOutput(sessionArchiveStartLogText(threadID: session.threadID))
 
@@ -5625,7 +5612,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
             appendOutput(archivedSessionRestoreSelectionRequiredLogText())
-            setStatus("请选择一个 session")
+            setStatus(sessionSelectionRequiredStatusText())
             NSSound.beep()
             return
         }
@@ -5652,13 +5639,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
 
-        saveRenameButton.isEnabled = false
-        archiveSessionButton.isEnabled = false
-        restoreSessionButton.isEnabled = false
-        deleteSessionButton.isEnabled = false
-        migrateSessionProviderButton.isEnabled = false
-        migrateAllSessionsProviderButton.isEnabled = false
-        renameField.isEnabled = false
+        disableSelectedSessionActionControls()
         setStatus(sessionRestoreRunningStatusText(), key: "action")
         appendOutput(sessionRestoreStartLogText(threadID: session.threadID))
 
@@ -5701,7 +5682,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
             appendOutput(sessionDeleteSelectionRequiredLogText())
-            setStatus("请选择一个 session")
+            setStatus(sessionSelectionRequiredStatusText())
             NSSound.beep()
             return
         }
@@ -5732,13 +5713,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     return
                 }
 
-                self.saveRenameButton.isEnabled = false
-                self.archiveSessionButton.isEnabled = false
-                self.restoreSessionButton.isEnabled = false
-                self.deleteSessionButton.isEnabled = false
-                self.migrateSessionProviderButton.isEnabled = false
-                self.migrateAllSessionsProviderButton.isEnabled = false
-                self.renameField.isEnabled = false
+                self.disableSelectedSessionActionControls()
                 self.setStatus(sessionDeleteRunningStatusText(), key: "action")
                 let targetThreadIDs = deletionPlan.includeDescendants ? ([session.threadID] + deletionPlan.descendantIDs) : [session.threadID]
                 self.appendOutput(sessionDeleteStartLogText(threadIDs: targetThreadIDs))
@@ -5787,7 +5762,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func migrateSelectedSessionToCurrentProvider() {
         guard let session = selectedSessionSnapshot() else {
             appendOutput(sessionProviderMigrationSelectionRequiredLogText())
-            setStatus("请选择一个 session")
+            setStatus(sessionSelectionRequiredStatusText())
             NSSound.beep()
             return
         }

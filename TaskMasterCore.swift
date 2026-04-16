@@ -2299,6 +2299,10 @@ func allSessionProviderMigrationTooltipText() -> String {
     "将本地所有 session 迁移到当前 config.toml 中的 model_provider"
 }
 
+func sessionSelectionRequiredStatusText() -> String {
+    "请选择一个 session"
+}
+
 func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
     guard !normalizedQuery.isEmpty else { return true }
     let candidates = [
