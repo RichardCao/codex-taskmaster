@@ -2258,6 +2258,25 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func applyProviderMigrationExecutionResult(
+        success: Bool,
+        detail: String,
+        completionStatusText: String,
+        failureStatusText: String
+    ) {
+        setButtonsEnabled(true)
+        updateProviderMigrationButtons()
+        if success {
+            setStatus(completionStatusText, key: "action")
+            appendOutput(detail)
+            detectStatuses()
+        } else {
+            setStatus(failureStatusText, key: "action")
+            appendStderrDetailIfPresent(detail)
+            NSSound.beep()
+        }
+    }
+
     private func applySessionStatusRefreshResult(_ resultKind: SessionStatusRefreshResultKind) {
         switch resultKind {
         case .success:
@@ -5867,17 +5886,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 DispatchQueue.global(qos: .userInitiated).async {
                     let result = self.migrateSessionProvider(threadID: session.threadID, targetProvider: targetProvider, includeFamily: includeFamily)
                     DispatchQueue.main.async {
-                        self.setButtonsEnabled(true)
-                        self.updateProviderMigrationButtons()
-                        if result.success {
-                            self.setStatus(sessionProviderMigrationCompletionStatusText(), key: "action")
-                            self.appendOutput(result.detail)
-                            self.detectStatuses()
-                        } else {
-                            self.setStatus(sessionProviderMigrationFailureStatusText(), key: "action")
-                            self.appendStderrDetailIfPresent(result.detail)
-                            NSSound.beep()
-                        }
+                        self.applyProviderMigrationExecutionResult(
+                            success: result.success,
+                            detail: result.detail,
+                            completionStatusText: sessionProviderMigrationCompletionStatusText(),
+                            failureStatusText: sessionProviderMigrationFailureStatusText()
+                        )
                     }
                 }
             }
@@ -5947,17 +5961,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 DispatchQueue.global(qos: .userInitiated).async {
                     let result = self.migrateAllSessionsProvider(targetProvider: targetProvider)
                     DispatchQueue.main.async {
-                        self.setButtonsEnabled(true)
-                        self.updateProviderMigrationButtons()
-                        if result.success {
-                            self.setStatus(allSessionProviderMigrationCompletionStatusText(), key: "action")
-                            self.appendOutput(result.detail)
-                            self.detectStatuses()
-                        } else {
-                            self.setStatus(allSessionProviderMigrationFailureStatusText(), key: "action")
-                            self.appendStderrDetailIfPresent(result.detail)
-                            NSSound.beep()
-                        }
+                        self.applyProviderMigrationExecutionResult(
+                            success: result.success,
+                            detail: result.detail,
+                            completionStatusText: allSessionProviderMigrationCompletionStatusText(),
+                            failureStatusText: allSessionProviderMigrationFailureStatusText()
+                        )
                     }
                 }
             }
