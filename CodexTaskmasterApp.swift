@@ -2736,10 +2736,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
-    private func sessionDetailText(for session: SessionSnapshot) -> String {
-        formattedSessionDetailText(session: session, updatedText: formatEpoch(session.updatedAtEpoch))
-    }
-
     private func matchingLoopSnapshots(for session: SessionSnapshot) -> [LoopSnapshot] {
         let candidates = Set(sessionPossibleTargets(session))
         guard !candidates.isEmpty else { return [] }
@@ -2798,18 +2794,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
 
         return results
-    }
-
-    private func recentSendStatsText(for results: [SendResultSnapshot]) -> String {
-        formattedRecentSendStatsText(results: results, formatEpoch: formatEpoch(_:))
-    }
-
-    private func recentSendResultsText(for results: [SendResultSnapshot]) -> String {
-        formattedRecentSendResultsText(results: results, formatEpoch: formatEpoch(_:))
-    }
-
-    private func loopOccupancyText(for session: SessionSnapshot) -> String {
-        formattedLoopOccupancyText(loops: matchingLoopSnapshots(for: session), formatEpoch: formatEpoch(_:))
     }
 
     private func recentUserMessageEntries(for session: SessionSnapshot, limit: Int? = nil) -> [(timestamp: String, message: String)]? {
@@ -2989,9 +2973,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             : "输入新名称，留空可恢复为未 rename 状态"
         let sendResults = recentSendResults(for: session)
         let initialDetailText = formattedSessionDetailPreviewDocument(
-            sessionDetailText: sessionDetailText(for: session),
-            sendStatsText: recentSendStatsText(for: sendResults),
-            loopOccupancyText: loopOccupancyText(for: session)
+            sessionDetailText: formattedSessionDetailText(session: session, updatedText: formatEpoch(session.updatedAtEpoch)),
+            sendStatsText: formattedRecentSendStatsText(results: sendResults, formatEpoch: formatEpoch(_:)),
+            loopOccupancyText: formattedLoopOccupancyText(loops: matchingLoopSnapshots(for: session), formatEpoch: formatEpoch(_:))
         )
         let shouldResetForInitialText = lastSessionDetailThreadID != session.threadID || lastSessionDetailText != initialDetailText
         if sessionDetailView.string != initialDetailText {
@@ -3015,10 +2999,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             let historyText = self.loadPromptHistoryText(for: session)
             let sendResults = self.recentSendResults(for: session)
             let detailText = formattedSessionDetailDocument(
-                sessionDetailText: self.sessionDetailText(for: session),
-                sendStatsText: self.recentSendStatsText(for: sendResults),
-                loopOccupancyText: self.loopOccupancyText(for: session),
-                sendResultsText: self.recentSendResultsText(for: sendResults),
+                sessionDetailText: formattedSessionDetailText(session: session, updatedText: self.formatEpoch(session.updatedAtEpoch)),
+                sendStatsText: formattedRecentSendStatsText(results: sendResults, formatEpoch: self.formatEpoch(_:)),
+                loopOccupancyText: formattedLoopOccupancyText(loops: self.matchingLoopSnapshots(for: session), formatEpoch: self.formatEpoch(_:)),
+                sendResultsText: formattedRecentSendResultsText(results: sendResults, formatEpoch: self.formatEpoch(_:)),
                 historyText: historyText
             )
 
