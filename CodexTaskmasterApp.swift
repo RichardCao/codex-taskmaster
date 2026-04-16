@@ -2258,6 +2258,16 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func beginProviderMigrationLoading() {
+        setButtonsEnabled(false)
+        setStatus(sessionProviderLoadingStatusText(), key: "action")
+    }
+
+    private func finishProviderMigrationPlanLoading() {
+        setButtonsEnabled(true)
+        updateProviderMigrationButtons()
+    }
+
     private func applyProviderMigrationExecutionResult(
         success: Bool,
         detail: String,
@@ -5785,8 +5795,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             NSSound.beep()
             return
         }
-        setButtonsEnabled(false)
-        setStatus(sessionProviderLoadingStatusText(), key: "action")
+        beginProviderMigrationLoading()
 
         refreshConfiguredModelProviderCache(updateButtons: false) { targetProvider in
             guard let targetProvider else {
@@ -5797,8 +5806,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             self.setStatus(sessionProviderMigrationPlanLoadingStatusText(), key: "action")
 
             self.sessionProviderPlanAsync(threadID: session.threadID, targetProvider: targetProvider) { plan in
-                self.setButtonsEnabled(true)
-                self.updateProviderMigrationButtons()
+                self.finishProviderMigrationPlanLoading()
 
                 guard let plan else {
                     self.handleProviderMigrationPlanFailure(logText: sessionProviderMigrationPlanFailureLogText())
@@ -5900,8 +5908,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     @objc
     private func migrateAllSessionsToCurrentProvider() {
-        setButtonsEnabled(false)
-        setStatus(sessionProviderLoadingStatusText(), key: "action")
+        beginProviderMigrationLoading()
 
         refreshConfiguredModelProviderCache(updateButtons: false) { targetProvider in
             guard let targetProvider else {
@@ -5912,8 +5919,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             self.setStatus(sessionProviderMigrationPlanLoadingStatusText(), key: "action")
 
             self.allSessionProviderPlanAsync(targetProvider: targetProvider) { plan in
-                self.setButtonsEnabled(true)
-                self.updateProviderMigrationButtons()
+                self.finishProviderMigrationPlanLoading()
 
                 guard let plan else {
                     self.handleProviderMigrationPlanFailure(logText: allSessionProviderMigrationPlanFailureLogText())

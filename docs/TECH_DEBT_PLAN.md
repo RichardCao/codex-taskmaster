@@ -295,6 +295,7 @@
 - session action 成功后的列表移除与重渲染收口到控制器单点 helper
 - provider migration 缺失 provider 与计划加载失败 UI 分支收口到控制器 helper
 - provider migration 执行结果回写收口到控制器 helper
+- provider migration loading 与计划完成按钮态收口到控制器 helper
 
 下一步建议：
 
