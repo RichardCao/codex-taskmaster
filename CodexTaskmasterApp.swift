@@ -1235,7 +1235,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         activityLogSelectedSessionCheckbox.action = #selector(toggleActivityLogSelectedSessionFilter)
         activityLogSelectedSessionCheckbox.translatesAutoresizingMaskIntoConstraints = false
 
-        renameField.placeholderString = "输入新名称，留空可恢复为未 rename 状态"
+        renameField.placeholderString = sessionRenamePlaceholderText(isArchived: false)
         renameField.translatesAutoresizingMaskIntoConstraints = false
         renameField.isEnabled = false
         saveRenameButton.isEnabled = false
@@ -1249,7 +1249,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         deleteSessionButton.contentTintColor = .systemRed
         migrateSessionProviderButton.contentTintColor = .systemPurple
         migrateAllSessionsProviderButton.contentTintColor = .systemPurple
-        saveRenameButton.toolTip = "保存当前 session 的名称"
+        saveRenameButton.toolTip = sessionRenameTooltipText()
         archiveSessionButton.toolTip = "按 Codex 原生语义归档当前 session"
         restoreSessionButton.toolTip = archivedSessionRestoreTooltipText()
         deleteSessionButton.toolTip = "从本地状态中彻底删除当前 session"
@@ -2811,9 +2811,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         restoreSessionButton.isEnabled = session.isArchived
         deleteSessionButton.isEnabled = true
         updateProviderMigrationButtons()
-        renameField.placeholderString = session.isArchived
-            ? archivedSessionRenamePlaceholderText()
-            : "输入新名称，留空可恢复为未 rename 状态"
+        renameField.placeholderString = sessionRenamePlaceholderText(isArchived: session.isArchived)
         let sendResults = recentSendResults(for: session)
         let initialDetailText = formattedSessionDetailPreviewDocument(
             sessionDetailText: formattedSessionDetailText(session: session, updatedText: formatEpoch(session.updatedAtEpoch)),
@@ -5500,7 +5498,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func saveSessionRename() {
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
-            appendOutput("请先选择一条 session，再保存名称。")
+            appendOutput(sessionRenameSelectionRequiredLogText())
             setStatus("请选择一个 session")
             NSSound.beep()
             return
@@ -5509,7 +5507,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let session = sessionSnapshots[selectedRow]
         guard !session.isArchived else {
             appendOutput(archivedSessionRenameBlockedLogText())
-            setStatus("请先恢复归档", key: "action")
+            setStatus(sessionRenameArchivedBlockedStatusText(), key: "action")
             NSSound.beep()
             return
         }
@@ -5521,8 +5519,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         migrateSessionProviderButton.isEnabled = false
         migrateAllSessionsProviderButton.isEnabled = false
         renameField.isEnabled = false
-        setStatus("保存名称中…", key: "action")
-        appendOutput("执行 保存名称: thread_id=\(session.threadID) name=\(newName.isEmpty ? "<empty>" : newName)")
+        setStatus(sessionRenameRunningStatusText(), key: "action")
+        appendOutput(sessionRenameStartLogText(threadID: session.threadID, newName: newName))
 
         DispatchQueue.global(qos: .userInitiated).async {
             let result = self.updateSessionName(threadID: session.threadID, newName: newName)
@@ -5564,10 +5562,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                         isComplete: self.lastSessionRenderIsComplete
                     )
                     self.selectSessionRow(threadID: session.threadID)
-                    self.setStatus("保存名称完成", key: "action")
-                    self.appendOutput(newName.isEmpty ? "已清空名称，恢复为未 rename 状态。" : "已保存名称: \(newName)")
+                    self.setStatus(sessionRenameCompletionStatusText(), key: "action")
+                    self.appendOutput(sessionRenameCompletionLogText(newName: newName))
                 } else {
-                    self.setStatus("保存名称失败", key: "action")
+                    self.setStatus(sessionRenameFailureStatusText(), key: "action")
                     self.appendOutput("stderr: \(result.error)")
                     NSSound.beep()
                 }

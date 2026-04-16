@@ -1872,6 +1872,42 @@ func archivedSessionRestoreSelectionRequiredStatusText() -> String {
     "请选择已归档 session"
 }
 
+func sessionRenameTooltipText() -> String {
+    "保存当前 session 的名称"
+}
+
+func sessionRenamePlaceholderText(isArchived: Bool) -> String {
+    isArchived ? archivedSessionRenamePlaceholderText() : "输入新名称，留空可恢复为未 rename 状态"
+}
+
+func sessionRenameSelectionRequiredLogText() -> String {
+    "请先选择一条 session，再保存名称。"
+}
+
+func sessionRenameArchivedBlockedStatusText() -> String {
+    "请先恢复归档"
+}
+
+func sessionRenameRunningStatusText() -> String {
+    "保存名称中…"
+}
+
+func sessionRenameStartLogText(threadID: String, newName: String) -> String {
+    "执行 保存名称: thread_id=\(threadID) name=\(newName.isEmpty ? "<empty>" : newName)"
+}
+
+func sessionRenameCompletionStatusText() -> String {
+    "保存名称完成"
+}
+
+func sessionRenameCompletionLogText(newName: String) -> String {
+    newName.isEmpty ? "已清空名称，恢复为未 rename 状态。" : "已保存名称: \(newName)"
+}
+
+func sessionRenameFailureStatusText() -> String {
+    "保存名称失败"
+}
+
 func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
     guard !normalizedQuery.isEmpty else { return true }
     let candidates = [
