@@ -2112,6 +2112,125 @@ func sessionDeleteFailureStatusText() -> String {
     "彻底删除失败"
 }
 
+func sessionProviderMigrationSelectionRequiredLogText() -> String {
+    "请先选择一条 session，再迁移 provider。"
+}
+
+func sessionProviderLoadingStatusText() -> String {
+    "读取当前 Provider 中…"
+}
+
+func sessionProviderMissingLogText() -> String {
+    "未能从 ~/.codex/config.toml 读取当前 model_provider。"
+}
+
+func sessionProviderMissingStatusText() -> String {
+    "当前 provider 未配置"
+}
+
+func sessionProviderMigrationPlanLoadingStatusText() -> String {
+    "读取迁移计划中…"
+}
+
+func sessionProviderMigrationPlanFailureLogText() -> String {
+    "读取 session provider 迁移计划失败。"
+}
+
+func sessionProviderMigrationPlanFailureStatusText() -> String {
+    "读取迁移计划失败"
+}
+
+func sessionProviderMigrationNoopAlertTitle() -> String {
+    "无需迁移"
+}
+
+func sessionProviderMigrationNoopAlertText(
+    currentProviderDisplay: String,
+    targetProvider: String,
+    familyCount: Int
+) -> String {
+    """
+    当前选中会话及其相关会话的 Provider 已经是目标值。
+
+    当前 Provider: \(currentProviderDisplay)
+    目标 Provider: \(targetProvider)
+    相关会话数: \(familyCount)
+    """
+}
+
+func sessionProviderMigrationNoopLogText(targetProvider: String) -> String {
+    "迁移已取消：当前会话及相关会话的 provider 已经是 \(targetProvider)。"
+}
+
+func noMigrationNeededStatusText() -> String {
+    "无需迁移"
+}
+
+func sessionProviderMigrationRelatedAlertTitle() -> String {
+    "迁移相关 Session 到当前 Provider？"
+}
+
+func sessionProviderMigrationRelatedAlertText(
+    targetProvider: String,
+    currentProviderDisplay: String,
+    threadID: String,
+    typeLabel: String,
+    isSubagent: Bool,
+    familyCount: Int,
+    familyMigrateNeeded: Int
+) -> String {
+    """
+    当前 Provider: \(targetProvider)
+    选中 Session 当前 Provider: \(currentProviderDisplay)
+    Session ID: \(threadID)
+    Type: \(typeLabel)
+
+    这条 session \(isSubagent ? "属于子 agent 会话" : "存在子 agent 会话")。
+    相关会话总数: \(familyCount)
+    需要迁移的相关会话数: \(familyMigrateNeeded)
+
+    你可以只迁移当前这一条，也可以递归迁移整组相关 session。
+    """
+}
+
+func sessionProviderMigrationCurrentAlertTitle() -> String {
+    "迁移当前 Session 到当前 Provider？"
+}
+
+func sessionProviderMigrationCurrentAlertText(
+    targetProvider: String,
+    currentProviderDisplay: String,
+    threadID: String,
+    typeLabel: String
+) -> String {
+    """
+    当前 Provider: \(targetProvider)
+    选中 Session 当前 Provider: \(currentProviderDisplay)
+    Session ID: \(threadID)
+    Type: \(typeLabel)
+    """
+}
+
+func sessionProviderMigrationCancelledStatusText() -> String {
+    "迁移 Session Provider 已取消"
+}
+
+func sessionProviderMigrationRunningStatusText() -> String {
+    "迁移 Session Provider 中…"
+}
+
+func sessionProviderMigrationStartLogText(threadID: String, targetProvider: String, includeFamily: Bool) -> String {
+    "执行 迁移 Session Provider: thread_id=\(threadID) target_provider=\(targetProvider) scope=\(includeFamily ? "family" : "current")"
+}
+
+func sessionProviderMigrationCompletionStatusText() -> String {
+    "迁移 Session Provider 完成"
+}
+
+func sessionProviderMigrationFailureStatusText() -> String {
+    "迁移 Session Provider 失败"
+}
+
 func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
     guard !normalizedQuery.isEmpty else { return true }
     let candidates = [
