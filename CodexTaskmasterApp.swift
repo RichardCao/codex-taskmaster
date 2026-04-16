@@ -5521,7 +5521,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.appendOutput(sessionRenameCompletionLogText(newName: newName))
                 } else {
                     self.setStatus(sessionRenameFailureStatusText(), key: "action")
-                    self.appendOutput("stderr: \(result.error)")
+                    self.appendStderrDetailIfPresent(result.error)
                     NSSound.beep()
                 }
             }
@@ -5600,7 +5600,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.updateProviderMigrationButtons()
                     self.setStatus(sessionArchiveFailureStatusText(), key: "action")
-                    self.appendOutput("stderr: \(result.error)")
+                    self.appendStderrDetailIfPresent(result.error)
                     NSSound.beep()
                 }
             }
@@ -5670,7 +5670,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.updateProviderMigrationButtons()
                     self.setStatus(sessionRestoreFailureStatusText(), key: "action")
-                    self.appendOutput("stderr: \(result.error)")
+                    self.appendStderrDetailIfPresent(result.error)
                     NSSound.beep()
                 }
             }
@@ -5749,7 +5749,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                             }
                             self.updateSessionDetailView()
                             self.setStatus(sessionDeleteFailureStatusText(), key: "action")
-                            self.appendOutput("stderr: \(result.detail)")
+                            self.appendStderrDetailIfPresent(result.detail)
                             NSSound.beep()
                         }
                     }
@@ -5881,7 +5881,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                             self.detectStatuses()
                         } else {
                             self.setStatus(sessionProviderMigrationFailureStatusText(), key: "action")
-                            self.appendOutput("stderr: \(result.detail)")
+                            self.appendStderrDetailIfPresent(result.detail)
                             NSSound.beep()
                         }
                     }
@@ -5967,7 +5967,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                             self.detectStatuses()
                         } else {
                             self.setStatus(allSessionProviderMigrationFailureStatusText(), key: "action")
-                            self.appendOutput("stderr: \(result.detail)")
+                            self.appendStderrDetailIfPresent(result.detail)
                             NSSound.beep()
                         }
                     }
