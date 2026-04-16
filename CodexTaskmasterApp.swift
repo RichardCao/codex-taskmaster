@@ -2222,6 +2222,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         renameField.isEnabled = false
     }
 
+    private func handleSessionSelectionRequired(logText: String) {
+        appendOutput(logText)
+        setStatus(sessionSelectionRequiredStatusText())
+        NSSound.beep()
+    }
+
     private func removeSessionSnapshots(threadIDs: [String]) {
         let deletedSet = Set(threadIDs)
         guard !deletedSet.isEmpty else { return }
@@ -5525,9 +5531,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func saveSessionRename() {
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
-            appendOutput(sessionRenameSelectionRequiredLogText())
-            setStatus(sessionSelectionRequiredStatusText())
-            NSSound.beep()
+            handleSessionSelectionRequired(logText: sessionRenameSelectionRequiredLogText())
             return
         }
 
@@ -5598,9 +5602,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func archiveSelectedSession() {
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
-            appendOutput(sessionArchiveSelectionRequiredLogText())
-            setStatus(sessionSelectionRequiredStatusText())
-            NSSound.beep()
+            handleSessionSelectionRequired(logText: sessionArchiveSelectionRequiredLogText())
             return
         }
 
@@ -5667,9 +5669,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func restoreSelectedSession() {
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
-            appendOutput(archivedSessionRestoreSelectionRequiredLogText())
-            setStatus(sessionSelectionRequiredStatusText())
-            NSSound.beep()
+            handleSessionSelectionRequired(logText: archivedSessionRestoreSelectionRequiredLogText())
             return
         }
 
@@ -5727,9 +5727,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func deleteSelectedSession() {
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
-            appendOutput(sessionDeleteSelectionRequiredLogText())
-            setStatus(sessionSelectionRequiredStatusText())
-            NSSound.beep()
+            handleSessionSelectionRequired(logText: sessionDeleteSelectionRequiredLogText())
             return
         }
 
@@ -5796,9 +5794,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func migrateSelectedSessionToCurrentProvider() {
         guard let session = selectedSessionSnapshot() else {
-            appendOutput(sessionProviderMigrationSelectionRequiredLogText())
-            setStatus(sessionSelectionRequiredStatusText())
-            NSSound.beep()
+            handleSessionSelectionRequired(logText: sessionProviderMigrationSelectionRequiredLogText())
             return
         }
         beginProviderMigrationLoading()
