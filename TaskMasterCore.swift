@@ -1684,3 +1684,82 @@ func formattedSessionStatusMetaText(
     parts.append("刷新: \(refreshText)")
     return parts.joined(separator: " | ")
 }
+
+func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
+    guard !normalizedQuery.isEmpty else { return true }
+    let candidates = [
+        sessionActualName(session),
+        sessionTypeLabel(session),
+        session.provider,
+        session.threadID,
+        sessionEffectiveTarget(session),
+        session.preview,
+        localizedSessionStatusLabel(session),
+        localizedSessionReason(session.reason)
+    ]
+    return candidates.contains { candidate in
+        candidate.localizedLowercase.contains(normalizedQuery)
+    }
+}
+
+func sessionMatchesFilterValues(
+    _ session: SessionSnapshot,
+    providerFilters: Set<String>,
+    typeFilters: Set<String>,
+    statusFilters: Set<String>,
+    terminalFilters: Set<String>,
+    ttyFilters: Set<String>
+) -> Bool {
+    if !providerFilters.isEmpty && !providerFilters.contains(sessionProviderDisplayValue(session)) {
+        return false
+    }
+    if !typeFilters.isEmpty && !typeFilters.contains(sessionTypeLabel(session)) {
+        return false
+    }
+    if !statusFilters.isEmpty && !statusFilters.contains(localizedSessionStatusLabel(session)) {
+        return false
+    }
+    if !terminalFilters.isEmpty && !terminalFilters.contains(sessionTerminalDisplayValue(session)) {
+        return false
+    }
+    if !ttyFilters.isEmpty && !ttyFilters.contains(sessionTTYDisplayValue(session)) {
+        return false
+    }
+    return true
+}
+
+func sessionProviderFilterOptions(from snapshots: [SessionSnapshot]) -> [String] {
+    var values = Set(snapshots.map(sessionProviderDisplayValue(_:)))
+    values.insert("-")
+    return values.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+}
+
+func sessionTypeFilterOptions(from snapshots: [SessionSnapshot]) -> [String] {
+    let base = ["CLI", "Subagent", "Exec", "Other"]
+    guard !snapshots.isEmpty else { return base }
+    let seen = Set(snapshots.map(sessionTypeLabel(_:)))
+    let extras = seen.subtracting(base).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    return base + extras
+}
+
+func sessionStatusFilterOptions(from snapshots: [SessionSnapshot]) -> [String] {
+    let base = ["空闲", "中断后空闲", "运行中", "状态滞后", "残留输入", "消息排队", "未知", "断联", "已归档"]
+    guard !snapshots.isEmpty else { return base }
+    let seen = Set(snapshots.map(localizedSessionStatusLabel(_:)))
+    let extras = seen.subtracting(base).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    return base + extras
+}
+
+func sessionTerminalFilterOptions(from snapshots: [SessionSnapshot]) -> [String] {
+    let base = ["可发送", "忙碌", "有残留输入", "不可达", "已归档", "未知"]
+    guard !snapshots.isEmpty else { return base }
+    let seen = Set(snapshots.map(sessionTerminalDisplayValue(_:)))
+    let extras = seen.subtracting(base).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    return base + extras
+}
+
+func sessionTTYFilterOptions(from snapshots: [SessionSnapshot]) -> [String] {
+    var ttyValues = Set(snapshots.map(sessionTTYDisplayValue(_:)))
+    ttyValues.insert("-")
+    return ttyValues.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+}

@@ -270,6 +270,7 @@
 - session 详情区预览/完整段落拼装下沉到 core formatter
 - session 详情区剩余包装函数从控制器中移除，直接消费 core formatter
 - session scope / empty state / search summary / meta label 文案下沉到 core formatter
+- session 快速搜索、筛选匹配与筛选选项生成规则下沉到 core
 
 下一步建议：
 

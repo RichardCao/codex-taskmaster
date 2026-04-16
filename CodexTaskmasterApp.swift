@@ -1970,88 +1970,29 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return sessionPromptSearchRevisionState == revision
     }
 
-    private func fastSessionMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
-        guard !normalizedQuery.isEmpty else { return true }
-        let candidates = [
-            sessionActualName(session),
-            sessionTypeLabel(session),
-            session.provider,
-            session.threadID,
-            sessionEffectiveTarget(session),
-            session.preview,
-            localizedSessionStatusLabel(session),
-            localizedSessionReason(session.reason)
-        ]
-        return candidates.contains { candidate in
-            candidate.localizedLowercase.contains(normalizedQuery)
-        }
-    }
-
     private func matchesSessionFilters(_ session: SessionSnapshot) -> Bool {
-        let providerValue = sessionProviderDisplayValue(session)
-        if !selectedSessionProviderFilters.isEmpty && !selectedSessionProviderFilters.contains(providerValue) {
-            return false
-        }
-
-        let typeValue = sessionTypeLabel(session)
-        if !selectedSessionTypeFilters.isEmpty && !selectedSessionTypeFilters.contains(typeValue) {
-            return false
-        }
-
-        let statusValue = localizedSessionStatusLabel(session)
-        if !selectedSessionStatusFilters.isEmpty && !selectedSessionStatusFilters.contains(statusValue) {
-            return false
-        }
-
-        let terminalValue = sessionTerminalDisplayValue(session)
-        if !selectedSessionTerminalFilters.isEmpty && !selectedSessionTerminalFilters.contains(terminalValue) {
-            return false
-        }
-
-        let ttyValue = sessionTTYDisplayValue(session)
-        if !selectedSessionTTYFilters.isEmpty && !selectedSessionTTYFilters.contains(ttyValue) {
-            return false
-        }
-
-        return true
-    }
-
-    private func sessionStatusOptionBaseOrder() -> [String] {
-        ["空闲", "中断后空闲", "运行中", "状态滞后", "残留输入", "消息排队", "未知", "断联", "已归档"]
-    }
-
-    private func sessionTerminalOptionBaseOrder() -> [String] {
-        ["可发送", "忙碌", "有残留输入", "不可达", "已归档", "未知"]
+        sessionMatchesFilterValues(
+            session,
+            providerFilters: selectedSessionProviderFilters,
+            typeFilters: selectedSessionTypeFilters,
+            statusFilters: selectedSessionStatusFilters,
+            terminalFilters: selectedSessionTerminalFilters,
+            ttyFilters: selectedSessionTTYFilters
+        )
     }
 
     private func sessionFilterOptions(for kind: SessionFilterKind) -> [String] {
         switch kind {
         case .provider:
-            var values = Set(allSessionSnapshots.map(sessionProviderDisplayValue(_:)))
-            values.insert("-")
-            return values.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            return sessionProviderFilterOptions(from: allSessionSnapshots)
         case .type:
-            let base = ["CLI", "Subagent", "Exec", "Other"]
-            guard !allSessionSnapshots.isEmpty else { return base }
-            let seen = Set(allSessionSnapshots.map(sessionTypeLabel(_:)))
-            let extras = seen.subtracting(base).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-            return base + extras
+            return sessionTypeFilterOptions(from: allSessionSnapshots)
         case .status:
-            let base = sessionStatusOptionBaseOrder()
-            guard !allSessionSnapshots.isEmpty else { return base }
-            let seen = Set(allSessionSnapshots.map(localizedSessionStatusLabel(_:)))
-            let extras = seen.subtracting(base).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-            return base + extras
+            return sessionStatusFilterOptions(from: allSessionSnapshots)
         case .terminal:
-            let base = sessionTerminalOptionBaseOrder()
-            guard !allSessionSnapshots.isEmpty else { return base }
-            let seen = Set(allSessionSnapshots.map(sessionTerminalDisplayValue(_:)))
-            let extras = seen.subtracting(base).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-            return base + extras
+            return sessionTerminalFilterOptions(from: allSessionSnapshots)
         case .tty:
-            var ttyValues = Set(allSessionSnapshots.map(sessionTTYDisplayValue(_:)))
-            ttyValues.insert("-")
-            return ttyValues.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            return sessionTTYFilterOptions(from: allSessionSnapshots)
         }
     }
 
@@ -2425,7 +2366,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         if normalizedQuery.isEmpty {
             fastMatches = allSessionSnapshots
         } else {
-            fastMatches = allSessionSnapshots.filter { fastSessionMatchesQuery($0, normalizedQuery: normalizedQuery) }
+            fastMatches = allSessionSnapshots.filter { sessionFastMatchesQuery($0, normalizedQuery: normalizedQuery) }
         }
 
         var matchedThreadIDs = Set(fastMatches.map(\.threadID))
