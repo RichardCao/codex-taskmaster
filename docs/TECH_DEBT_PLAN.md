@@ -278,6 +278,7 @@
 - session 扫描 meta label 文案下沉到 core formatter
 - session 扫描流程中的状态栏 / 日志文案下沉到 core formatter
 - session 状态刷新与 session scope 切换提示文案下沉到 core formatter
+- session 状态刷新结果分类收口为 core `SessionStatusRefreshResultKind`
 
 下一步建议：
 

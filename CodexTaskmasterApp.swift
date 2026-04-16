@@ -2147,13 +2147,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
             guard self.displayedSessionListMode == .active, !self.isSessionScanRunning else {
                 if showProgress {
-                    let text = sessionStatusRefreshCompletionText(failedCount: failedThreadIDs.count, totalCount: claimedSnapshots.count)
-                    if failedThreadIDs.isEmpty {
-                        self.setStatus(text, key: "scan")
-                    } else if failedThreadIDs.count == claimedSnapshots.count {
-                        self.setStatus(text, key: "scan", color: .systemRed)
-                    } else {
-                        self.setStatus(text, key: "scan", color: .systemOrange)
+                    let resultKind = sessionStatusRefreshResultKind(failedCount: failedThreadIDs.count, totalCount: claimedSnapshots.count)
+                    switch resultKind {
+                    case .success:
+                        self.setStatus(resultKind.text, key: "scan")
+                    case .failure:
+                        self.setStatus(resultKind.text, key: "scan", color: .systemRed)
+                    case .partialFailure:
+                        self.setStatus(resultKind.text, key: "scan", color: .systemOrange)
                     }
                 }
                 return
@@ -2161,13 +2162,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
             self.applyRefreshedSessionSnapshots(refreshedSnapshots, preserveSelectionThreadID: preservedSelectionThreadID)
             if showProgress {
-                let text = sessionStatusRefreshCompletionText(failedCount: failedThreadIDs.count, totalCount: claimedSnapshots.count)
-                if failedThreadIDs.isEmpty {
-                    self.setStatus(text, key: "scan")
-                } else if failedThreadIDs.count == claimedSnapshots.count {
-                    self.setStatus(text, key: "scan", color: .systemRed)
-                } else {
-                    self.setStatus(text, key: "scan", color: .systemOrange)
+                let resultKind = sessionStatusRefreshResultKind(failedCount: failedThreadIDs.count, totalCount: claimedSnapshots.count)
+                switch resultKind {
+                case .success:
+                    self.setStatus(resultKind.text, key: "scan")
+                case .failure:
+                    self.setStatus(resultKind.text, key: "scan", color: .systemRed)
+                case .partialFailure:
+                    self.setStatus(resultKind.text, key: "scan", color: .systemOrange)
                 }
             }
         }
@@ -2193,9 +2195,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     if showProgress {
                         switch result {
                         case .success:
-                            self.setStatus(sessionStatusRefreshCompletionText(failedCount: 0, totalCount: 1), key: "scan")
+                            self.setStatus(SessionStatusRefreshResultKind.success.text, key: "scan")
                         case .failure:
-                            self.setStatus(sessionStatusRefreshCompletionText(failedCount: 1, totalCount: 1), key: "scan", color: .systemRed)
+                            self.setStatus(SessionStatusRefreshResultKind.failure.text, key: "scan", color: .systemRed)
                         }
                     }
                     return
@@ -2203,7 +2205,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
                 guard case let .success(snapshots) = result else {
                     if showProgress {
-                        self.setStatus(sessionStatusRefreshCompletionText(failedCount: 1, totalCount: 1), key: "scan", color: .systemRed)
+                        self.setStatus(SessionStatusRefreshResultKind.failure.text, key: "scan", color: .systemRed)
                     }
                     return
                 }
@@ -2218,7 +2220,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 )
                 self.restoreSessionSelection(preferredThreadID: preservedSelectionThreadID)
                 if showProgress {
-                    self.setStatus(sessionStatusRefreshCompletionText(failedCount: 0, totalCount: 1), key: "scan")
+                    self.setStatus(SessionStatusRefreshResultKind.success.text, key: "scan")
                 }
             }
         }

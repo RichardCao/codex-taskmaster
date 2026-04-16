@@ -1785,14 +1785,31 @@ func sessionStatusRefreshRunningText() -> String {
     "刷新状态执行中…"
 }
 
-func sessionStatusRefreshCompletionText(failedCount: Int, totalCount: Int) -> String {
+enum SessionStatusRefreshResultKind {
+    case success
+    case failure
+    case partialFailure
+
+    var text: String {
+        switch self {
+        case .success:
+            return "刷新状态完成"
+        case .failure:
+            return "刷新状态失败"
+        case .partialFailure:
+            return "刷新状态部分失败"
+        }
+    }
+}
+
+func sessionStatusRefreshResultKind(failedCount: Int, totalCount: Int) -> SessionStatusRefreshResultKind {
     if failedCount == 0 {
-        return "刷新状态完成"
+        return .success
     }
     if failedCount == totalCount {
-        return "刷新状态失败"
+        return .failure
     }
-    return "刷新状态部分失败"
+    return .partialFailure
 }
 
 func sessionScopeChangeBlockedStatusText() -> String {
