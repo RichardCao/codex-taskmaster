@@ -2251,6 +2251,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         appendOutput(startLogText)
     }
 
+    private func handleSelectedSessionActionFailure(statusText: String, detail: String) {
+        setStatus(statusText, key: "action")
+        appendStderrDetailIfPresent(detail)
+        NSSound.beep()
+    }
+
     private func appendStderrDetailIfPresent(_ detail: String) {
         guard !detail.isEmpty else { return }
         appendOutput("stderr: \(detail)")
@@ -5597,9 +5603,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.setStatus(sessionRenameCompletionStatusText(), key: "action")
                     self.appendOutput(sessionRenameCompletionLogText(newName: newName))
                 } else {
-                    self.setStatus(sessionRenameFailureStatusText(), key: "action")
-                    self.appendStderrDetailIfPresent(result.error)
-                    NSSound.beep()
+                    self.handleSelectedSessionActionFailure(
+                        statusText: sessionRenameFailureStatusText(),
+                        detail: result.error
+                    )
                 }
             }
         }
@@ -5665,9 +5672,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.restoreSessionButton.isEnabled = false
                     self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.updateProviderMigrationButtons()
-                    self.setStatus(sessionArchiveFailureStatusText(), key: "action")
-                    self.appendStderrDetailIfPresent(result.error)
-                    NSSound.beep()
+                    self.handleSelectedSessionActionFailure(
+                        statusText: sessionArchiveFailureStatusText(),
+                        detail: result.error
+                    )
                 }
             }
         }
@@ -5724,9 +5732,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.restoreSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.updateProviderMigrationButtons()
-                    self.setStatus(sessionRestoreFailureStatusText(), key: "action")
-                    self.appendStderrDetailIfPresent(result.error)
-                    NSSound.beep()
+                    self.handleSelectedSessionActionFailure(
+                        statusText: sessionRestoreFailureStatusText(),
+                        detail: result.error
+                    )
                 }
             }
         }
@@ -5791,9 +5800,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                                 }
                             }
                             self.updateSessionDetailView()
-                            self.setStatus(sessionDeleteFailureStatusText(), key: "action")
-                            self.appendStderrDetailIfPresent(result.detail)
-                            NSSound.beep()
+                            self.handleSelectedSessionActionFailure(
+                                statusText: sessionDeleteFailureStatusText(),
+                                detail: result.detail
+                            )
                         }
                     }
                 }
