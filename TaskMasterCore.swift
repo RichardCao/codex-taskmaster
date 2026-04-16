@@ -1567,3 +1567,23 @@ func formattedRecentSendResultsText(results: [SendResultSnapshot], formatEpoch: 
         return lines.joined(separator: "\n")
     }.joined(separator: "\n\n")
 }
+
+func formattedLoopOccupancyText(loops: [LoopSnapshot], formatEpoch: (String) -> String) -> String {
+    guard !loops.isEmpty else {
+        return "相关 Loop\n无"
+    }
+
+    return (["相关 Loop"] + loops.map { loop in
+        let nextRun = loop.stopped == "yes" ? "-" : formatEpoch(loop.nextRunEpoch)
+        let reason = loopResultReasonLabel(loop)
+        var lines = [
+            "Target: \(loop.target)",
+            "状态: \(loopStateLabel(loop)) | 结果: \(loopResultLabel(loop))",
+            "间隔: \(loop.intervalSeconds)s | 模式: \(loop.forceSend == "yes" ? "force" : "idle") | 下次: \(nextRun)"
+        ]
+        if !reason.isEmpty {
+            lines.append("原因: \(reason)")
+        }
+        return lines.joined(separator: "\n")
+    }).joined(separator: "\n\n")
+}

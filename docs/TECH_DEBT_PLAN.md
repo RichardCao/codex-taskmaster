@@ -266,6 +266,7 @@
 - session provider / terminal / tty 显示值 fallback 下沉到 core formatter
 - session 详情区基础文案与最近发送统计文案继续下沉到 core formatter
 - loop 状态 / 结果 / 原因标签与排序 rank 下沉到 core formatter
+- session 详情区的 loop 占用文案下沉到 core formatter
 
 下一步建议：
 
