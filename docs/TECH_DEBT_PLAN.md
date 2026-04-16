@@ -298,6 +298,7 @@
 - provider migration loading 与计划完成按钮态收口到控制器 helper
 - provider migration 进入执行态的按钮/状态/日志切换收口到控制器 helper
 - session action 未选中 session 的日志/状态/beep 分支收口到控制器 helper
+- session action 进入执行态的按钮/状态/日志切换收口到控制器 helper
 
 下一步建议：
 

@@ -2245,6 +2245,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         )
     }
 
+    private func beginSelectedSessionAction(runningStatusText: String, startLogText: String) {
+        disableSelectedSessionActionControls()
+        setStatus(runningStatusText, key: "action")
+        appendOutput(startLogText)
+    }
+
     private func appendStderrDetailIfPresent(_ detail: String) {
         guard !detail.isEmpty else { return }
         appendOutput("stderr: \(detail)")
@@ -5543,9 +5549,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
         let newName = renameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        disableSelectedSessionActionControls()
-        setStatus(sessionRenameRunningStatusText(), key: "action")
-        appendOutput(sessionRenameStartLogText(threadID: session.threadID, newName: newName))
+        beginSelectedSessionAction(
+            runningStatusText: sessionRenameRunningStatusText(),
+            startLogText: sessionRenameStartLogText(threadID: session.threadID, newName: newName)
+        )
 
         DispatchQueue.global(qos: .userInitiated).async {
             let result = self.updateSessionName(threadID: session.threadID, newName: newName)
@@ -5630,9 +5637,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
 
-        disableSelectedSessionActionControls()
-        setStatus(sessionArchiveRunningStatusText(), key: "action")
-        appendOutput(sessionArchiveStartLogText(threadID: session.threadID))
+        beginSelectedSessionAction(
+            runningStatusText: sessionArchiveRunningStatusText(),
+            startLogText: sessionArchiveStartLogText(threadID: session.threadID)
+        )
 
         DispatchQueue.global(qos: .userInitiated).async {
             let result = self.archiveSession(threadID: session.threadID)
@@ -5695,9 +5703,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
 
-        disableSelectedSessionActionControls()
-        setStatus(sessionRestoreRunningStatusText(), key: "action")
-        appendOutput(sessionRestoreStartLogText(threadID: session.threadID))
+        beginSelectedSessionAction(
+            runningStatusText: sessionRestoreRunningStatusText(),
+            startLogText: sessionRestoreStartLogText(threadID: session.threadID)
+        )
 
         DispatchQueue.global(qos: .userInitiated).async {
             let result = self.unarchiveSession(threadID: session.threadID)
@@ -5757,10 +5766,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     return
                 }
 
-                self.disableSelectedSessionActionControls()
-                self.setStatus(sessionDeleteRunningStatusText(), key: "action")
                 let targetThreadIDs = deletionPlan.includeDescendants ? ([session.threadID] + deletionPlan.descendantIDs) : [session.threadID]
-                self.appendOutput(sessionDeleteStartLogText(threadIDs: targetThreadIDs))
+                self.beginSelectedSessionAction(
+                    runningStatusText: sessionDeleteRunningStatusText(),
+                    startLogText: sessionDeleteStartLogText(threadIDs: targetThreadIDs)
+                )
 
                 DispatchQueue.global(qos: .userInitiated).async {
                     let orderedThreadIDs = deletionPlan.includeDescendants ? (deletionPlan.descendantIDs.reversed() + [session.threadID]) : [session.threadID]
