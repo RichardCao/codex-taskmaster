@@ -1001,8 +1001,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private lazy var archiveSessionButton = makeButton(title: "归档", action: #selector(archiveSelectedSession))
     private lazy var restoreSessionButton = makeButton(title: "恢复", action: #selector(restoreSelectedSession))
     private lazy var deleteSessionButton = makeButton(title: "删除", action: #selector(deleteSelectedSession))
-    private lazy var migrateSessionProviderButton = makeButton(title: "迁移当前会话", action: #selector(migrateSelectedSessionToCurrentProvider))
-    private lazy var migrateAllSessionsProviderButton = makeButton(title: "迁移全部会话", action: #selector(migrateAllSessionsToCurrentProvider))
+    private lazy var migrateSessionProviderButton = makeButton(title: sessionProviderMigrationButtonTitle(), action: #selector(migrateSelectedSessionToCurrentProvider))
+    private lazy var migrateAllSessionsProviderButton = makeButton(title: allSessionProviderMigrationButtonTitle(), action: #selector(migrateAllSessionsToCurrentProvider))
     private lazy var clearLogButton = makeButton(title: "清空日志", action: #selector(clearActivityLog))
     private lazy var saveLogButton = makeButton(title: "保存日志", action: #selector(saveActivityLog))
     private lazy var exportSessionLogButton = makeButton(title: "导出当前 Session", action: #selector(exportSelectedSessionLogs))
@@ -1253,8 +1253,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         archiveSessionButton.toolTip = "按 Codex 原生语义归档当前 session"
         restoreSessionButton.toolTip = archivedSessionRestoreTooltipText()
         deleteSessionButton.toolTip = "从本地状态中彻底删除当前 session"
-        migrateSessionProviderButton.toolTip = "将当前选中 session 迁移到当前 config.toml 中的 model_provider"
-        migrateAllSessionsProviderButton.toolTip = "将本地所有 session 迁移到当前 config.toml 中的 model_provider"
+        migrateSessionProviderButton.toolTip = sessionProviderMigrationTooltipText()
+        migrateAllSessionsProviderButton.toolTip = allSessionProviderMigrationTooltipText()
 
         [renameField, saveRenameButton, archiveSessionButton, restoreSessionButton, deleteSessionButton].forEach {
             sessionRenameRow.addArrangedSubview($0)

@@ -2283,6 +2283,22 @@ func allSessionProviderMigrationFailureStatusText() -> String {
     "迁移全部 Session Provider 失败"
 }
 
+func sessionProviderMigrationButtonTitle() -> String {
+    "迁移当前会话"
+}
+
+func allSessionProviderMigrationButtonTitle() -> String {
+    "迁移全部会话"
+}
+
+func sessionProviderMigrationTooltipText() -> String {
+    "将当前选中 session 迁移到当前 config.toml 中的 model_provider"
+}
+
+func allSessionProviderMigrationTooltipText() -> String {
+    "将本地所有 session 迁移到当前 config.toml 中的 model_provider"
+}
+
 func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
     guard !normalizedQuery.isEmpty else { return true }
     let candidates = [
