@@ -1768,6 +1768,44 @@ enum SessionFilterKind: String {
     }
 }
 
+struct SessionFilterSelections {
+    var provider = Set<String>()
+    var type = Set<String>()
+    var status = Set<String>()
+    var terminal = Set<String>()
+    var tty = Set<String>()
+
+    func values(for kind: SessionFilterKind) -> Set<String> {
+        switch kind {
+        case .provider:
+            return provider
+        case .type:
+            return type
+        case .status:
+            return status
+        case .terminal:
+            return terminal
+        case .tty:
+            return tty
+        }
+    }
+
+    mutating func setValues(_ values: Set<String>, for kind: SessionFilterKind) {
+        switch kind {
+        case .provider:
+            provider = values
+        case .type:
+            type = values
+        case .status:
+            status = values
+        case .terminal:
+            terminal = values
+        case .tty:
+            tty = values
+        }
+    }
+}
+
 func sessionFilterOptionsForKind(_ kind: SessionFilterKind, from snapshots: [SessionSnapshot]) -> [String] {
     switch kind {
     case .provider:

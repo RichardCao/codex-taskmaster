@@ -274,6 +274,7 @@
 - session scope 相关控制器包装函数移除，直接消费 core formatter
 - session filter 面板哨兵项、标题和选中切换规则下沉到 core
 - session filter kind 类型、列映射与按 kind 取筛选项规则下沉到 core
+- session filter 选中状态收口为 core `SessionFilterSelections`
 
 下一步建议：
 

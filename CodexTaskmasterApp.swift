@@ -948,11 +948,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let tableCellVerticalPadding: CGFloat = 6
     private let tableBaseRowHeight: CGFloat = 24
     private let tableWrappedRowHeightCap: CGFloat = 110
-    private var selectedSessionStatusFilters = Set<String>()
-    private var selectedSessionProviderFilters = Set<String>()
-    private var selectedSessionTypeFilters = Set<String>()
-    private var selectedSessionTerminalFilters = Set<String>()
-    private var selectedSessionTTYFilters = Set<String>()
+    private var sessionFilterSelections = SessionFilterSelections()
     private let sessionFilterContainerView = NSView()
     private let sessionFilterStackView = NSStackView()
     private let sessionScanControlLock = NSLock()
@@ -1934,11 +1930,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func matchesSessionFilters(_ session: SessionSnapshot) -> Bool {
         sessionMatchesFilterValues(
             session,
-            providerFilters: selectedSessionProviderFilters,
-            typeFilters: selectedSessionTypeFilters,
-            statusFilters: selectedSessionStatusFilters,
-            terminalFilters: selectedSessionTerminalFilters,
-            ttyFilters: selectedSessionTTYFilters
+            providerFilters: sessionFilterSelections.provider,
+            typeFilters: sessionFilterSelections.type,
+            statusFilters: sessionFilterSelections.status,
+            terminalFilters: sessionFilterSelections.terminal,
+            ttyFilters: sessionFilterSelections.tty
         )
     }
 
@@ -1947,33 +1943,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func selectedFilterValues(for kind: SessionFilterKind) -> Set<String> {
-        switch kind {
-        case .provider:
-            return selectedSessionProviderFilters
-        case .type:
-            return selectedSessionTypeFilters
-        case .status:
-            return selectedSessionStatusFilters
-        case .terminal:
-            return selectedSessionTerminalFilters
-        case .tty:
-            return selectedSessionTTYFilters
-        }
+        sessionFilterSelections.values(for: kind)
     }
 
     private func setSelectedFilterValues(_ values: Set<String>, for kind: SessionFilterKind) {
-        switch kind {
-        case .provider:
-            selectedSessionProviderFilters = values
-        case .type:
-            selectedSessionTypeFilters = values
-        case .status:
-            selectedSessionStatusFilters = values
-        case .terminal:
-            selectedSessionTerminalFilters = values
-        case .tty:
-            selectedSessionTTYFilters = values
-        }
+        sessionFilterSelections.setValues(values, for: kind)
         updateSessionFilterHeaderIndicators()
     }
 
