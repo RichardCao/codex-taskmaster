@@ -1728,6 +1728,61 @@ func sessionMatchesFilterValues(
     return true
 }
 
+enum SessionFilterKind: String {
+    case provider
+    case type
+    case status
+    case terminal
+    case tty
+
+    init?(columnIdentifier: String) {
+        switch columnIdentifier {
+        case "provider":
+            self = .provider
+        case "type":
+            self = .type
+        case "status":
+            self = .status
+        case "terminalState":
+            self = .terminal
+        case "tty":
+            self = .tty
+        default:
+            return nil
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .provider:
+            return "Provider"
+        case .type:
+            return "类型"
+        case .status:
+            return "Status"
+        case .terminal:
+            return "Terminal"
+        case .tty:
+            return "TTY"
+        }
+    }
+}
+
+func sessionFilterOptionsForKind(_ kind: SessionFilterKind, from snapshots: [SessionSnapshot]) -> [String] {
+    switch kind {
+    case .provider:
+        return sessionProviderFilterOptions(from: snapshots)
+    case .type:
+        return sessionTypeFilterOptions(from: snapshots)
+    case .status:
+        return sessionStatusFilterOptions(from: snapshots)
+    case .terminal:
+        return sessionTerminalFilterOptions(from: snapshots)
+    case .tty:
+        return sessionTTYFilterOptions(from: snapshots)
+    }
+}
+
 func sessionProviderFilterOptions(from snapshots: [SessionSnapshot]) -> [String] {
     var values = Set(snapshots.map(sessionProviderDisplayValue(_:)))
     values.insert("-")

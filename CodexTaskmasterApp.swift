@@ -819,29 +819,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         case archived
     }
 
-    private enum SessionFilterKind: String {
-        case provider
-        case type
-        case status
-        case terminal
-        case tty
-
-        var title: String {
-            switch self {
-            case .provider:
-                return "Provider"
-            case .type:
-                return "类型"
-            case .status:
-                return "Status"
-            case .terminal:
-                return "Terminal"
-            case .tty:
-                return "TTY"
-            }
-        }
-    }
-
     private struct ActivityLogEntry {
         let timestamp: Date
         let sourceText: String
@@ -1966,18 +1943,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func sessionFilterOptions(for kind: SessionFilterKind) -> [String] {
-        switch kind {
-        case .provider:
-            return sessionProviderFilterOptions(from: allSessionSnapshots)
-        case .type:
-            return sessionTypeFilterOptions(from: allSessionSnapshots)
-        case .status:
-            return sessionStatusFilterOptions(from: allSessionSnapshots)
-        case .terminal:
-            return sessionTerminalFilterOptions(from: allSessionSnapshots)
-        case .tty:
-            return sessionTTYFilterOptions(from: allSessionSnapshots)
-        }
+        sessionFilterOptionsForKind(kind, from: allSessionSnapshots)
     }
 
     private func selectedFilterValues(for kind: SessionFilterKind) -> Set<String> {
@@ -2012,20 +1978,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func sessionFilterKind(for columnIdentifier: String) -> SessionFilterKind? {
-        switch columnIdentifier {
-        case "provider":
-            return .provider
-        case "type":
-            return .type
-        case "status":
-            return .status
-        case "terminalState":
-            return .terminal
-        case "tty":
-            return .tty
-        default:
-            return nil
-        }
+        SessionFilterKind(columnIdentifier: columnIdentifier)
     }
 
     private func updateSessionFilterHeaderIndicators() {
