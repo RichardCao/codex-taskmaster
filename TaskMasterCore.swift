@@ -1908,6 +1908,96 @@ func sessionRenameFailureStatusText() -> String {
     "保存名称失败"
 }
 
+func sessionArchiveSelectionRequiredLogText() -> String {
+    "请先选择一条 session，再归档。"
+}
+
+func sessionArchiveAlreadyArchivedLogText() -> String {
+    "这条 session 已经归档。"
+}
+
+func sessionArchiveAlreadyArchivedStatusText() -> String {
+    "该 session 已归档"
+}
+
+func sessionArchiveAlertTitle() -> String {
+    "归档这个 Session？"
+}
+
+func sessionArchiveAlertText(threadID: String, target: String, matchingLoopTargets: [String]) -> String {
+    var informativeText = """
+    这会调用 Codex 原生的 thread/archive。
+    归档后该 session 会从当前非归档列表中消失，但后续仍可恢复。
+
+    Session ID: \(threadID)
+    Target: \(target)
+    """
+    if !matchingLoopTargets.isEmpty {
+        informativeText += """
+
+        
+        警告：当前有循环任务仍可能指向这个 session：
+        \(matchingLoopTargets.joined(separator: ", "))
+        归档后这些循环不会自动停止。
+        """
+    }
+    return informativeText
+}
+
+func sessionArchiveRunningStatusText() -> String {
+    "归档 Session 中…"
+}
+
+func sessionArchiveStartLogText(threadID: String) -> String {
+    "执行 归档 Session: thread_id=\(threadID)"
+}
+
+func sessionArchiveCompletionStatusText() -> String {
+    "归档 Session 完成"
+}
+
+func sessionArchiveFailureStatusText() -> String {
+    "归档 Session 失败"
+}
+
+func sessionRestoreNonArchivedSelectionLogText() -> String {
+    "当前选择的 session 不在已归档列表中。"
+}
+
+func sessionRestoreAlertTitle() -> String {
+    "恢复这个已归档 Session？"
+}
+
+func sessionRestoreAlertText(threadID: String, name: String) -> String {
+    """
+    这会调用 Codex 原生的 thread/unarchive。
+    恢复后该 session 会重新回到普通 session 列表中。
+
+    Session ID: \(threadID)
+    Name: \(name)
+    """
+}
+
+func sessionRestoreRunningStatusText() -> String {
+    "恢复归档中…"
+}
+
+func sessionRestoreStartLogText(threadID: String) -> String {
+    "执行 恢复归档: thread_id=\(threadID)"
+}
+
+func sessionRestoreCompletionStatusText() -> String {
+    "恢复归档完成"
+}
+
+func sessionRestoreCompletionLogText(threadID: String) -> String {
+    "已恢复归档 session: \(threadID)"
+}
+
+func sessionRestoreFailureStatusText() -> String {
+    "恢复归档失败"
+}
+
 func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
     guard !normalizedQuery.isEmpty else { return true }
     let candidates = [

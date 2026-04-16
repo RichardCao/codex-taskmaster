@@ -5577,7 +5577,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func archiveSelectedSession() {
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
-            appendOutput("请先选择一条 session，再归档。")
+            appendOutput(sessionArchiveSelectionRequiredLogText())
             setStatus("请选择一个 session")
             NSSound.beep()
             return
@@ -5585,32 +5585,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         let session = sessionSnapshots[selectedRow]
         guard !session.isArchived else {
-            appendOutput("这条 session 已经归档。")
-            setStatus("该 session 已归档", key: "action")
+            appendOutput(sessionArchiveAlreadyArchivedLogText())
+            setStatus(sessionArchiveAlreadyArchivedStatusText(), key: "action")
             NSSound.beep()
             return
         }
         let matchingLoopTargets = loopTargetsAffectingSession(session)
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "归档这个 Session？"
-        var informativeText = """
-        这会调用 Codex 原生的 thread/archive。
-        归档后该 session 会从当前非归档列表中消失，但后续仍可恢复。
-
-        Session ID: \(session.threadID)
-        Target: \(sessionEffectiveTarget(session))
-        """
-        if !matchingLoopTargets.isEmpty {
-            informativeText += """
-
-            
-            警告：当前有循环任务仍可能指向这个 session：
-            \(matchingLoopTargets.joined(separator: ", "))
-            归档后这些循环不会自动停止。
-            """
-        }
-        alert.informativeText = informativeText
+        alert.messageText = sessionArchiveAlertTitle()
+        alert.informativeText = sessionArchiveAlertText(
+            threadID: session.threadID,
+            target: sessionEffectiveTarget(session),
+            matchingLoopTargets: matchingLoopTargets
+        )
         alert.addButton(withTitle: "归档")
         alert.addButton(withTitle: "取消")
         alert.buttons.first?.hasDestructiveAction = true
@@ -5626,8 +5614,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         migrateSessionProviderButton.isEnabled = false
         migrateAllSessionsProviderButton.isEnabled = false
         renameField.isEnabled = false
-        setStatus("归档 Session 中…", key: "action")
-        appendOutput("执行 归档 Session: thread_id=\(session.threadID)")
+        setStatus(sessionArchiveRunningStatusText(), key: "action")
+        appendOutput(sessionArchiveStartLogText(threadID: session.threadID))
 
         DispatchQueue.global(qos: .userInitiated).async {
             let result = self.archiveSession(threadID: session.threadID)
@@ -5645,7 +5633,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                         totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.allSessionSnapshots.count,
                         isComplete: true
                     )
-                    self.setStatus("归档 Session 完成", key: "action")
+                    self.setStatus(sessionArchiveCompletionStatusText(), key: "action")
                     self.appendOutput(archivedSessionCompletionLogText(threadID: session.threadID))
                     self.refreshLoopsSnapshot()
                 } else {
@@ -5662,7 +5650,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.restoreSessionButton.isEnabled = false
                     self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.updateProviderMigrationButtons()
-                    self.setStatus("归档 Session 失败", key: "action")
+                    self.setStatus(sessionArchiveFailureStatusText(), key: "action")
                     self.appendOutput("stderr: \(result.error)")
                     NSSound.beep()
                 }
@@ -5682,7 +5670,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         let session = sessionSnapshots[selectedRow]
         guard session.isArchived else {
-            appendOutput("当前选择的 session 不在已归档列表中。")
+            appendOutput(sessionRestoreNonArchivedSelectionLogText())
             setStatus(archivedSessionRestoreSelectionRequiredStatusText(), key: "action")
             NSSound.beep()
             return
@@ -5690,14 +5678,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "恢复这个已归档 Session？"
-        alert.informativeText = """
-        这会调用 Codex 原生的 thread/unarchive。
-        恢复后该 session 会重新回到普通 session 列表中。
-
-        Session ID: \(session.threadID)
-        Name: \(sessionActualName(session).isEmpty ? "-" : sessionActualName(session))
-        """
+        alert.messageText = sessionRestoreAlertTitle()
+        alert.informativeText = sessionRestoreAlertText(
+            threadID: session.threadID,
+            name: sessionActualName(session).isEmpty ? "-" : sessionActualName(session)
+        )
         alert.addButton(withTitle: "恢复")
         alert.addButton(withTitle: "取消")
 
@@ -5712,8 +5697,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         migrateSessionProviderButton.isEnabled = false
         migrateAllSessionsProviderButton.isEnabled = false
         renameField.isEnabled = false
-        setStatus("恢复归档中…", key: "action")
-        appendOutput("执行 恢复归档: thread_id=\(session.threadID)")
+        setStatus(sessionRestoreRunningStatusText(), key: "action")
+        appendOutput(sessionRestoreStartLogText(threadID: session.threadID))
 
         DispatchQueue.global(qos: .userInitiated).async {
             let result = self.unarchiveSession(threadID: session.threadID)
@@ -5731,8 +5716,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                         totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.allSessionSnapshots.count,
                         isComplete: true
                     )
-                    self.setStatus("恢复归档完成", key: "action")
-                    self.appendOutput("已恢复归档 session: \(session.threadID)")
+                    self.setStatus(sessionRestoreCompletionStatusText(), key: "action")
+                    self.appendOutput(sessionRestoreCompletionLogText(threadID: session.threadID))
                     self.refreshLoopsSnapshot()
                 } else {
                     self.renameField.isEnabled = false
@@ -5741,7 +5726,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.restoreSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
                     self.updateProviderMigrationButtons()
-                    self.setStatus("恢复归档失败", key: "action")
+                    self.setStatus(sessionRestoreFailureStatusText(), key: "action")
                     self.appendOutput("stderr: \(result.error)")
                     NSSound.beep()
                 }
