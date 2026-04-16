@@ -288,6 +288,7 @@
 - archive / restore session 的 action 文案与确认框文案下沉到 core formatter
 - delete session 的 action 文案与确认框文案下沉到 core formatter
 - 当前 session provider 迁移动作文案与确认框文案下沉到 core formatter
+- 全部 session provider 迁移动作文案与确认框文案下沉到 core formatter
 
 下一步建议：
 

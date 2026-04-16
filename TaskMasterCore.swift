@@ -2231,6 +2231,58 @@ func sessionProviderMigrationFailureStatusText() -> String {
     "迁移 Session Provider 失败"
 }
 
+func allSessionProviderMigrationPlanFailureLogText() -> String {
+    "读取全部 session provider 迁移计划失败。"
+}
+
+func allSessionProviderMigrationNoopAlertText(targetProvider: String, totalThreads: Int) -> String {
+    """
+    本地所有会话的 Provider 已经是目标值。
+
+    目标 Provider: \(targetProvider)
+    会话总数: \(totalThreads)
+    """
+}
+
+func allSessionProviderMigrationNoopLogText(targetProvider: String) -> String {
+    "全部迁移已取消：所有 session 的 provider 已经是 \(targetProvider)。"
+}
+
+func allSessionProviderMigrationAlertTitle() -> String {
+    "将所有 Session 迁移到当前 Provider？"
+}
+
+func allSessionProviderMigrationAlertText(targetProvider: String, totalThreads: Int, migrateNeeded: Int) -> String {
+    """
+    当前 Provider: \(targetProvider)
+    本地 Session 总数: \(totalThreads)
+    需要迁移的 Session 数: \(migrateNeeded)
+
+    这会直接改写本地 state_5.sqlite 中的 threads.model_provider。
+    不会改写 source，也不会重写 rollout 文件。
+    """
+}
+
+func allSessionProviderMigrationCancelledStatusText() -> String {
+    "迁移全部 Session Provider 已取消"
+}
+
+func allSessionProviderMigrationRunningStatusText() -> String {
+    "迁移全部 Session Provider 中…"
+}
+
+func allSessionProviderMigrationStartLogText(targetProvider: String) -> String {
+    "执行 全部迁移 Session Provider: target_provider=\(targetProvider)"
+}
+
+func allSessionProviderMigrationCompletionStatusText() -> String {
+    "迁移全部 Session Provider 完成"
+}
+
+func allSessionProviderMigrationFailureStatusText() -> String {
+    "迁移全部 Session Provider 失败"
+}
+
 func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
     guard !normalizedQuery.isEmpty else { return true }
     let candidates = [

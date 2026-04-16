@@ -5918,27 +5918,27 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func migrateAllSessionsToCurrentProvider() {
         setButtonsEnabled(false)
-        setStatus("读取当前 Provider 中…", key: "action")
+        setStatus(sessionProviderLoadingStatusText(), key: "action")
 
         refreshConfiguredModelProviderCache(updateButtons: false) { targetProvider in
             guard let targetProvider else {
                 self.setButtonsEnabled(true)
                 self.updateProviderMigrationButtons()
-                self.appendOutput("未能从 ~/.codex/config.toml 读取当前 model_provider。")
-                self.setStatus("当前 provider 未配置", key: "action")
+                self.appendOutput(sessionProviderMissingLogText())
+                self.setStatus(sessionProviderMissingStatusText(), key: "action")
                 NSSound.beep()
                 return
             }
 
-            self.setStatus("读取迁移计划中…", key: "action")
+            self.setStatus(sessionProviderMigrationPlanLoadingStatusText(), key: "action")
 
             self.allSessionProviderPlanAsync(targetProvider: targetProvider) { plan in
                 self.setButtonsEnabled(true)
                 self.updateProviderMigrationButtons()
 
                 guard let plan else {
-                    self.appendOutput("读取全部 session provider 迁移计划失败。")
-                    self.setStatus("读取迁移计划失败", key: "action")
+                    self.appendOutput(allSessionProviderMigrationPlanFailureLogText())
+                    self.setStatus(sessionProviderMigrationPlanFailureStatusText(), key: "action")
                     NSSound.beep()
                     return
                 }
@@ -5949,42 +5949,37 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 if migrateNeeded == 0 {
                     let alert = NSAlert()
                     alert.alertStyle = .informational
-                    alert.messageText = "无需迁移"
-                    alert.informativeText = """
-                    本地所有会话的 Provider 已经是目标值。
-
-                    目标 Provider: \(targetProvider)
-                    会话总数: \(totalThreads)
-                    """
+                    alert.messageText = sessionProviderMigrationNoopAlertTitle()
+                    alert.informativeText = allSessionProviderMigrationNoopAlertText(
+                        targetProvider: targetProvider,
+                        totalThreads: totalThreads
+                    )
                     alert.addButton(withTitle: "确定")
                     alert.runModal()
-                    self.appendOutput("全部迁移已取消：所有 session 的 provider 已经是 \(targetProvider)。")
-                    self.setStatus("无需迁移", key: "action")
+                    self.appendOutput(allSessionProviderMigrationNoopLogText(targetProvider: targetProvider))
+                    self.setStatus(noMigrationNeededStatusText(), key: "action")
                     return
                 }
 
                 let alert = NSAlert()
                 alert.alertStyle = .warning
-                alert.messageText = "将所有 Session 迁移到当前 Provider？"
-                alert.informativeText = """
-                当前 Provider: \(targetProvider)
-                本地 Session 总数: \(totalThreads)
-                需要迁移的 Session 数: \(migrateNeeded)
-
-                这会直接改写本地 state_5.sqlite 中的 threads.model_provider。
-                不会改写 source，也不会重写 rollout 文件。
-                """
+                alert.messageText = allSessionProviderMigrationAlertTitle()
+                alert.informativeText = allSessionProviderMigrationAlertText(
+                    targetProvider: targetProvider,
+                    totalThreads: totalThreads,
+                    migrateNeeded: migrateNeeded
+                )
                 alert.addButton(withTitle: "全部迁移")
                 alert.addButton(withTitle: "取消")
                 alert.buttons.first?.hasDestructiveAction = true
                 guard alert.runModal() == .alertFirstButtonReturn else {
-                    self.setStatus("迁移全部 Session Provider 已取消", key: "action")
+                    self.setStatus(allSessionProviderMigrationCancelledStatusText(), key: "action")
                     return
                 }
 
                 self.setButtonsEnabled(false)
-                self.setStatus("迁移全部 Session Provider 中…", key: "action")
-                self.appendOutput("执行 全部迁移 Session Provider: target_provider=\(targetProvider)")
+                self.setStatus(allSessionProviderMigrationRunningStatusText(), key: "action")
+                self.appendOutput(allSessionProviderMigrationStartLogText(targetProvider: targetProvider))
 
                 DispatchQueue.global(qos: .userInitiated).async {
                     let result = self.migrateAllSessionsProvider(targetProvider: targetProvider)
@@ -5992,11 +5987,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                         self.setButtonsEnabled(true)
                         self.updateProviderMigrationButtons()
                         if result.success {
-                            self.setStatus("迁移全部 Session Provider 完成", key: "action")
+                            self.setStatus(allSessionProviderMigrationCompletionStatusText(), key: "action")
                             self.appendOutput(result.detail)
                             self.detectStatuses()
                         } else {
-                            self.setStatus("迁移全部 Session Provider 失败", key: "action")
+                            self.setStatus(allSessionProviderMigrationFailureStatusText(), key: "action")
                             self.appendOutput("stderr: \(result.detail)")
                             NSSound.beep()
                         }
