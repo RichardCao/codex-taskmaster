@@ -2947,60 +2947,22 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "彻底删除这个 Session？"
-        var informativeText = """
-        这是本地不可恢复删除，不是 Codex 当前公开的原生 archive/unarchive 语义。
-        本次删除计划会按固定步骤处理：
-        1. 删除 state_5.sqlite 中的 thread 主记录与相关扩展状态
-        2. 删除日志数据库中的 thread 日志
-        3. 删除 session_index.jsonl 中对应的 rename/name 记录
-        4. 删除当前 rollout 文件并尝试清理空目录
-
-        已知风险：
-        - 目前没有公开的 Codex 原生永久删除 API，这是一种本地硬删除
-        - 删除后通常无法恢复
-        - 如果中途失败，界面会显示失败步骤和 repair 提示，不再静默半成功
-
-        Session ID: \(session.threadID)
-        Name: \(sessionActualName(session).isEmpty ? "-" : sessionActualName(session))
-        当前路径: \(rolloutPath.isEmpty ? "-" : rolloutPath)
-
-        本次预计删除内容：
-        - state_5.sqlite thread 日志行: \(stateLogRows)
-        - state_5.sqlite 动态工具行: \(dynamicToolRows)
-        - state_5.sqlite stage1 输出行: \(stage1OutputRows)
-        - logs 数据库日志行: \(logsDBRows)
-        - session_index 记录数: \(sessionIndexEntries)
-        - rollout 文件存在: \(rolloutExists ? "是" : "否")
-        """
-        if parentThreadID != "-" {
-            informativeText += """
-
-
-            提示：这条 session 有父 agent：
-            \(parentThreadID)
-            默认不会删除父 agent。
-            """
-        }
-        if directChildCount > 0 || descendantCount > 0 {
-            informativeText += """
-
-
-            这条 session 下还有子 agent 会话。
-            直接子会话数: \(directChildCount)
-            递归子会话总数: \(descendantCount)
-            """
-        }
-        if !matchingLoopTargets.isEmpty {
-            informativeText += """
-
-            
-            警告：当前有循环任务仍可能指向这个 session：
-            \(matchingLoopTargets.joined(separator: ", "))
-            删除后这些循环不会自动停止，后续只会继续失败或延期。
-            """
-        }
-        alert.informativeText = informativeText
+        alert.messageText = sessionDeleteAlertTitle()
+        alert.informativeText = sessionDeleteAlertText(
+            threadID: session.threadID,
+            name: sessionActualName(session).isEmpty ? "-" : sessionActualName(session),
+            rolloutPath: rolloutPath,
+            stateLogRows: stateLogRows,
+            dynamicToolRows: dynamicToolRows,
+            stage1OutputRows: stage1OutputRows,
+            logsDBRows: logsDBRows,
+            sessionIndexEntries: sessionIndexEntries,
+            rolloutExists: rolloutExists,
+            parentThreadID: parentThreadID,
+            directChildCount: directChildCount,
+            descendantCount: descendantCount,
+            matchingLoopTargets: matchingLoopTargets
+        )
         if descendantCount > 0 {
             alert.addButton(withTitle: "删除当前和子会话")
             alert.addButton(withTitle: "只删当前")
@@ -5738,7 +5700,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func deleteSelectedSession() {
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
-            appendOutput("请先选择一条 session，再删除。")
+            appendOutput(sessionDeleteSelectionRequiredLogText())
             setStatus("请选择一个 session")
             NSSound.beep()
             return
@@ -5747,15 +5709,15 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let session = sessionSnapshots[selectedRow]
         let matchingLoopTargets = loopTargetsAffectingSession(session)
         setButtonsEnabled(false)
-        setStatus("读取删除计划中…", key: "action")
+        setStatus(sessionDeletePlanLoadingStatusText(), key: "action")
 
         sessionFamilyPlanAsync(threadID: session.threadID) { familyPlan in
             self.sessionDeletePlanAsync(threadID: session.threadID) { deletePlan in
                 self.setButtonsEnabled(true)
 
                 guard let deletePlan else {
-                    self.setStatus("读取删除计划失败", key: "action")
-                    self.appendOutput("读取删除计划失败：helper 未返回 thread-delete-plan。")
+                    self.setStatus(sessionDeletePlanLoadingFailureStatusText(), key: "action")
+                    self.appendOutput(sessionDeletePlanLoadingFailureLogText())
                     NSSound.beep()
                     return
                 }
@@ -5766,7 +5728,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     familyPlan: familyPlan,
                     deletePlan: deletePlan
                 ) else {
-                    self.setStatus("彻底删除已取消", key: "action")
+                    self.setStatus(sessionDeleteCancelledStatusText(), key: "action")
                     return
                 }
 
@@ -5777,9 +5739,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.migrateSessionProviderButton.isEnabled = false
                 self.migrateAllSessionsProviderButton.isEnabled = false
                 self.renameField.isEnabled = false
-                self.setStatus("彻底删除中…", key: "action")
+                self.setStatus(sessionDeleteRunningStatusText(), key: "action")
                 let targetThreadIDs = deletionPlan.includeDescendants ? ([session.threadID] + deletionPlan.descendantIDs) : [session.threadID]
-                self.appendOutput("执行 彻底删除: thread_ids=\(targetThreadIDs.joined(separator: ","))")
+                self.appendOutput(sessionDeleteStartLogText(threadIDs: targetThreadIDs))
 
                 DispatchQueue.global(qos: .userInitiated).async {
                     let orderedThreadIDs = deletionPlan.includeDescendants ? (deletionPlan.descendantIDs.reversed() + [session.threadID]) : [session.threadID]
@@ -5799,8 +5761,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                                 totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.allSessionSnapshots.count,
                                 isComplete: true
                             )
-                            self.setStatus("彻底删除完成", key: "action")
-                            self.appendOutput(result.detail.isEmpty ? "已彻底删除 session: \(orderedThreadIDs.joined(separator: ","))" : "已彻底删除 session: \(result.detail)")
+                            self.setStatus(sessionDeleteCompletionStatusText(), key: "action")
+                            self.appendOutput(sessionDeleteCompletionLogText(detail: result.detail, deletedThreadIDs: orderedThreadIDs))
                             self.refreshLoopsSnapshot()
                         } else {
                             if let fields = result.failedFields {
@@ -5811,7 +5773,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                                 }
                             }
                             self.updateSessionDetailView()
-                            self.setStatus("彻底删除失败", key: "action")
+                            self.setStatus(sessionDeleteFailureStatusText(), key: "action")
                             self.appendOutput("stderr: \(result.detail)")
                             NSSound.beep()
                         }

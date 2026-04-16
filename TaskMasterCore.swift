@@ -1998,6 +1998,120 @@ func sessionRestoreFailureStatusText() -> String {
     "恢复归档失败"
 }
 
+func sessionDeleteAlertTitle() -> String {
+    "彻底删除这个 Session？"
+}
+
+func sessionDeleteAlertText(
+    threadID: String,
+    name: String,
+    rolloutPath: String,
+    stateLogRows: Int,
+    dynamicToolRows: Int,
+    stage1OutputRows: Int,
+    logsDBRows: Int,
+    sessionIndexEntries: Int,
+    rolloutExists: Bool,
+    parentThreadID: String,
+    directChildCount: Int,
+    descendantCount: Int,
+    matchingLoopTargets: [String]
+) -> String {
+    var informativeText = """
+    这是本地不可恢复删除，不是 Codex 当前公开的原生 archive/unarchive 语义。
+    本次删除计划会按固定步骤处理：
+    1. 删除 state_5.sqlite 中的 thread 主记录与相关扩展状态
+    2. 删除日志数据库中的 thread 日志
+    3. 删除 session_index.jsonl 中对应的 rename/name 记录
+    4. 删除当前 rollout 文件并尝试清理空目录
+
+    已知风险：
+    - 目前没有公开的 Codex 原生永久删除 API，这是一种本地硬删除
+    - 删除后通常无法恢复
+    - 如果中途失败，界面会显示失败步骤和 repair 提示，不再静默半成功
+
+    Session ID: \(threadID)
+    Name: \(name)
+    当前路径: \(rolloutPath.isEmpty ? "-" : rolloutPath)
+
+    本次预计删除内容：
+    - state_5.sqlite thread 日志行: \(stateLogRows)
+    - state_5.sqlite 动态工具行: \(dynamicToolRows)
+    - state_5.sqlite stage1 输出行: \(stage1OutputRows)
+    - logs 数据库日志行: \(logsDBRows)
+    - session_index 记录数: \(sessionIndexEntries)
+    - rollout 文件存在: \(rolloutExists ? "是" : "否")
+    """
+    if parentThreadID != "-" {
+        informativeText += """
+
+
+        提示：这条 session 有父 agent：
+        \(parentThreadID)
+        默认不会删除父 agent。
+        """
+    }
+    if directChildCount > 0 || descendantCount > 0 {
+        informativeText += """
+
+
+        这条 session 下还有子 agent 会话。
+        直接子会话数: \(directChildCount)
+        递归子会话总数: \(descendantCount)
+        """
+    }
+    if !matchingLoopTargets.isEmpty {
+        informativeText += """
+
+        
+        警告：当前有循环任务仍可能指向这个 session：
+        \(matchingLoopTargets.joined(separator: ", "))
+        删除后这些循环不会自动停止，后续只会继续失败或延期。
+        """
+    }
+    return informativeText
+}
+
+func sessionDeleteSelectionRequiredLogText() -> String {
+    "请先选择一条 session，再删除。"
+}
+
+func sessionDeletePlanLoadingStatusText() -> String {
+    "读取删除计划中…"
+}
+
+func sessionDeletePlanLoadingFailureStatusText() -> String {
+    "读取删除计划失败"
+}
+
+func sessionDeletePlanLoadingFailureLogText() -> String {
+    "读取删除计划失败：helper 未返回 thread-delete-plan。"
+}
+
+func sessionDeleteCancelledStatusText() -> String {
+    "彻底删除已取消"
+}
+
+func sessionDeleteRunningStatusText() -> String {
+    "彻底删除中…"
+}
+
+func sessionDeleteStartLogText(threadIDs: [String]) -> String {
+    "执行 彻底删除: thread_ids=\(threadIDs.joined(separator: ","))"
+}
+
+func sessionDeleteCompletionStatusText() -> String {
+    "彻底删除完成"
+}
+
+func sessionDeleteCompletionLogText(detail: String, deletedThreadIDs: [String]) -> String {
+    detail.isEmpty ? "已彻底删除 session: \(deletedThreadIDs.joined(separator: ","))" : "已彻底删除 session: \(detail)"
+}
+
+func sessionDeleteFailureStatusText() -> String {
+    "彻底删除失败"
+}
+
 func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
     guard !normalizedQuery.isEmpty else { return true }
     let candidates = [
