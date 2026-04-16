@@ -4979,8 +4979,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         isSessionScanRunning = false
         updateDetectStatusButtonState()
-        setStatus("检测会话已停止", key: "scan")
-        appendOutput("已请求停止检测会话。")
+        setStatus(sessionScanStoppedStatusText(), key: "scan")
+        appendOutput(sessionScanStoppedLogText())
         if sessionScanTotal > 0 {
             renderSessionSnapshots(scannedCount: allSessionSnapshots.count, totalCount: sessionScanTotal, isComplete: false)
             sessionStatusMetaLabel.stringValue += " | 已停止"
@@ -5048,8 +5048,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionScanTotal = 0
         sessionStatusRefreshCoordinator.clear()
         updateDetectStatusButtonState()
-        setStatus("检测会话执行中…", key: "scan")
-        appendOutput("执行 检测会话: session-count + probe-all batches")
+        setStatus(sessionScanRunningStatusText(), key: "scan")
+        appendOutput(sessionScanStartLogText())
         invalidateSessionSearch(resetPromptCache: true)
         sessionStatusMetaLabel.stringValue = sessionScanPreparingMetaText()
 
@@ -5075,7 +5075,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.activeSessionScanMode = nil
                     self.updateDetectStatusButtonState()
                     self.sessionStatusMetaLabel.stringValue = sessionScanFailureMetaText(detail: failureDetail)
-                    self.setStatus("检测会话失败", key: "scan", color: .systemRed)
+                    self.setStatus(sessionScanFailureStatusText(), key: "scan", color: .systemRed)
                     if !failureDetail.isEmpty {
                         self.appendOutput("stderr: \(failureDetail)")
                     }
@@ -5094,7 +5094,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.sessionSnapshots = []
                     self.sessionStatusMetaLabel.stringValue = sessionScanEmptyMetaText()
                     self.sessionStatusTableView.reloadData()
-                    self.setStatus("检测会话完成", key: "scan")
+                    self.setStatus(sessionScanCompletionStatusText(), key: "scan")
                 } else {
                     self.sessionStatusMetaLabel.stringValue = sessionScanProgressMetaText(scannedCount: 0, totalCount: totalCount)
                     self.sessionStatusTableView.reloadData()
@@ -5143,7 +5143,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.allSessionSnapshots = pendingSnapshots
                     self.renderSessionSnapshots(scannedCount: scannedCount, totalCount: totalCount, isComplete: scannedCount >= totalCount)
                     if scannedCount < totalCount {
-                        self.setStatus("检测会话执行中… \(scannedCount)/\(totalCount)", key: "scan")
+                        self.setStatus(sessionScanProgressStatusText(scannedCount: scannedCount, totalCount: totalCount), key: "scan")
                     }
                 }
 
@@ -5159,7 +5159,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 if encounteredFailure {
                     self.renderSessionSnapshots(scannedCount: scannedCount, totalCount: totalCount, isComplete: false)
                     self.sessionStatusMetaLabel.stringValue += sessionScanPartialFailureSuffix()
-                    self.setStatus("检测会话部分失败", key: "scan", color: .systemOrange)
+                    self.setStatus(sessionScanPartialFailureStatusText(), key: "scan", color: .systemOrange)
                     if !failureDetail.isEmpty {
                         self.appendOutput("stderr: \(failureDetail)")
                     }
@@ -5172,8 +5172,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 for snapshot in self.loadedActiveSessionSnapshotsForStatusRefresh() {
                     self.sessionStatusRefreshCoordinator.scheduleNext(for: snapshot, from: completionDate)
                 }
-                self.setStatus("检测会话完成", key: "scan")
-                self.appendOutput("检测到 \(self.sessionSnapshots.count) 个 session 状态。")
+                self.setStatus(sessionScanCompletionStatusText(), key: "scan")
+                self.appendOutput(sessionScanCompletionLogText(count: self.sessionSnapshots.count))
             }
         }
     }
@@ -5186,8 +5186,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionScanTotal = 0
         sessionStatusRefreshCoordinator.clear()
         updateDetectStatusButtonState()
-        setStatus("读取已归档 session 中…", key: "scan")
-        appendOutput("执行 检测会话: thread-list --archived")
+        setStatus(archivedSessionLoadingStatusText(), key: "scan")
+        appendOutput(archivedSessionStartLogText())
         invalidateSessionSearch(resetPromptCache: true)
         sessionStatusMetaLabel.stringValue = archivedSessionLoadingMetaText()
 
@@ -5213,7 +5213,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                         failureDetail = ""
                     }
                     self.sessionStatusMetaLabel.stringValue = archivedSessionFailureMetaText(detail: failureDetail)
-                    self.setStatus("读取已归档 session 失败", key: "scan")
+                    self.setStatus(archivedSessionFailureStatusText(), key: "scan")
                     if !failureDetail.isEmpty {
                         self.appendOutput("stderr: \(failureDetail)")
                     }
@@ -5223,8 +5223,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.allSessionSnapshots = snapshots
                 self.sessionScanTotal = snapshots.count
                 self.renderSessionSnapshots(scannedCount: snapshots.count, totalCount: snapshots.count, isComplete: true)
-                self.setStatus("已加载已归档 session", key: "scan")
-                self.appendOutput("检测到 \(snapshots.count) 个已归档 session。")
+                self.setStatus(archivedSessionCompletionStatusText(), key: "scan")
+                self.appendOutput(archivedSessionCompletionLogText(count: snapshots.count))
             }
         }
     }

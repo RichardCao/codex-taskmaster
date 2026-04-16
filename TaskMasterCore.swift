@@ -1717,6 +1717,62 @@ func archivedSessionFailureMetaText(detail: String) -> String {
     "视图: 已归档 | 读取失败: \(detail)"
 }
 
+func sessionScanStoppedStatusText() -> String {
+    "检测会话已停止"
+}
+
+func sessionScanStoppedLogText() -> String {
+    "已请求停止检测会话。"
+}
+
+func sessionScanRunningStatusText() -> String {
+    "检测会话执行中…"
+}
+
+func sessionScanStartLogText() -> String {
+    "执行 检测会话: session-count + probe-all batches"
+}
+
+func sessionScanFailureStatusText() -> String {
+    "检测会话失败"
+}
+
+func sessionScanCompletionStatusText() -> String {
+    "检测会话完成"
+}
+
+func sessionScanProgressStatusText(scannedCount: Int, totalCount: Int) -> String {
+    "检测会话执行中… \(scannedCount)/\(totalCount)"
+}
+
+func sessionScanPartialFailureStatusText() -> String {
+    "检测会话部分失败"
+}
+
+func sessionScanCompletionLogText(count: Int) -> String {
+    "检测到 \(count) 个 session 状态。"
+}
+
+func archivedSessionLoadingStatusText() -> String {
+    "读取已归档 session 中…"
+}
+
+func archivedSessionStartLogText() -> String {
+    "执行 检测会话: thread-list --archived"
+}
+
+func archivedSessionFailureStatusText() -> String {
+    "读取已归档 session 失败"
+}
+
+func archivedSessionCompletionStatusText() -> String {
+    "已加载已归档 session"
+}
+
+func archivedSessionCompletionLogText(count: Int) -> String {
+    "检测到 \(count) 个已归档 session。"
+}
+
 func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
     guard !normalizedQuery.isEmpty else { return true }
     let candidates = [
