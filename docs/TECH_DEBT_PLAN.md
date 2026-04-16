@@ -293,6 +293,7 @@
 - session action 通用选择提示与操作区禁用状态收口到 core formatter / 控制器 helper
 - session action 失败 stderr 输出收口到控制器单点 helper
 - session action 成功后的列表移除与重渲染收口到控制器单点 helper
+- provider migration 缺失 provider 与计划加载失败 UI 分支收口到控制器 helper
 
 下一步建议：
 

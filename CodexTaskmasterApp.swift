@@ -2244,6 +2244,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         appendOutput("stderr: \(detail)")
     }
 
+    private func handleProviderMigrationMissingProvider() {
+        setButtonsEnabled(true)
+        updateProviderMigrationButtons()
+        appendOutput(sessionProviderMissingLogText())
+        setStatus(sessionProviderMissingStatusText(), key: "action")
+        NSSound.beep()
+    }
+
+    private func handleProviderMigrationPlanFailure(logText: String) {
+        appendOutput(logText)
+        setStatus(sessionProviderMigrationPlanFailureStatusText(), key: "action")
+        NSSound.beep()
+    }
+
     private func applySessionStatusRefreshResult(_ resultKind: SessionStatusRefreshResultKind) {
         switch resultKind {
         case .success:
@@ -5757,11 +5771,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         refreshConfiguredModelProviderCache(updateButtons: false) { targetProvider in
             guard let targetProvider else {
-                self.setButtonsEnabled(true)
-                self.updateProviderMigrationButtons()
-                self.appendOutput(sessionProviderMissingLogText())
-                self.setStatus(sessionProviderMissingStatusText(), key: "action")
-                NSSound.beep()
+                self.handleProviderMigrationMissingProvider()
                 return
             }
 
@@ -5772,9 +5782,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.updateProviderMigrationButtons()
 
                 guard let plan else {
-                    self.appendOutput(sessionProviderMigrationPlanFailureLogText())
-                    self.setStatus(sessionProviderMigrationPlanFailureStatusText(), key: "action")
-                    NSSound.beep()
+                    self.handleProviderMigrationPlanFailure(logText: sessionProviderMigrationPlanFailureLogText())
                     return
                 }
 
@@ -5883,11 +5891,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         refreshConfiguredModelProviderCache(updateButtons: false) { targetProvider in
             guard let targetProvider else {
-                self.setButtonsEnabled(true)
-                self.updateProviderMigrationButtons()
-                self.appendOutput(sessionProviderMissingLogText())
-                self.setStatus(sessionProviderMissingStatusText(), key: "action")
-                NSSound.beep()
+                self.handleProviderMigrationMissingProvider()
                 return
             }
 
@@ -5898,9 +5902,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.updateProviderMigrationButtons()
 
                 guard let plan else {
-                    self.appendOutput(allSessionProviderMigrationPlanFailureLogText())
-                    self.setStatus(sessionProviderMigrationPlanFailureStatusText(), key: "action")
-                    NSSound.beep()
+                    self.handleProviderMigrationPlanFailure(logText: allSessionProviderMigrationPlanFailureLogText())
                     return
                 }
 
