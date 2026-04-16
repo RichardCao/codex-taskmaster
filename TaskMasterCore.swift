@@ -1587,3 +1587,33 @@ func formattedLoopOccupancyText(loops: [LoopSnapshot], formatEpoch: (String) -> 
         return lines.joined(separator: "\n")
     }).joined(separator: "\n\n")
 }
+
+func formattedSessionDetailPreviewDocument(
+    sessionDetailText: String,
+    sendStatsText: String,
+    loopOccupancyText: String
+) -> String {
+    [
+        sessionDetailText,
+        sendStatsText,
+        loopOccupancyText,
+        "最近发送结果\n加载中…",
+        "提示词历史\n加载中…"
+    ].joined(separator: "\n\n")
+}
+
+func formattedSessionDetailDocument(
+    sessionDetailText: String,
+    sendStatsText: String,
+    loopOccupancyText: String,
+    sendResultsText: String,
+    historyText: String
+) -> String {
+    [
+        sessionDetailText,
+        sendStatsText,
+        loopOccupancyText,
+        sendResultsText,
+        "提示词历史\n\(historyText)"
+    ].joined(separator: "\n\n")
+}

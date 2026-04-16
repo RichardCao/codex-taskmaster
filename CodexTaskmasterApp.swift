@@ -2988,13 +2988,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             ? "已归档 session 需先恢复后再改名"
             : "输入新名称，留空可恢复为未 rename 状态"
         let sendResults = recentSendResults(for: session)
-        let initialDetailText = [
-            sessionDetailText(for: session),
-            recentSendStatsText(for: sendResults),
-            loopOccupancyText(for: session),
-            "最近发送结果\n加载中…",
-            "提示词历史\n加载中…"
-        ].joined(separator: "\n\n")
+        let initialDetailText = formattedSessionDetailPreviewDocument(
+            sessionDetailText: sessionDetailText(for: session),
+            sendStatsText: recentSendStatsText(for: sendResults),
+            loopOccupancyText: loopOccupancyText(for: session)
+        )
         let shouldResetForInitialText = lastSessionDetailThreadID != session.threadID || lastSessionDetailText != initialDetailText
         if sessionDetailView.string != initialDetailText {
             sessionDetailView.string = initialDetailText
@@ -3016,13 +3014,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         DispatchQueue.global(qos: .utility).async {
             let historyText = self.loadPromptHistoryText(for: session)
             let sendResults = self.recentSendResults(for: session)
-            let detailText = [
-                self.sessionDetailText(for: session),
-                self.recentSendStatsText(for: sendResults),
-                self.loopOccupancyText(for: session),
-                self.recentSendResultsText(for: sendResults),
-                "提示词历史\n\(historyText)"
-            ].joined(separator: "\n\n")
+            let detailText = formattedSessionDetailDocument(
+                sessionDetailText: self.sessionDetailText(for: session),
+                sendStatsText: self.recentSendStatsText(for: sendResults),
+                loopOccupancyText: self.loopOccupancyText(for: session),
+                sendResultsText: self.recentSendResultsText(for: sendResults),
+                historyText: historyText
+            )
 
             DispatchQueue.main.async {
                 guard self.sessionDetailLoadGeneration == generation else { return }
