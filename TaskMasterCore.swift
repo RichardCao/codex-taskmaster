@@ -1832,6 +1832,14 @@ func sessionScopeChangedLogText(requestedScopeText: String, displayedScopeText: 
     "已切换 Session Status 视图到\(requestedScopeText)；当前列表仍显示上次\(displayedScopeText)检测结果，点击“检测会话”后刷新。"
 }
 
+func sessionStatusInitialMetaText() -> String {
+    "点击“检测会话”加载 session 列表。"
+}
+
+func detectSessionButtonTitle(isRunning: Bool) -> String {
+    isRunning ? "停止检测" : "检测会话"
+}
+
 func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
     guard !normalizedQuery.isEmpty else { return true }
     let candidates = [

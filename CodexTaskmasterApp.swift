@@ -893,7 +893,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private let statusLabel = NSTextField(labelWithString: "就绪")
     private let activeLoopsMetaLabel = NSTextField(labelWithString: "暂无循环。")
     private let activeLoopsWarningLabel = NSTextField(labelWithString: "")
-    private let sessionStatusMetaLabel = NSTextField(labelWithString: "点击“检测会话”加载 session 列表。")
+    private let sessionStatusMetaLabel = NSTextField(labelWithString: sessionStatusInitialMetaText())
     private let activityLogMetaLabel = NSTextField(labelWithString: "显示 0 / 0")
     private var refreshTimer: Timer?
     private var requestTimer: Timer?
@@ -4037,7 +4037,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func updateDetectStatusButtonState() {
-        detectStatusButton.title = isSessionScanRunning ? "停止检测" : "检测会话"
+        detectStatusButton.title = detectSessionButtonTitle(isRunning: isSessionScanRunning)
         detectStatusButton.isEnabled = true
         refreshSessionStatusButton.isEnabled = true
     }
