@@ -2222,6 +2222,23 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         renameField.isEnabled = false
     }
 
+    private func removeSessionSnapshots(threadIDs: [String]) {
+        let deletedSet = Set(threadIDs)
+        guard !deletedSet.isEmpty else { return }
+        let deletedCount = deletedSet.count
+        allSessionSnapshots.removeAll { deletedSet.contains($0.threadID) }
+        sessionSnapshots.removeAll { deletedSet.contains($0.threadID) }
+        if sessionScanTotal > 0 {
+            sessionScanTotal = max(0, sessionScanTotal - deletedCount)
+        }
+        invalidateSessionSearch()
+        renderSessionSnapshots(
+            scannedCount: allSessionSnapshots.count,
+            totalCount: sessionScanTotal > 0 ? sessionScanTotal : allSessionSnapshots.count,
+            isComplete: true
+        )
+    }
+
     private func appendStderrDetailIfPresent(_ detail: String) {
         guard !detail.isEmpty else { return }
         appendOutput("stderr: \(detail)")
@@ -5571,17 +5588,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
             DispatchQueue.main.async {
                 if result.success {
-                    self.allSessionSnapshots.removeAll { $0.threadID == session.threadID }
-                    self.sessionSnapshots.removeAll { $0.threadID == session.threadID }
-                    if self.sessionScanTotal > 0 {
-                        self.sessionScanTotal = max(0, self.sessionScanTotal - 1)
-                    }
-                    self.invalidateSessionSearch()
-                    self.renderSessionSnapshots(
-                        scannedCount: self.allSessionSnapshots.count,
-                        totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.allSessionSnapshots.count,
-                        isComplete: true
-                    )
+                    self.removeSessionSnapshots(threadIDs: [session.threadID])
                     self.setStatus(sessionArchiveCompletionStatusText(), key: "action")
                     self.appendOutput(archivedSessionCompletionLogText(threadID: session.threadID))
                     self.refreshLoopsSnapshot()
@@ -5648,17 +5655,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
             DispatchQueue.main.async {
                 if result.success {
-                    self.allSessionSnapshots.removeAll { $0.threadID == session.threadID }
-                    self.sessionSnapshots.removeAll { $0.threadID == session.threadID }
-                    if self.sessionScanTotal > 0 {
-                        self.sessionScanTotal = max(0, self.sessionScanTotal - 1)
-                    }
-                    self.invalidateSessionSearch()
-                    self.renderSessionSnapshots(
-                        scannedCount: self.allSessionSnapshots.count,
-                        totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.allSessionSnapshots.count,
-                        isComplete: true
-                    )
+                    self.removeSessionSnapshots(threadIDs: [session.threadID])
                     self.setStatus(sessionRestoreCompletionStatusText(), key: "action")
                     self.appendOutput(sessionRestoreCompletionLogText(threadID: session.threadID))
                     self.refreshLoopsSnapshot()
@@ -5724,18 +5721,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
                     DispatchQueue.main.async {
                         if result.success {
-                            let deletedSet = Set(orderedThreadIDs)
-                            self.allSessionSnapshots.removeAll { deletedSet.contains($0.threadID) }
-                            self.sessionSnapshots.removeAll { deletedSet.contains($0.threadID) }
-                            if self.sessionScanTotal > 0 {
-                                self.sessionScanTotal = max(0, self.sessionScanTotal - orderedThreadIDs.count)
-                            }
-                            self.invalidateSessionSearch()
-                            self.renderSessionSnapshots(
-                                scannedCount: self.allSessionSnapshots.count,
-                                totalCount: self.sessionScanTotal > 0 ? self.sessionScanTotal : self.allSessionSnapshots.count,
-                                isComplete: true
-                            )
+                            self.removeSessionSnapshots(threadIDs: orderedThreadIDs)
                             self.setStatus(sessionDeleteCompletionStatusText(), key: "action")
                             self.appendOutput(sessionDeleteCompletionLogText(detail: result.detail, deletedThreadIDs: orderedThreadIDs))
                             self.refreshLoopsSnapshot()
