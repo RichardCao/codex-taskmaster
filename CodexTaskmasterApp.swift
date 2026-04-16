@@ -3791,10 +3791,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionFilterPanel?.isVisible == true
     }
 
-    private func sessionFilterItems(for kind: SessionFilterKind) -> [String] {
-        ["__all__"] + sessionFilterOptions(for: kind)
-    }
-
     @objc
     private func handleSessionFilterCheckbox(_ sender: NSButton) {
         guard let item = sender.identifier?.rawValue else { return }
@@ -3802,7 +3798,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func makeSessionFilterCheckbox(item: String, selected: Bool) -> NSButton {
-        let button = NSButton(checkboxWithTitle: item == "__all__" ? "全部" : item, target: self, action: #selector(handleSessionFilterCheckbox(_:)))
+        let button = NSButton(checkboxWithTitle: sessionFilterItemTitle(item), target: self, action: #selector(handleSessionFilterCheckbox(_:)))
         button.identifier = NSUserInterfaceItemIdentifier(item)
         button.state = selected ? .on : .off
         button.setButtonType(.switch)
@@ -3816,17 +3812,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func toggleSessionFilterSelection(item: String) {
         guard let kind = sessionFilterPanelKind else { return }
-        if item == "__all__" {
-            setSelectedFilterValues([], for: kind)
-        } else {
-            var selections = selectedFilterValues(for: kind)
-            if selections.contains(item) {
-                selections.remove(item)
-            } else {
-                selections.insert(item)
-            }
-            setSelectedFilterValues(selections, for: kind)
-        }
+        let selections = toggledSessionFilterValues(selectedFilterValues(for: kind), item: item)
+        setSelectedFilterValues(selections, for: kind)
 
         rebuildSessionFilterPanel(kind: kind)
         renderSessionSnapshots(
@@ -3904,10 +3891,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
         let width = max(sessionFilterPanel?.frame.width ?? 220, 180)
 
-        let items = sessionFilterItems(for: kind)
+        let items = sessionFilterPanelItems(options: sessionFilterOptions(for: kind))
         let selectedValues = selectedFilterValues(for: kind)
         for item in items {
-            let isSelected = item == "__all__" ? selectedValues.isEmpty : selectedValues.contains(item)
+            let isSelected = isSessionFilterItemSelected(item, selectedValues: selectedValues)
             let checkbox = makeSessionFilterCheckbox(item: item, selected: isSelected)
             sessionFilterStackView.addArrangedSubview(checkbox)
         }

@@ -1763,3 +1763,29 @@ func sessionTTYFilterOptions(from snapshots: [SessionSnapshot]) -> [String] {
     ttyValues.insert("-")
     return ttyValues.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
 }
+
+let sessionFilterAllToken = "__all__"
+
+func sessionFilterPanelItems(options: [String]) -> [String] {
+    [sessionFilterAllToken] + options
+}
+
+func sessionFilterItemTitle(_ item: String) -> String {
+    item == sessionFilterAllToken ? "全部" : item
+}
+
+func toggledSessionFilterValues(_ values: Set<String>, item: String) -> Set<String> {
+    guard item != sessionFilterAllToken else { return [] }
+
+    var updatedValues = values
+    if updatedValues.contains(item) {
+        updatedValues.remove(item)
+    } else {
+        updatedValues.insert(item)
+    }
+    return updatedValues
+}
+
+func isSessionFilterItemSelected(_ item: String, selectedValues: Set<String>) -> Bool {
+    item == sessionFilterAllToken ? selectedValues.isEmpty : selectedValues.contains(item)
+}
