@@ -2212,6 +2212,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
+    private func finishSessionScanUIState() {
+        isSessionScanRunning = false
+        activeSessionScanMode = nil
+        updateDetectStatusButtonState()
+    }
+
     private func applySessionStatusRefreshResult(_ resultKind: SessionStatusRefreshResultKind) {
         switch resultKind {
         case .success:
@@ -4978,8 +4984,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             process.terminate()
         }
 
-        isSessionScanRunning = false
-        updateDetectStatusButtonState()
+        finishSessionScanUIState()
         setStatus(sessionScanStoppedStatusText(), key: "scan")
         appendOutput(sessionScanStoppedLogText())
         if sessionScanTotal > 0 {
@@ -4989,7 +4994,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             sessionStatusMetaLabel.stringValue = sessionScanStoppedMetaText(isArchived: stoppedMode == .archived)
             sessionStatusTableView.reloadData()
         }
-        activeSessionScanMode = nil
     }
 
     private func requestLoopSnapshotRefresh() {
@@ -5072,9 +5076,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 }
                 DispatchQueue.main.async {
                     guard self.isCurrentSessionScan(generation) else { return }
-                    self.isSessionScanRunning = false
-                    self.activeSessionScanMode = nil
-                    self.updateDetectStatusButtonState()
+                    self.finishSessionScanUIState()
                     self.sessionStatusMetaLabel.stringValue = sessionScanFailureMetaText(detail: failureDetail)
                     self.setStatus(sessionScanFailureStatusText(), key: "scan", color: .systemRed)
                     if !failureDetail.isEmpty {
@@ -5088,9 +5090,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 guard self.isCurrentSessionScan(generation) else { return }
                 self.sessionScanTotal = totalCount
                 if totalCount == 0 {
-                    self.isSessionScanRunning = false
-                    self.activeSessionScanMode = nil
-                    self.updateDetectStatusButtonState()
+                    self.finishSessionScanUIState()
                     self.allSessionSnapshots = []
                     self.sessionSnapshots = []
                     self.sessionStatusMetaLabel.stringValue = sessionScanEmptyMetaText()
@@ -5153,9 +5153,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
             DispatchQueue.main.async {
                 guard self.isCurrentSessionScan(generation) else { return }
-                self.isSessionScanRunning = false
-                self.activeSessionScanMode = nil
-                self.updateDetectStatusButtonState()
+                self.finishSessionScanUIState()
 
                 if encounteredFailure {
                     self.renderSessionSnapshots(scannedCount: scannedCount, totalCount: totalCount, isComplete: false)
@@ -5201,9 +5199,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
             DispatchQueue.main.async {
                 guard self.isCurrentSessionScan(generation) else { return }
-                self.isSessionScanRunning = false
-                self.activeSessionScanMode = nil
-                self.updateDetectStatusButtonState()
+                self.finishSessionScanUIState()
 
                 guard case let .success(snapshots) = result else {
                     let failureDetail: String
