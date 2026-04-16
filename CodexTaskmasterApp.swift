@@ -1109,7 +1109,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         normalizeInitialIntervalValue()
         configureSessionFilterPopover()
         updateSessionFilterHeaderIndicators()
-        sessionStatusMetaLabel.stringValue = displayedSessionEmptyStateText()
+        sessionStatusMetaLabel.stringValue = sessionEmptyStateText(isArchived: displayedSessionListMode == .archived)
         updateDetectStatusButtonState()
         stopButton.isEnabled = false
         resumeLoopButton.isEnabled = false
@@ -1922,22 +1922,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionScopeControl.selectedSegment == 1 ? .archived : .active
     }
 
-    private func sessionScopeText(for mode: SessionListMode) -> String {
-        sessionScopeDisplayText(isArchived: mode == .archived)
-    }
-
-    private func requestedSessionScopeText() -> String {
-        sessionScopeText(for: currentSessionListMode())
-    }
-
-    private func displayedSessionScopeText() -> String {
-        sessionScopeText(for: displayedSessionListMode)
-    }
-
-    private func displayedSessionEmptyStateText() -> String {
-        sessionEmptyStateText(isArchived: displayedSessionListMode == .archived)
-    }
-
     private func currentSessionSearchQuery() -> String {
         sessionSearchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -2119,8 +2103,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func updateSessionStatusMetaLabel() {
         sessionStatusMetaLabel.stringValue = formattedSessionStatusMetaText(
             allSessionCount: allSessionSnapshots.count,
-            scopeText: displayedSessionScopeText(),
-            emptyStateText: displayedSessionEmptyStateText(),
+            scopeText: sessionScopeDisplayText(isArchived: displayedSessionListMode == .archived),
+            emptyStateText: sessionEmptyStateText(isArchived: displayedSessionListMode == .archived),
             sessionScanRunning: isSessionScanRunning,
             scannedCount: lastSessionRenderScannedCount,
             totalCount: lastSessionRenderTotalCount,
@@ -5087,7 +5071,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             renderSessionSnapshots(scannedCount: allSessionSnapshots.count, totalCount: sessionScanTotal, isComplete: false)
             sessionStatusMetaLabel.stringValue += " | 已停止"
         } else {
-            sessionStatusMetaLabel.stringValue = "视图: \(sessionScopeText(for: stoppedMode)) | 检测已停止。"
+            sessionStatusMetaLabel.stringValue = "视图: \(sessionScopeDisplayText(isArchived: stoppedMode == .archived)) | 检测已停止。"
             sessionStatusTableView.reloadData()
         }
         activeSessionScanMode = nil
@@ -5484,20 +5468,22 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             let activeMode = activeSessionScanMode ?? displayedSessionListMode
             sessionScopeControl.selectedSegment = activeMode == .archived ? 1 : 0
             setStatus("请等待当前检测完成或手动停止后再切换", key: "scan", color: .systemOrange)
-            appendOutput("检测会话仍在进行中，已保持当前视图为\(sessionScopeText(for: activeMode))。")
+            appendOutput("检测会话仍在进行中，已保持当前视图为\(sessionScopeDisplayText(isArchived: activeMode == .archived))。")
             return
         }
 
         guard requestedMode != displayedSessionListMode else {
-            setStatus("当前视图切换为\(displayedSessionScopeText())", key: "scan")
+            setStatus("当前视图切换为\(sessionScopeDisplayText(isArchived: displayedSessionListMode == .archived))", key: "scan")
             return
         }
 
         invalidateSessionSearch(resetPromptCache: true)
         sessionStatusTableView.reloadData()
         updateSessionDetailView()
-        setStatus("已切换到\(requestedSessionScopeText())视图，点击“检测会话”刷新", key: "scan", color: .systemOrange)
-        appendOutput("已切换 Session Status 视图到\(requestedSessionScopeText())；当前列表仍显示上次\(displayedSessionScopeText())检测结果，点击“检测会话”后刷新。")
+        let requestedScopeText = sessionScopeDisplayText(isArchived: requestedMode == .archived)
+        let displayedScopeText = sessionScopeDisplayText(isArchived: displayedSessionListMode == .archived)
+        setStatus("已切换到\(requestedScopeText)视图，点击“检测会话”刷新", key: "scan", color: .systemOrange)
+        appendOutput("已切换 Session Status 视图到\(requestedScopeText)；当前列表仍显示上次\(displayedScopeText)检测结果，点击“检测会话”后刷新。")
     }
 
     @objc

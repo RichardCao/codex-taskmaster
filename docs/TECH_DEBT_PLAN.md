@@ -271,6 +271,7 @@
 - session 详情区剩余包装函数从控制器中移除，直接消费 core formatter
 - session scope / empty state / search summary / meta label 文案下沉到 core formatter
 - session 快速搜索、筛选匹配与筛选选项生成规则下沉到 core
+- session scope 相关控制器包装函数移除，直接消费 core formatter
 
 下一步建议：
 
