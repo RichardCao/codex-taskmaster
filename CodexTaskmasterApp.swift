@@ -2228,6 +2228,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func handleLoopSelectionRequired() {
+        appendOutput("请先在 Active Loops 中选择一条循环任务。")
+        setStatus("请选择一个循环任务")
+        NSSound.beep()
+    }
+
     private func removeSessionSnapshots(threadIDs: [String]) {
         let deletedSet = Set(threadIDs)
         guard !deletedSet.isEmpty else { return }
@@ -5471,9 +5477,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func stopLoop() {
         guard let loop = selectedLoopSnapshot() else {
-            appendOutput("请先在 Active Loops 中选择一条循环任务。")
-            setStatus("请选择一个循环任务")
-            NSSound.beep()
+            handleLoopSelectionRequired()
             return
         }
         guard loop.stopped != "yes" else {
@@ -5499,9 +5503,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func resumeSelectedLoop() {
         guard let loop = selectedLoopSnapshot() else {
-            appendOutput("请先在 Active Loops 中选择一条循环任务。")
-            setStatus("请选择一个循环任务")
-            NSSound.beep()
+            handleLoopSelectionRequired()
             return
         }
         guard loop.paused == "yes" || loop.stopped == "yes" else {
@@ -5541,9 +5543,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func deleteSelectedLoop() {
         guard let loop = selectedLoopSnapshot() else {
-            appendOutput("请先在 Active Loops 中选择一条循环任务。")
-            setStatus("请选择一个循环任务")
-            NSSound.beep()
+            handleLoopSelectionRequired()
             return
         }
 
