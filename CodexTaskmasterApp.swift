@@ -2371,6 +2371,25 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return (displayed, ordered)
     }
 
+    private func showSessionDeleteBlockedAlertIfNeeded(
+        session: SessionSnapshot,
+        detail: String,
+        failedFields: [String: String]?
+    ) {
+        guard let failedFields else { return }
+        let reason = failedFields["reason"] ?? ""
+        guard reason == "session_delete_live" || reason == "session_delete_live_ambiguous" else {
+            return
+        }
+        let blockedDetail = failedFields["detail"] ?? detail
+        showSessionActionBlockedAlert(
+            actionLabel: "删除",
+            session: session,
+            detail: blockedDetail,
+            ambiguous: reason == "session_delete_live_ambiguous"
+        )
+    }
+
     private func completeSelectedSessionRemovalAction(
         threadIDs: [String],
         completionStatusText: String,
@@ -5986,13 +6005,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                                 completionLogText: sessionDeleteCompletionLogText(detail: result.detail, deletedThreadIDs: threadIDs.ordered)
                             )
                         } else {
-                            if let fields = result.failedFields {
-                                let reason = fields["reason"] ?? ""
-                                if reason == "session_delete_live" || reason == "session_delete_live_ambiguous" {
-                                    let detail = fields["detail"] ?? result.detail
-                                    self.showSessionActionBlockedAlert(actionLabel: "删除", session: session, detail: detail, ambiguous: reason == "session_delete_live_ambiguous")
-                                }
-                            }
+                            self.showSessionDeleteBlockedAlertIfNeeded(
+                                session: session,
+                                detail: result.detail,
+                                failedFields: result.failedFields
+                            )
                             self.updateSessionDetailView()
                             self.handleSelectedSessionActionFailure(
                                 statusText: sessionDeleteFailureStatusText(),
