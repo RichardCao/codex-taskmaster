@@ -2303,6 +2303,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         updateProviderMigrationButtons()
     }
 
+    private func handleProviderMigrationNoop(informativeText: String, logText: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = sessionProviderMigrationNoopAlertTitle()
+        alert.informativeText = informativeText
+        alert.addButton(withTitle: "确定")
+        alert.runModal()
+        appendOutput(logText)
+        setStatus(noMigrationNeededStatusText(), key: "action")
+    }
+
     private func beginProviderMigrationExecution(runningStatusText: String, startLogText: String) {
         setButtonsEnabled(false)
         setStatus(runningStatusText, key: "action")
@@ -5866,18 +5877,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 let currentProviderDisplay = currentProvider.isEmpty ? "-" : currentProvider
 
                 if currentProvider == targetProvider && familyMigrateNeeded == 0 {
-                    let alert = NSAlert()
-                    alert.alertStyle = .informational
-                    alert.messageText = sessionProviderMigrationNoopAlertTitle()
-                    alert.informativeText = sessionProviderMigrationNoopAlertText(
-                        currentProviderDisplay: currentProviderDisplay,
-                        targetProvider: targetProvider,
-                        familyCount: familyCount
+                    self.handleProviderMigrationNoop(
+                        informativeText: sessionProviderMigrationNoopAlertText(
+                            currentProviderDisplay: currentProviderDisplay,
+                            targetProvider: targetProvider,
+                            familyCount: familyCount
+                        ),
+                        logText: sessionProviderMigrationNoopLogText(targetProvider: targetProvider)
                     )
-                    alert.addButton(withTitle: "确定")
-                    alert.runModal()
-                    self.appendOutput(sessionProviderMigrationNoopLogText(targetProvider: targetProvider))
-                    self.setStatus(noMigrationNeededStatusText(), key: "action")
                     return
                 }
 
@@ -5974,17 +5981,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 let totalThreads = Int(plan["total_threads"] ?? "0") ?? 0
 
                 if migrateNeeded == 0 {
-                    let alert = NSAlert()
-                    alert.alertStyle = .informational
-                    alert.messageText = sessionProviderMigrationNoopAlertTitle()
-                    alert.informativeText = allSessionProviderMigrationNoopAlertText(
-                        targetProvider: targetProvider,
-                        totalThreads: totalThreads
+                    self.handleProviderMigrationNoop(
+                        informativeText: allSessionProviderMigrationNoopAlertText(
+                            targetProvider: targetProvider,
+                            totalThreads: totalThreads
+                        ),
+                        logText: allSessionProviderMigrationNoopLogText(targetProvider: targetProvider)
                     )
-                    alert.addButton(withTitle: "确定")
-                    alert.runModal()
-                    self.appendOutput(allSessionProviderMigrationNoopLogText(targetProvider: targetProvider))
-                    self.setStatus(noMigrationNeededStatusText(), key: "action")
                     return
                 }
 
