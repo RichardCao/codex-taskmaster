@@ -2354,6 +2354,44 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         refreshLoopsSnapshot()
     }
 
+    private func performSelectedSessionRemovalAction(
+        threadID: String,
+        selectedSessionIsArchived: Bool,
+        runningStatusText: String,
+        startLogText: String,
+        completionStatusText: String,
+        completionLogText: String,
+        failureStatusText: String,
+        beforeFailure: ((String) -> Void)? = nil,
+        work: @escaping () -> (success: Bool, error: String)
+    ) {
+        beginSelectedSessionAction(
+            runningStatusText: runningStatusText,
+            startLogText: startLogText
+        )
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = work()
+
+            DispatchQueue.main.async {
+                if result.success {
+                    self.completeSelectedSessionRemovalAction(
+                        threadIDs: [threadID],
+                        completionStatusText: completionStatusText,
+                        completionLogText: completionLogText
+                    )
+                } else {
+                    beforeFailure?(result.error)
+                    self.failSelectedSessionAction(
+                        statusText: failureStatusText,
+                        detail: result.error,
+                        selectedSessionIsArchived: selectedSessionIsArchived
+                    )
+                }
+            }
+        }
+    }
+
     private func restoreSelectedSessionActionControls(selectedSessionIsArchived: Bool) {
         let hasSelection = hasSelectedSession()
         renameField.isEnabled = hasSelection && !selectedSessionIsArchived
@@ -5809,36 +5847,25 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
 
-        beginSelectedSessionAction(
+        performSelectedSessionRemovalAction(
+            threadID: session.threadID,
+            selectedSessionIsArchived: false,
             runningStatusText: sessionArchiveRunningStatusText(),
-            startLogText: sessionArchiveStartLogText(threadID: session.threadID)
-        )
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = self.archiveSession(threadID: session.threadID)
-
-            DispatchQueue.main.async {
-                if result.success {
-                    self.completeSelectedSessionRemovalAction(
-                        threadIDs: [session.threadID],
-                        completionStatusText: sessionArchiveCompletionStatusText(),
-                        completionLogText: archivedSessionCompletionLogText(threadID: session.threadID)
-                    )
-                } else {
-                    if let fields = self.parseStructuredHelperFields(result.error) {
-                        let reason = fields["reason"] ?? ""
-                        if reason == "session_archive_live" || reason == "session_archive_live_ambiguous" {
-                            let detail = fields["detail"] ?? result.error
-                            self.showSessionActionBlockedAlert(actionLabel: "归档", session: session, detail: detail, ambiguous: reason == "session_archive_live_ambiguous")
-                        }
+            startLogText: sessionArchiveStartLogText(threadID: session.threadID),
+            completionStatusText: sessionArchiveCompletionStatusText(),
+            completionLogText: archivedSessionCompletionLogText(threadID: session.threadID),
+            failureStatusText: sessionArchiveFailureStatusText(),
+            beforeFailure: { error in
+                if let fields = self.parseStructuredHelperFields(error) {
+                    let reason = fields["reason"] ?? ""
+                    if reason == "session_archive_live" || reason == "session_archive_live_ambiguous" {
+                        let detail = fields["detail"] ?? error
+                        self.showSessionActionBlockedAlert(actionLabel: "归档", session: session, detail: detail, ambiguous: reason == "session_archive_live_ambiguous")
                     }
-                    self.failSelectedSessionAction(
-                        statusText: sessionArchiveFailureStatusText(),
-                        detail: result.error,
-                        selectedSessionIsArchived: false
-                    )
                 }
             }
+        ) {
+            self.archiveSession(threadID: session.threadID)
         }
     }
 
@@ -5870,29 +5897,16 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
 
-        beginSelectedSessionAction(
+        performSelectedSessionRemovalAction(
+            threadID: session.threadID,
+            selectedSessionIsArchived: true,
             runningStatusText: sessionRestoreRunningStatusText(),
-            startLogText: sessionRestoreStartLogText(threadID: session.threadID)
-        )
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = self.unarchiveSession(threadID: session.threadID)
-
-            DispatchQueue.main.async {
-                if result.success {
-                    self.completeSelectedSessionRemovalAction(
-                        threadIDs: [session.threadID],
-                        completionStatusText: sessionRestoreCompletionStatusText(),
-                        completionLogText: sessionRestoreCompletionLogText(threadID: session.threadID)
-                    )
-                } else {
-                    self.failSelectedSessionAction(
-                        statusText: sessionRestoreFailureStatusText(),
-                        detail: result.error,
-                        selectedSessionIsArchived: true
-                    )
-                }
-            }
+            startLogText: sessionRestoreStartLogText(threadID: session.threadID),
+            completionStatusText: sessionRestoreCompletionStatusText(),
+            completionLogText: sessionRestoreCompletionLogText(threadID: session.threadID),
+            failureStatusText: sessionRestoreFailureStatusText()
+        ) {
+            self.unarchiveSession(threadID: session.threadID)
         }
     }
 

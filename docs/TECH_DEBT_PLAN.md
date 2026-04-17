@@ -306,6 +306,7 @@
 - session action 失败状态的状态栏/stderr/beep 收口到控制器 helper
 - session action 失败时的按钮恢复与失败态回写收口到控制器 helper
 - session 删除/归档/恢复成功后的移除列表与完成态刷新收口到控制器 helper
+- session archive/restore 的后台执行与成功失败回写收口到控制器 helper
 - session action 被当前 session 状态阻止时的日志/状态/beep 收口到控制器 helper
 - provider migration noop 提示框/日志/状态收口到控制器 helper
 - loop action 未选中循环任务的日志/状态/beep 分支收口到控制器 helper
