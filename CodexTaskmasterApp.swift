@@ -2254,6 +2254,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func handleEmptyMessageRequired() {
+        appendOutput("输出内容不能为空。")
+        setStatus("请填写输出内容")
+        NSSound.beep()
+    }
+
     private func removeSessionSnapshots(threadIDs: [String]) {
         let deletedSet = Set(threadIDs)
         guard !deletedSet.isEmpty else { return }
@@ -5326,9 +5332,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func sendOnce() {
         guard let target = validateTarget(), !currentMessage().isEmpty else {
             if currentMessage().isEmpty {
-                appendOutput("输出内容不能为空。")
-                setStatus("请填写输出内容")
-                NSSound.beep()
+                handleEmptyMessageRequired()
             }
             return
         }
@@ -5372,9 +5376,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func startLoop() {
         guard let target = validateTarget(), let interval = validateInterval(), !currentMessage().isEmpty else {
             if currentMessage().isEmpty {
-                appendOutput("输出内容不能为空。")
-                setStatus("请填写输出内容")
-                NSSound.beep()
+                handleEmptyMessageRequired()
             }
             return
         }
