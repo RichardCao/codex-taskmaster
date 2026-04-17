@@ -2268,6 +2268,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func handleSelectedSessionActionBlocked(logText: String, statusText: String) {
+        appendOutput(logText)
+        setStatus(statusText, key: "action")
+        NSSound.beep()
+    }
+
     private func appendStderrDetailIfPresent(_ detail: String) {
         guard !detail.isEmpty else { return }
         appendOutput("stderr: \(detail)")
@@ -5560,9 +5566,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         let session = sessionSnapshots[selectedRow]
         guard !session.isArchived else {
-            appendOutput(archivedSessionRenameBlockedLogText())
-            setStatus(sessionRenameArchivedBlockedStatusText(), key: "action")
-            NSSound.beep()
+            handleSelectedSessionActionBlocked(
+                logText: archivedSessionRenameBlockedLogText(),
+                statusText: sessionRenameArchivedBlockedStatusText()
+            )
             return
         }
         let newName = renameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -5633,9 +5640,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         let session = sessionSnapshots[selectedRow]
         guard !session.isArchived else {
-            appendOutput(sessionArchiveAlreadyArchivedLogText())
-            setStatus(sessionArchiveAlreadyArchivedStatusText(), key: "action")
-            NSSound.beep()
+            handleSelectedSessionActionBlocked(
+                logText: sessionArchiveAlreadyArchivedLogText(),
+                statusText: sessionArchiveAlreadyArchivedStatusText()
+            )
             return
         }
         let matchingLoopTargets = loopTargetsAffectingSession(session)
@@ -5703,9 +5711,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         let session = sessionSnapshots[selectedRow]
         guard session.isArchived else {
-            appendOutput(sessionRestoreNonArchivedSelectionLogText())
-            setStatus(archivedSessionRestoreSelectionRequiredStatusText(), key: "action")
-            NSSound.beep()
+            handleSelectedSessionActionBlocked(
+                logText: sessionRestoreNonArchivedSelectionLogText(),
+                statusText: archivedSessionRestoreSelectionRequiredStatusText()
+            )
             return
         }
 

@@ -301,6 +301,7 @@
 - session action 进入执行态的按钮/状态/日志切换收口到控制器 helper
 - session action 失败状态的状态栏/stderr/beep 收口到控制器 helper
 - session 删除/归档/恢复成功后的移除列表与完成态刷新收口到控制器 helper
+- session action 被当前 session 状态阻止时的日志/状态/beep 收口到控制器 helper
 
 下一步建议：
 
