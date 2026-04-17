@@ -2407,6 +2407,36 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         )
     }
 
+    private func performSessionDeleteAction(
+        session: SessionSnapshot,
+        threadIDs: (displayed: [String], ordered: [String])
+    ) {
+        beginSelectedSessionAction(
+            runningStatusText: sessionDeleteRunningStatusText(),
+            startLogText: sessionDeleteStartLogText(threadIDs: threadIDs.displayed)
+        )
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = self.deleteSessionsRecursively(threadIDs: threadIDs.ordered)
+
+            DispatchQueue.main.async {
+                if result.success {
+                    self.completeSelectedSessionRemovalAction(
+                        threadIDs: threadIDs.ordered,
+                        completionStatusText: sessionDeleteCompletionStatusText(),
+                        completionLogText: sessionDeleteCompletionLogText(detail: result.detail, deletedThreadIDs: threadIDs.ordered)
+                    )
+                } else {
+                    self.failSessionDeleteAction(
+                        session: session,
+                        detail: result.detail,
+                        failedFields: result.failedFields
+                    )
+                }
+            }
+        }
+    }
+
     private func completeSelectedSessionRemovalAction(
         threadIDs: [String],
         completionStatusText: String,
@@ -6006,30 +6036,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     threadID: session.threadID,
                     deletionPlan: deletionPlan
                 )
-                self.beginSelectedSessionAction(
-                    runningStatusText: sessionDeleteRunningStatusText(),
-                    startLogText: sessionDeleteStartLogText(threadIDs: threadIDs.displayed)
-                )
-
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let result = self.deleteSessionsRecursively(threadIDs: threadIDs.ordered)
-
-                    DispatchQueue.main.async {
-                        if result.success {
-                            self.completeSelectedSessionRemovalAction(
-                                threadIDs: threadIDs.ordered,
-                                completionStatusText: sessionDeleteCompletionStatusText(),
-                                completionLogText: sessionDeleteCompletionLogText(detail: result.detail, deletedThreadIDs: threadIDs.ordered)
-                            )
-                        } else {
-                            self.failSessionDeleteAction(
-                                session: session,
-                                detail: result.detail,
-                                failedFields: result.failedFields
-                            )
-                        }
-                    }
-                }
+                self.performSessionDeleteAction(session: session, threadIDs: threadIDs)
             }
         }
     }
