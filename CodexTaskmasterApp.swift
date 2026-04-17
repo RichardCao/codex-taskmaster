@@ -2234,6 +2234,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func handleLoopActionBlocked(logText: String, statusText: String) {
+        appendOutput(logText)
+        setStatus(statusText, key: "action")
+        NSSound.beep()
+    }
+
     private func removeSessionSnapshots(threadIDs: [String]) {
         let deletedSet = Set(threadIDs)
         guard !deletedSet.isEmpty else { return }
@@ -5481,9 +5487,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
         guard loop.stopped != "yes" else {
-            appendOutput("当前选中的循环已经是停止状态。")
-            setStatus("当前循环已停止", key: "action")
-            NSSound.beep()
+            handleLoopActionBlocked(
+                logText: "当前选中的循环已经是停止状态。",
+                statusText: "当前循环已停止"
+            )
             return
         }
         targetField.stringValue = loop.target
@@ -5507,9 +5514,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
         guard loop.paused == "yes" || loop.stopped == "yes" else {
-            appendOutput("当前选中的循环既不是暂停状态，也不是停止状态。")
-            setStatus("当前循环不可恢复", key: "action")
-            NSSound.beep()
+            handleLoopActionBlocked(
+                logText: "当前选中的循环既不是暂停状态，也不是停止状态。",
+                statusText: "当前循环不可恢复"
+            )
             return
         }
         guard preflightRuntimePermissions(actionName: "恢复当前", requiresLoopState: true) else {
