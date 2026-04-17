@@ -2362,6 +2362,15 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setStatus(sessionDeleteCancelledStatusText(), key: "action")
     }
 
+    private func resolvedSessionDeleteThreadIDs(
+        threadID: String,
+        deletionPlan: (includeDescendants: Bool, descendantIDs: [String])
+    ) -> (displayed: [String], ordered: [String]) {
+        let displayed = deletionPlan.includeDescendants ? ([threadID] + deletionPlan.descendantIDs) : [threadID]
+        let ordered = deletionPlan.includeDescendants ? (deletionPlan.descendantIDs.reversed() + [threadID]) : [threadID]
+        return (displayed, ordered)
+    }
+
     private func completeSelectedSessionRemovalAction(
         threadIDs: [String],
         completionStatusText: String,
@@ -5957,22 +5966,24 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     return
                 }
 
-                let targetThreadIDs = deletionPlan.includeDescendants ? ([session.threadID] + deletionPlan.descendantIDs) : [session.threadID]
+                let threadIDs = self.resolvedSessionDeleteThreadIDs(
+                    threadID: session.threadID,
+                    deletionPlan: deletionPlan
+                )
                 self.beginSelectedSessionAction(
                     runningStatusText: sessionDeleteRunningStatusText(),
-                    startLogText: sessionDeleteStartLogText(threadIDs: targetThreadIDs)
+                    startLogText: sessionDeleteStartLogText(threadIDs: threadIDs.displayed)
                 )
 
                 DispatchQueue.global(qos: .userInitiated).async {
-                    let orderedThreadIDs = deletionPlan.includeDescendants ? (deletionPlan.descendantIDs.reversed() + [session.threadID]) : [session.threadID]
-                    let result = self.deleteSessionsRecursively(threadIDs: orderedThreadIDs)
+                    let result = self.deleteSessionsRecursively(threadIDs: threadIDs.ordered)
 
                     DispatchQueue.main.async {
                         if result.success {
                             self.completeSelectedSessionRemovalAction(
-                                threadIDs: orderedThreadIDs,
+                                threadIDs: threadIDs.ordered,
                                 completionStatusText: sessionDeleteCompletionStatusText(),
-                                completionLogText: sessionDeleteCompletionLogText(detail: result.detail, deletedThreadIDs: orderedThreadIDs)
+                                completionLogText: sessionDeleteCompletionLogText(detail: result.detail, deletedThreadIDs: threadIDs.ordered)
                             )
                         } else {
                             if let fields = result.failedFields {
