@@ -2983,8 +2983,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func updateSessionDetailView() {
-        let selectedRow = sessionStatusTableView.selectedRow
-        guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
+        guard let session = selectedSessionSnapshot() else {
             renameField.stringValue = ""
             disableSelectedSessionActionControls()
             migrateAllSessionsProviderButton.isEnabled = configuredModelProvider != nil
@@ -3001,8 +3000,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             }
             return
         }
-
-        let session = sessionSnapshots[selectedRow]
         renameField.stringValue = session.name
         renameField.isEnabled = !session.isArchived
         saveRenameButton.isEnabled = !session.isArchived

@@ -321,6 +321,7 @@
 - runtime 内 `SubprocessResult` 的首选错误详情访问收口到 core accessor
 - loop status 加载失败详情改为复用 `HelperCommandResult.primaryDetail`
 - rename/archive/restore/delete 的 session 选择读取统一复用 `selectedSessionSnapshot()`
+- session detail 面板的选中 session 读取统一复用 `selectedSessionSnapshot()`
 
 下一步建议：
 
