@@ -4973,9 +4973,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 }
                 self.setStatus(accepted ? "\(actionName)已受理" : "\(actionName)完成", key: "action")
             } else {
-                let combinedErrorDetail = [result.stderr, result.stdout]
-                    .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-                    .joined(separator: "\n")
+                let combinedErrorDetail = result.combinedText
                 if let structuredSendResult,
                    structuredSendResult["reason"] == "ambiguous_target" {
                     let detail = structuredSendResult["detail"] ?? result.stderr
