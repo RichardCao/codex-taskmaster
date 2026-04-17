@@ -2299,6 +2299,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return arguments
     }
 
+    private func currentLoopMessageOptions() -> (message: String, forceSend: Bool) {
+        (currentMessage(), isForceSendEnabled())
+    }
+
     private func runLoopTargetAction(
         actionName: String,
         commandName: String,
@@ -5402,17 +5406,16 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         ) {
             self.setButtonsEnabled(true)
         } onValid: {
-            let message = self.currentMessage()
-            let forceSend = self.isForceSendEnabled()
+            let options = self.currentLoopMessageOptions()
             let displayArguments = self.helperDisplayArguments(
-                base: ["send", "-t", target, "-m", message],
-                forceSend: forceSend
+                base: ["send", "-t", target, "-m", options.message],
+                forceSend: options.forceSend
             )
             self.runHelper(actionName: "发送一次", displayArguments: displayArguments) { completion in
                 self.loopCommandService.sendMessageAsync(
                     target: target,
-                    message: message,
-                    forceSend: forceSend,
+                    message: options.message,
+                    forceSend: options.forceSend,
                     completion: completion
                 )
             }
@@ -5465,8 +5468,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 }
             }
         } onValid: {
-            let message = self.currentMessage()
-            let forceSend = self.isForceSendEnabled()
+            let options = self.currentLoopMessageOptions()
             let conflicts = self.conflictingLoops(for: target)
             if !conflicts.isEmpty {
                 self.setButtonsEnabled(true)
@@ -5478,22 +5480,22 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.runLoopReplacement(
                     target: target,
                     interval: interval,
-                    message: message,
-                    forceSend: forceSend,
+                    message: options.message,
+                    forceSend: options.forceSend,
                     conflicts: conflicts
                 )
                 return
             }
             let displayArguments = self.helperDisplayArguments(
-                base: ["start", "-t", target, "-i", interval, "-m", message],
-                forceSend: forceSend
+                base: ["start", "-t", target, "-i", interval, "-m", options.message],
+                forceSend: options.forceSend
             )
             self.runHelper(actionName: "开始循环", displayArguments: displayArguments) { completion in
                 self.loopCommandService.startLoopAsync(
                     target: target,
                     interval: interval,
-                    message: message,
-                    forceSend: forceSend,
+                    message: options.message,
+                    forceSend: options.forceSend,
                     completion: completion
                 )
             }

@@ -316,6 +316,7 @@
 - 控制器内 helper 失败详情拼接改为复用 `HelperCommandResult.combinedText`
 - runtime 内 send coordinator 的首选失败详情读取收口到本地 helper
 - 发送一次/开始循环/恢复当前的“进入校验态并执行目标校验”模板收口到控制器 helper
+- 控制器内当前 loop message/force-send 输入快照收口到单点 helper
 
 下一步建议：
 
