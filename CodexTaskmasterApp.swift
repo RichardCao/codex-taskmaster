@@ -2503,6 +2503,25 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         )
     }
 
+    private func completeSessionRenameAction(
+        threadID: String,
+        newName: String
+    ) {
+        if let index = allSessionSnapshots.firstIndex(where: { $0.threadID == threadID }) {
+            let previous = allSessionSnapshots[index]
+            allSessionSnapshots[index] = renamedSessionSnapshot(from: previous, newName: newName)
+        }
+        invalidateSessionSearch()
+        renderSessionSnapshots(
+            scannedCount: lastSessionRenderScannedCount,
+            totalCount: lastSessionRenderTotalCount,
+            isComplete: lastSessionRenderIsComplete
+        )
+        selectSessionRow(threadID: threadID)
+        setStatus(sessionRenameCompletionStatusText(), key: "action")
+        appendOutput(sessionRenameCompletionLogText(newName: newName))
+    }
+
     private func completeSelectedSessionRemovalAction(
         threadIDs: [String],
         completionStatusText: String,
@@ -5934,19 +5953,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.restoreSelectedSessionActionControls(selectedSessionIsArchived: false)
 
                 if result.success {
-                    if let index = self.allSessionSnapshots.firstIndex(where: { $0.threadID == session.threadID }) {
-                        let previous = self.allSessionSnapshots[index]
-                        self.allSessionSnapshots[index] = self.renamedSessionSnapshot(from: previous, newName: newName)
-                    }
-                    self.invalidateSessionSearch()
-                    self.renderSessionSnapshots(
-                        scannedCount: self.lastSessionRenderScannedCount,
-                        totalCount: self.lastSessionRenderTotalCount,
-                        isComplete: self.lastSessionRenderIsComplete
+                    self.completeSessionRenameAction(
+                        threadID: session.threadID,
+                        newName: newName
                     )
-                    self.selectSessionRow(threadID: session.threadID)
-                    self.setStatus(sessionRenameCompletionStatusText(), key: "action")
-                    self.appendOutput(sessionRenameCompletionLogText(newName: newName))
                 } else {
                     self.failSelectedSessionAction(
                         statusText: sessionRenameFailureStatusText(),
