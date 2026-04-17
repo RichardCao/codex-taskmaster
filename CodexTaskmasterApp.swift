@@ -2394,6 +2394,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func handleProviderMigrationCancelled(statusText: String) {
+        setStatus(statusText, key: "action")
+    }
+
     private func beginProviderMigrationLoading() {
         setButtonsEnabled(false)
         setStatus(sessionProviderLoadingStatusText(), key: "action")
@@ -5962,7 +5966,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     } else if response == .alertSecondButtonReturn {
                         includeFamily = false
                     } else {
-                        self.setStatus(sessionProviderMigrationCancelledStatusText(), key: "action")
+                        self.handleProviderMigrationCancelled(statusText: sessionProviderMigrationCancelledStatusText())
                         return
                     }
                 } else {
@@ -5978,7 +5982,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     alert.addButton(withTitle: "迁移")
                     alert.addButton(withTitle: "取消")
                     guard alert.runModal() == .alertFirstButtonReturn else {
-                        self.setStatus(sessionProviderMigrationCancelledStatusText(), key: "action")
+                        self.handleProviderMigrationCancelled(statusText: sessionProviderMigrationCancelledStatusText())
                         return
                     }
                     includeFamily = false
@@ -6054,7 +6058,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 alert.addButton(withTitle: "取消")
                 alert.buttons.first?.hasDestructiveAction = true
                 guard alert.runModal() == .alertFirstButtonReturn else {
-                    self.setStatus(allSessionProviderMigrationCancelledStatusText(), key: "action")
+                    self.handleProviderMigrationCancelled(statusText: allSessionProviderMigrationCancelledStatusText())
                     return
                 }
 

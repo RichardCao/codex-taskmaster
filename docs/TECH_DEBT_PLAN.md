@@ -328,6 +328,7 @@
 - session action 按钮置灰列表收口到控制器 helper，并保留 `renameField` 单独控制
 - session 选中态布尔判断收口到 `hasSelectedSession()` helper
 - provider migration 退出 loading / 执行态时的按钮恢复收口到控制器 helper
+- provider migration 的取消状态回写收口到控制器 helper
 
 下一步建议：
 
