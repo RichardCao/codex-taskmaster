@@ -3011,12 +3011,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
         renameField.stringValue = session.name
-        renameField.isEnabled = !session.isArchived
-        saveRenameButton.isEnabled = !session.isArchived
-        archiveSessionButton.isEnabled = !session.isArchived
-        restoreSessionButton.isEnabled = session.isArchived
-        deleteSessionButton.isEnabled = true
-        updateProviderMigrationButtons()
+        restoreSelectedSessionActionControls(selectedSessionIsArchived: session.isArchived)
         renameField.placeholderString = sessionRenamePlaceholderText(isArchived: session.isArchived)
         let sendResults = recentSendResults(for: session)
         let initialDetailText = formattedSessionDetailPreviewDocument(
