@@ -2343,6 +2343,21 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         appendOutput(startLogText)
     }
 
+    private func beginSessionDeletePlanLoading() {
+        setButtonsEnabled(false)
+        setStatus(sessionDeletePlanLoadingStatusText(), key: "action")
+    }
+
+    private func finishSessionDeletePlanLoading() {
+        setButtonsEnabled(true)
+    }
+
+    private func handleSessionDeletePlanLoadingFailure() {
+        setStatus(sessionDeletePlanLoadingFailureStatusText(), key: "action")
+        appendOutput(sessionDeletePlanLoadingFailureLogText())
+        NSSound.beep()
+    }
+
     private func completeSelectedSessionRemovalAction(
         threadIDs: [String],
         completionStatusText: String,
@@ -5917,17 +5932,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
         let matchingLoopTargets = loopTargetsAffectingSession(session)
-        setButtonsEnabled(false)
-        setStatus(sessionDeletePlanLoadingStatusText(), key: "action")
+        beginSessionDeletePlanLoading()
 
         sessionFamilyPlanAsync(threadID: session.threadID) { familyPlan in
             self.sessionDeletePlanAsync(threadID: session.threadID) { deletePlan in
-                self.setButtonsEnabled(true)
+                self.finishSessionDeletePlanLoading()
 
                 guard let deletePlan else {
-                    self.setStatus(sessionDeletePlanLoadingFailureStatusText(), key: "action")
-                    self.appendOutput(sessionDeletePlanLoadingFailureLogText())
-                    NSSound.beep()
+                    self.handleSessionDeletePlanLoadingFailure()
                     return
                 }
 
