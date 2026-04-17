@@ -317,6 +317,7 @@
 - runtime 内 send coordinator 的首选失败详情读取收口到本地 helper
 - 发送一次/开始循环/恢复当前的“进入校验态并执行目标校验”模板收口到控制器 helper
 - 控制器内当前 loop message/force-send 输入快照收口到单点 helper
+- 开始循环失败分支里“按当前输入保存停止态 loop 并刷新”收口到控制器 helper
 
 下一步建议：
 

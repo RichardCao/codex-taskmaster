@@ -4791,6 +4791,19 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         )
     }
 
+    private func saveCurrentLoopAsStoppedAsync(target: String, interval: String, reason: String) {
+        let options = currentLoopMessageOptions()
+        saveStoppedLoopEntryAsync(
+            target: target,
+            interval: interval,
+            message: options.message,
+            forceSend: options.forceSend,
+            reason: reason
+        ) { _ in
+            self.requestLoopSnapshotRefresh()
+        }
+    }
+
     private func isAmbiguousTargetError(_ detail: String) -> Bool {
         detail.contains("found multiple matching sessions for target") ||
         detail.contains("found multiple matching thread titles for target") ||
@@ -5438,15 +5451,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 logText: "Codex Taskmaster 缺少辅助功能权限，无法处理循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。",
                 actionStatusText: "开始循环失败"
             ) {
-                self.saveStoppedLoopEntryAsync(
-                    target: target,
-                    interval: interval,
-                    message: self.currentMessage(),
-                    forceSend: self.isForceSendEnabled(),
-                    reason: "missing_accessibility_permission"
-                ) { _ in
-                    self.requestLoopSnapshotRefresh()
-                }
+                self.saveCurrentLoopAsStoppedAsync(target: target, interval: interval, reason: "missing_accessibility_permission")
             }
             return
         }
@@ -5457,15 +5462,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         ) {
             let reason = self.lastTargetValidationFailureReason ?? "start_failed"
             self.handleLoopValidationFailure(statusText: "开始循环失败") {
-                self.saveStoppedLoopEntryAsync(
-                    target: target,
-                    interval: interval,
-                    message: self.currentMessage(),
-                    forceSend: self.isForceSendEnabled(),
-                    reason: reason
-                ) { _ in
-                    self.requestLoopSnapshotRefresh()
-                }
+                self.saveCurrentLoopAsStoppedAsync(target: target, interval: interval, reason: reason)
             }
         } onValid: {
             let options = self.currentLoopMessageOptions()
