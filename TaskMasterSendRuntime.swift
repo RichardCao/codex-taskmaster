@@ -209,7 +209,7 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
                 standardInputData: script.data(using: .utf8)
             )
             guard result.terminationStatus == 0 else {
-                let errText = result.trimmedStderr.isEmpty ? "聚焦 Terminal 失败" : result.trimmedStderr
+                let errText = result.primaryDetail ?? "聚焦 Terminal 失败"
                 throw NSError(
                     domain: "CodexTaskmaster",
                     code: 4,

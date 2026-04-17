@@ -14,6 +14,11 @@ struct SubprocessResult {
     var trimmedStderr: String {
         stderr.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    var primaryDetail: String? {
+        let detail = trimmedStderr.isEmpty ? trimmedStdout : trimmedStderr
+        return detail.isEmpty ? nil : detail
+    }
 }
 
 enum SubprocessRunnerError: LocalizedError {
