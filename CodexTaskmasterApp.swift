@@ -2280,6 +2280,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func handleLoopMessageValidationFailure() {
+        if currentMessage().isEmpty {
+            handleEmptyMessageRequired()
+        }
+    }
+
     private func beginLoopActionValidation(statusText: String) {
         setButtonsEnabled(false)
         setStatus(statusText, key: "action")
@@ -5695,9 +5701,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func sendOnce() {
         guard let target = validateTarget(), !currentMessage().isEmpty else {
-            if currentMessage().isEmpty {
-                handleEmptyMessageRequired()
-            }
+            handleLoopMessageValidationFailure()
             return
         }
         guard preflightRuntimePermissions(actionName: "发送一次", requiresLoopState: false) else {
@@ -5734,9 +5738,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func startLoop() {
         guard let target = validateTarget(), let interval = validateInterval(), !currentMessage().isEmpty else {
-            if currentMessage().isEmpty {
-                handleEmptyMessageRequired()
-            }
+            handleLoopMessageValidationFailure()
             return
         }
         guard preflightRuntimePermissions(actionName: "开始循环", requiresLoopState: true) else {
