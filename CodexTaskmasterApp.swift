@@ -5642,13 +5642,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     @objc
     private func saveSessionRename() {
-        let selectedRow = sessionStatusTableView.selectedRow
-        guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
+        guard let session = selectedSessionSnapshot() else {
             handleSessionSelectionRequired(logText: sessionRenameSelectionRequiredLogText())
             return
         }
-
-        let session = sessionSnapshots[selectedRow]
         guard !session.isArchived else {
             handleSelectedSessionActionBlocked(
                 logText: archivedSessionRenameBlockedLogText(),
@@ -5716,13 +5713,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     @objc
     private func archiveSelectedSession() {
-        let selectedRow = sessionStatusTableView.selectedRow
-        guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
+        guard let session = selectedSessionSnapshot() else {
             handleSessionSelectionRequired(logText: sessionArchiveSelectionRequiredLogText())
             return
         }
-
-        let session = sessionSnapshots[selectedRow]
         guard !session.isArchived else {
             handleSelectedSessionActionBlocked(
                 logText: sessionArchiveAlreadyArchivedLogText(),
@@ -5787,13 +5781,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     @objc
     private func restoreSelectedSession() {
-        let selectedRow = sessionStatusTableView.selectedRow
-        guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
+        guard let session = selectedSessionSnapshot() else {
             handleSessionSelectionRequired(logText: archivedSessionRestoreSelectionRequiredLogText())
             return
         }
-
-        let session = sessionSnapshots[selectedRow]
         guard session.isArchived else {
             handleSelectedSessionActionBlocked(
                 logText: sessionRestoreNonArchivedSelectionLogText(),
@@ -5849,13 +5840,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     @objc
     private func deleteSelectedSession() {
-        let selectedRow = sessionStatusTableView.selectedRow
-        guard selectedRow >= 0, selectedRow < sessionSnapshots.count else {
+        guard let session = selectedSessionSnapshot() else {
             handleSessionSelectionRequired(logText: sessionDeleteSelectionRequiredLogText())
             return
         }
-
-        let session = sessionSnapshots[selectedRow]
         let matchingLoopTargets = loopTargetsAffectingSession(session)
         setButtonsEnabled(false)
         setStatus(sessionDeletePlanLoadingStatusText(), key: "action")

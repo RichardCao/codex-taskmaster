@@ -320,6 +320,7 @@
 - 开始循环失败分支里“按当前输入保存停止态 loop 并刷新”收口到控制器 helper
 - runtime 内 `SubprocessResult` 的首选错误详情访问收口到 core accessor
 - loop status 加载失败详情改为复用 `HelperCommandResult.primaryDetail`
+- rename/archive/restore/delete 的 session 选择读取统一复用 `selectedSessionSnapshot()`
 
 下一步建议：
 
