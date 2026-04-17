@@ -2212,13 +2212,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         updateDetectStatusButtonState()
     }
 
-    private func disableSelectedSessionActionControls() {
+    private func disableSelectedSessionActionButtons() {
         saveRenameButton.isEnabled = false
         archiveSessionButton.isEnabled = false
         restoreSessionButton.isEnabled = false
         deleteSessionButton.isEnabled = false
         migrateSessionProviderButton.isEnabled = false
         migrateAllSessionsProviderButton.isEnabled = false
+    }
+
+    private func disableSelectedSessionActionControls() {
+        disableSelectedSessionActionButtons()
         renameField.isEnabled = false
     }
 
@@ -4188,12 +4192,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             stopButton.isEnabled = false
             resumeLoopButton.isEnabled = false
             deleteLoopButton.isEnabled = false
-            saveRenameButton.isEnabled = false
-            archiveSessionButton.isEnabled = false
-            restoreSessionButton.isEnabled = false
-            deleteSessionButton.isEnabled = false
-            migrateSessionProviderButton.isEnabled = false
-            migrateAllSessionsProviderButton.isEnabled = false
+            disableSelectedSessionActionButtons()
         }
     }
 

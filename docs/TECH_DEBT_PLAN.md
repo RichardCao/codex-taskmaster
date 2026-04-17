@@ -325,6 +325,7 @@
 - 导出当前 Session 日志的未选中分支复用 `handleSessionSelectionRequired`
 - rename/archive/restore 失败后的 session 操作区按钮恢复收口到控制器 helper
 - session detail 面板的操作区按钮恢复复用同一组 session action controls helper
+- session action 按钮置灰列表收口到控制器 helper，并保留 `renameField` 单独控制
 
 下一步建议：
 
