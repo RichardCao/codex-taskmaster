@@ -2358,6 +2358,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func handleSessionDeleteCancelled() {
+        setStatus(sessionDeleteCancelledStatusText(), key: "action")
+    }
+
     private func completeSelectedSessionRemovalAction(
         threadIDs: [String],
         completionStatusText: String,
@@ -5949,7 +5953,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     familyPlan: familyPlan,
                     deletePlan: deletePlan
                 ) else {
-                    self.setStatus(sessionDeleteCancelledStatusText(), key: "action")
+                    self.handleSessionDeleteCancelled()
                     return
                 }
 
