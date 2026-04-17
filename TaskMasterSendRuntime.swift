@@ -585,6 +585,12 @@ final class SendRequestCoordinator {
         return result
     }
 
+    private func primaryDetail(stdout: String, stderr: String) -> String? {
+        let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? stdout : stderr
+        let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     private func probeResult(for target: String) -> ProbeResult {
         let result = runHelper(["probe", "-t", target])
         return (result.status, parseProbeOutput(result.stdout), result.stdout, result.stderr)
@@ -610,7 +616,7 @@ final class SendRequestCoordinator {
 
     private func compactProbeSummary(_ probe: ProbeResult) -> String {
         if probe.status != 0 {
-            return probe.stderr.isEmpty ? probe.stdout : probe.stderr
+            return primaryDetail(stdout: probe.stdout, stderr: probe.stderr) ?? ""
         }
 
         let keys = [
@@ -702,9 +708,7 @@ final class SendRequestCoordinator {
 
     private func resolveLiveTTY(target: String) -> (tty: String?, detail: String) {
         let result = runHelper(["resolve-live-tty", "-t", target])
-        let detail = [result.stderr, result.stdout]
-            .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "failed to resolve live tty"
+        let detail = primaryDetail(stdout: result.stdout, stderr: result.stderr) ?? "failed to resolve live tty"
         guard result.status == 0 else {
             return (nil, detail)
         }
