@@ -321,6 +321,7 @@
 - session rename 成功后的列表刷新与完成态回写收口到控制器 helper
 - provider migration noop 提示框/日志/状态收口到控制器 helper
 - loop action 未选中循环任务的日志/状态/beep 分支收口到控制器 helper
+- loop action 的选中循环前置判断收口到控制器 helper
 - loop action 被当前 loop 状态阻止时的日志/状态/beep 收口到控制器 helper
 - 辅助功能权限缺失时的 general/action 状态与日志分支收口到控制器 helper
 - 发送一次/开始循环的空消息提示分支收口到控制器 helper

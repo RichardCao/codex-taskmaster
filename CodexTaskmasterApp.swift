@@ -2847,6 +2847,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return loopSnapshots[selectedRow]
     }
 
+    private func selectedLoopSnapshotForAction() -> LoopSnapshot? {
+        guard let loop = selectedLoopSnapshot() else {
+            handleLoopSelectionRequired()
+            return nil
+        }
+        return loop
+    }
+
     private func selectedSessionSnapshot() -> SessionSnapshot? {
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else { return nil }
@@ -5840,10 +5848,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     @objc
     private func stopLoop() {
-        guard let loop = selectedLoopSnapshot() else {
-            handleLoopSelectionRequired()
-            return
-        }
+        guard let loop = selectedLoopSnapshotForAction() else { return }
         guard loop.stopped != "yes" else {
             handleLoopActionBlocked(
                 logText: "当前选中的循环已经是停止状态。",
@@ -5865,10 +5870,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     @objc
     private func resumeSelectedLoop() {
-        guard let loop = selectedLoopSnapshot() else {
-            handleLoopSelectionRequired()
-            return
-        }
+        guard let loop = selectedLoopSnapshotForAction() else { return }
         guard loop.paused == "yes" || loop.stopped == "yes" else {
             handleLoopActionBlocked(
                 logText: "当前选中的循环既不是暂停状态，也不是停止状态。",
@@ -5905,10 +5907,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     @objc
     private func deleteSelectedLoop() {
-        guard let loop = selectedLoopSnapshot() else {
-            handleLoopSelectionRequired()
-            return
-        }
+        guard let loop = selectedLoopSnapshotForAction() else { return }
         runLoopTargetAction(actionName: "删除当前", commandName: "loop-delete", loop: loop) { target, completion in
             self.loopCommandService.deleteLoopAsync(target: target, completion: completion)
         }
