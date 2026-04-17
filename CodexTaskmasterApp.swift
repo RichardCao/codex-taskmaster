@@ -2274,6 +2274,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setButtonsEnabled(true)
     }
 
+    private func helperDisplayArguments(base: [String], forceSend: Bool) -> [String] {
+        var arguments = base
+        if forceSend {
+            arguments.append("-f")
+        }
+        return arguments
+    }
+
     private func runLoopTargetAction(
         actionName: String,
         commandName: String,
@@ -5051,10 +5059,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setButtonsEnabled(false)
         setStatus("开始循环执行中…", key: "action")
 
-        var displayArguments = ["start", "-t", target, "-i", interval, "-m", message]
-        if forceSend {
-            displayArguments.append("-f")
-        }
+        let displayArguments = helperDisplayArguments(
+            base: ["start", "-t", target, "-i", interval, "-m", message],
+            forceSend: forceSend
+        )
         appendOutput("执行 开始循环: \(displayArguments.joined(separator: " "))")
         appendOutput("检测到循环冲突，先停止旧循环: \(conflicts.map(\.target).joined(separator: ", "))")
 
@@ -5380,13 +5388,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             }
             let message = self.currentMessage()
             let forceSend = self.isForceSendEnabled()
-            let displayArguments = {
-                var arguments = ["send", "-t", target, "-m", message]
-                if forceSend {
-                    arguments.append("-f")
-                }
-                return arguments
-            }()
+            let displayArguments = self.helperDisplayArguments(
+                base: ["send", "-t", target, "-m", message],
+                forceSend: forceSend
+            )
             self.runHelper(actionName: "发送一次", displayArguments: displayArguments) { completion in
                 self.loopCommandService.sendMessageAsync(
                     target: target,
@@ -5464,13 +5469,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
             let message = self.currentMessage()
             let forceSend = self.isForceSendEnabled()
-            let displayArguments = {
-                var arguments = ["start", "-t", target, "-i", interval, "-m", message]
-                if forceSend {
-                    arguments.append("-f")
-                }
-                return arguments
-            }()
+            let displayArguments = self.helperDisplayArguments(
+                base: ["start", "-t", target, "-i", interval, "-m", message],
+                forceSend: forceSend
+            )
             self.runHelper(actionName: "开始循环", displayArguments: displayArguments) { completion in
                 self.loopCommandService.startLoopAsync(
                     target: target,
