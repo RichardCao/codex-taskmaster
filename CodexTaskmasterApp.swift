@@ -2403,6 +2403,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setStatus(sessionProviderLoadingStatusText(), key: "action")
     }
 
+    private func beginProviderMigrationPlanLoading() {
+        setStatus(sessionProviderMigrationPlanLoadingStatusText(), key: "action")
+    }
+
     private func finishProviderMigrationPlanLoading() {
         finishProviderMigrationInteraction()
     }
@@ -5914,7 +5918,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 return
             }
 
-            self.setStatus(sessionProviderMigrationPlanLoadingStatusText(), key: "action")
+            self.beginProviderMigrationPlanLoading()
 
             self.sessionProviderPlanAsync(threadID: session.threadID, targetProvider: targetProvider) { plan in
                 self.finishProviderMigrationPlanLoading()
@@ -6022,7 +6026,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 return
             }
 
-            self.setStatus(sessionProviderMigrationPlanLoadingStatusText(), key: "action")
+            self.beginProviderMigrationPlanLoading()
 
             self.allSessionProviderPlanAsync(targetProvider: targetProvider) { plan in
                 self.finishProviderMigrationPlanLoading()
