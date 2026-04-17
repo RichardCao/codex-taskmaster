@@ -2370,6 +2370,15 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func failSelectedSessionAction(
+        statusText: String,
+        detail: String,
+        selectedSessionIsArchived: Bool
+    ) {
+        restoreSelectedSessionActionControls(selectedSessionIsArchived: selectedSessionIsArchived)
+        handleSelectedSessionActionFailure(statusText: statusText, detail: detail)
+    }
+
     private func handleSelectedSessionActionBlocked(logText: String, statusText: String) {
         appendOutput(logText)
         setStatus(statusText, key: "action")
@@ -5760,9 +5769,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.setStatus(sessionRenameCompletionStatusText(), key: "action")
                     self.appendOutput(sessionRenameCompletionLogText(newName: newName))
                 } else {
-                    self.handleSelectedSessionActionFailure(
+                    self.failSelectedSessionAction(
                         statusText: sessionRenameFailureStatusText(),
-                        detail: result.error
+                        detail: result.error,
+                        selectedSessionIsArchived: false
                     )
                 }
             }
@@ -5822,10 +5832,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                             self.showSessionActionBlockedAlert(actionLabel: "归档", session: session, detail: detail, ambiguous: reason == "session_archive_live_ambiguous")
                         }
                     }
-                    self.restoreSelectedSessionActionControls(selectedSessionIsArchived: false)
-                    self.handleSelectedSessionActionFailure(
+                    self.failSelectedSessionAction(
                         statusText: sessionArchiveFailureStatusText(),
-                        detail: result.error
+                        detail: result.error,
+                        selectedSessionIsArchived: false
                     )
                 }
             }
@@ -5876,10 +5886,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                         completionLogText: sessionRestoreCompletionLogText(threadID: session.threadID)
                     )
                 } else {
-                    self.restoreSelectedSessionActionControls(selectedSessionIsArchived: true)
-                    self.handleSelectedSessionActionFailure(
+                    self.failSelectedSessionAction(
                         statusText: sessionRestoreFailureStatusText(),
-                        detail: result.error
+                        detail: result.error,
+                        selectedSessionIsArchived: true
                     )
                 }
             }
