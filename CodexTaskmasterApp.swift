@@ -2411,6 +2411,18 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         finishProviderMigrationInteraction()
     }
 
+    private func resolvedProviderMigrationPlan(
+        _ plan: [String: String]?,
+        failureLogText: String
+    ) -> [String: String]? {
+        finishProviderMigrationPlanLoading()
+        guard let plan else {
+            handleProviderMigrationPlanFailure(logText: failureLogText)
+            return nil
+        }
+        return plan
+    }
+
     private func finishProviderMigrationInteraction() {
         setButtonsEnabled(true)
         updateProviderMigrationButtons()
@@ -5921,12 +5933,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             self.beginProviderMigrationPlanLoading()
 
             self.sessionProviderPlanAsync(threadID: session.threadID, targetProvider: targetProvider) { plan in
-                self.finishProviderMigrationPlanLoading()
-
-                guard let plan else {
-                    self.handleProviderMigrationPlanFailure(logText: sessionProviderMigrationPlanFailureLogText())
-                    return
-                }
+                guard let plan = self.resolvedProviderMigrationPlan(
+                    plan,
+                    failureLogText: sessionProviderMigrationPlanFailureLogText()
+                ) else { return }
 
                 let isSubagent = (plan["is_subagent"] ?? "no") == "yes"
                 let familyCount = Int(plan["family_count"] ?? "1") ?? 1
@@ -6029,12 +6039,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             self.beginProviderMigrationPlanLoading()
 
             self.allSessionProviderPlanAsync(targetProvider: targetProvider) { plan in
-                self.finishProviderMigrationPlanLoading()
-
-                guard let plan else {
-                    self.handleProviderMigrationPlanFailure(logText: allSessionProviderMigrationPlanFailureLogText())
-                    return
-                }
+                guard let plan = self.resolvedProviderMigrationPlan(
+                    plan,
+                    failureLogText: allSessionProviderMigrationPlanFailureLogText()
+                ) else { return }
 
                 let migrateNeeded = Int(plan["migrate_needed_count"] ?? "0") ?? 0
                 let totalThreads = Int(plan["total_threads"] ?? "0") ?? 0
