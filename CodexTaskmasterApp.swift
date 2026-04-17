@@ -2258,6 +2258,22 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func ensureAccessibilityPermission(
+        logText: String,
+        actionStatusText: String? = nil,
+        sideEffect: (() -> Void)? = nil
+    ) -> Bool {
+        guard sendRequestCoordinator.ensurePermission(prompt: true) else {
+            handleAccessibilityPermissionDenied(
+                logText: logText,
+                actionStatusText: actionStatusText,
+                sideEffect: sideEffect
+            )
+            return false
+        }
+        return true
+    }
+
     private func handleEmptyMessageRequired() {
         appendOutput("输出内容不能为空。")
         setStatus("请填写输出内容")
@@ -5639,10 +5655,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         guard preflightRuntimePermissions(actionName: "发送一次", requiresLoopState: false) else {
             return
         }
-        guard sendRequestCoordinator.ensurePermission(prompt: true) else {
-            handleAccessibilityPermissionDenied(
-                logText: "Codex Taskmaster 缺少辅助功能权限，无法发送按键。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。"
-            )
+        guard ensureAccessibilityPermission(
+            logText: "Codex Taskmaster 缺少辅助功能权限，无法发送按键。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。"
+        ) else {
             return
         }
         performValidatedLoopAction(
@@ -5679,13 +5694,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         guard preflightRuntimePermissions(actionName: "开始循环", requiresLoopState: true) else {
             return
         }
-        guard sendRequestCoordinator.ensurePermission(prompt: true) else {
-            handleAccessibilityPermissionDenied(
-                logText: "Codex Taskmaster 缺少辅助功能权限，无法处理循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。",
-                actionStatusText: "开始循环失败"
-            ) {
+        guard ensureAccessibilityPermission(
+            logText: "Codex Taskmaster 缺少辅助功能权限，无法处理循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。",
+            actionStatusText: "开始循环失败",
+            sideEffect: {
                 self.saveCurrentLoopAsStoppedAsync(target: target, interval: interval, reason: "missing_accessibility_permission")
             }
+        ) else {
             return
         }
         performValidatedLoopAction(
@@ -5825,11 +5840,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
 
-        guard sendRequestCoordinator.ensurePermission(prompt: true) else {
-            handleAccessibilityPermissionDenied(
-                logText: "Codex Taskmaster 缺少辅助功能权限，无法恢复循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。",
-                actionStatusText: "恢复当前失败"
-            )
+        guard ensureAccessibilityPermission(
+            logText: "Codex Taskmaster 缺少辅助功能权限，无法恢复循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。",
+            actionStatusText: "恢复当前失败"
+        ) else {
             return
         }
 
