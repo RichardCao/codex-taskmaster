@@ -2403,6 +2403,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setStatus(sessionProviderLoadingStatusText(), key: "action")
     }
 
+    private func withProviderMigrationTargetProvider(
+        _ body: @escaping (String) -> Void
+    ) {
+        beginProviderMigrationLoading()
+        refreshConfiguredModelProviderCache(updateButtons: false) { targetProvider in
+            guard let targetProvider else {
+                self.handleProviderMigrationMissingProvider()
+                return
+            }
+            self.beginProviderMigrationPlanLoading()
+            body(targetProvider)
+        }
+    }
+
     private func beginProviderMigrationPlanLoading() {
         setStatus(sessionProviderMigrationPlanLoadingStatusText(), key: "action")
     }
@@ -5922,16 +5936,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             handleSessionSelectionRequired(logText: sessionProviderMigrationSelectionRequiredLogText())
             return
         }
-        beginProviderMigrationLoading()
-
-        refreshConfiguredModelProviderCache(updateButtons: false) { targetProvider in
-            guard let targetProvider else {
-                self.handleProviderMigrationMissingProvider()
-                return
-            }
-
-            self.beginProviderMigrationPlanLoading()
-
+        withProviderMigrationTargetProvider { targetProvider in
             self.sessionProviderPlanAsync(threadID: session.threadID, targetProvider: targetProvider) { plan in
                 guard let plan = self.resolvedProviderMigrationPlan(
                     plan,
@@ -6028,16 +6033,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     @objc
     private func migrateAllSessionsToCurrentProvider() {
-        beginProviderMigrationLoading()
-
-        refreshConfiguredModelProviderCache(updateButtons: false) { targetProvider in
-            guard let targetProvider else {
-                self.handleProviderMigrationMissingProvider()
-                return
-            }
-
-            self.beginProviderMigrationPlanLoading()
-
+        withProviderMigrationTargetProvider { targetProvider in
             self.allSessionProviderPlanAsync(targetProvider: targetProvider) { plan in
                 guard let plan = self.resolvedProviderMigrationPlan(
                     plan,
