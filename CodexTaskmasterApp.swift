@@ -2355,7 +2355,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func restoreSelectedSessionActionControls(selectedSessionIsArchived: Bool) {
-        let hasSelection = selectedSessionSnapshot() != nil
+        let hasSelection = hasSelectedSession()
         renameField.isEnabled = hasSelection && !selectedSessionIsArchived
         saveRenameButton.isEnabled = hasSelection && !selectedSessionIsArchived
         archiveSessionButton.isEnabled = hasSelection && !selectedSessionIsArchived
@@ -2565,6 +2565,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let selectedRow = sessionStatusTableView.selectedRow
         guard selectedRow >= 0, selectedRow < sessionSnapshots.count else { return nil }
         return sessionSnapshots[selectedRow]
+    }
+
+    private func hasSelectedSession() -> Bool {
+        selectedSessionSnapshot() != nil
     }
 
     private func updateLoopActionButtons() {
@@ -4167,7 +4171,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func updateActivityLogControls() {
-        let hasSelection = selectedSessionSnapshot() != nil
+        let hasSelection = hasSelectedSession()
         exportSessionLogButton.isEnabled = hasSelection
         activityLogSelectedSessionCheckbox.state = isFilteringActivityLogBySelectedSession ? .on : .off
         activityLogSelectedSessionCheckbox.isEnabled = hasSelection || isFilteringActivityLogBySelectedSession
@@ -4295,7 +4299,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func toggleActivityLogSelectedSessionFilter() {
         if activityLogSelectedSessionCheckbox.state == .on {
-            guard selectedSessionSnapshot() != nil else {
+            guard hasSelectedSession() else {
                 activityLogSelectedSessionCheckbox.state = .off
                 setStatus("请先选择一个 Session，再启用当前 Session 日志过滤", key: "general")
                 NSSound.beep()
