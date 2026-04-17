@@ -481,7 +481,7 @@ final class LoopCommandService {
     ) {
         helperService.runAsync(arguments: ["status", "--json"], qos: qos) { result in
             guard result.status == 0 else {
-                completion(nil, result.stderr.isEmpty ? "Failed to load active loops." : result.stderr)
+                completion(nil, result.primaryDetail ?? "Failed to load active loops.")
                 return
             }
             guard let decoded = parseLoopStatusJSONOutput(result.stdout) else {
