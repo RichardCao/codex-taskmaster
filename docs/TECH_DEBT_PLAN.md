@@ -311,6 +311,7 @@
 - 开始循环/恢复当前的目标校验失败分支收口到控制器 helper
 - 发送一次/开始循环/冲突替换启动的 force-send 展示参数拼装收口到控制器 helper
 - stop/delete loop 的 target 填充与 helper 调用收口到控制器 helper
+- `HelperCommandResult` 的首选错误详情访问收口到 core accessor
 
 下一步建议：
 

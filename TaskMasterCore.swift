@@ -160,6 +160,11 @@ struct HelperCommandResult {
     let stdout: String
     let stderr: String
 
+    var primaryDetail: String? {
+        let detail = stderr.isEmpty ? stdout : stderr
+        return detail.isEmpty ? nil : detail
+    }
+
     var combinedText: String {
         [stdout, stderr]
             .filter { !$0.isEmpty }
@@ -280,7 +285,7 @@ final class SessionCommandService {
         if result.status == 0 {
             return (true, result.stdout)
         }
-        return (false, [result.stderr, result.stdout].first { !$0.isEmpty } ?? "迁移 provider 失败")
+        return (false, result.primaryDetail ?? "迁移 provider 失败")
     }
 
     func migrateAllSessionsProvider(targetProvider: String) -> (success: Bool, detail: String) {
@@ -288,7 +293,7 @@ final class SessionCommandService {
         if result.status == 0 {
             return (true, result.stdout)
         }
-        return (false, [result.stderr, result.stdout].first { !$0.isEmpty } ?? "迁移全部 session provider 失败")
+        return (false, result.primaryDetail ?? "迁移全部 session provider 失败")
     }
 
     func updateSessionName(threadID: String, newName: String) -> (success: Bool, error: String) {
@@ -296,7 +301,7 @@ final class SessionCommandService {
         if result.status == 0 {
             return (true, "")
         }
-        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? (newName.isEmpty ? "清空名称失败" : "重命名失败")
+        let detail = result.primaryDetail ?? (newName.isEmpty ? "清空名称失败" : "重命名失败")
         return (false, detail)
     }
 
@@ -305,7 +310,7 @@ final class SessionCommandService {
         if result.status == 0 {
             return (true, "")
         }
-        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? "归档 session 失败"
+        let detail = result.primaryDetail ?? "归档 session 失败"
         return (false, detail)
     }
 
@@ -314,7 +319,7 @@ final class SessionCommandService {
         if result.status == 0 {
             return (true, "")
         }
-        let detail = [result.stderr, result.stdout].first { !$0.isEmpty } ?? "恢复归档失败"
+        let detail = result.primaryDetail ?? "恢复归档失败"
         return (false, detail)
     }
 
@@ -371,7 +376,7 @@ final class SessionScanService {
     func sessionCount(processCallbacks: HelperCommandProcessCallbacks? = nil) -> Result<Int, Failure> {
         let result = run(arguments: ["session-count"], processCallbacks: processCallbacks)
         guard result.status == 0 else {
-            return .failure(Failure(detail: result.stderr.isEmpty ? result.stdout : result.stderr))
+            return .failure(Failure(detail: result.primaryDetail ?? "session-count 失败"))
         }
         guard let totalCount = parseSessionCountOutput(result.stdout) else {
             return .failure(Failure(detail: result.stdout.isEmpty ? "无法解析 session-count 输出" : result.stdout))
@@ -385,7 +390,7 @@ final class SessionScanService {
             processCallbacks: processCallbacks
         )
         guard result.status == 0 else {
-            return .failure(Failure(detail: result.stderr.isEmpty ? result.stdout : result.stderr))
+            return .failure(Failure(detail: result.primaryDetail ?? "probe-all 失败"))
         }
         return .success(parseProbeAllJSONOutput(result.stdout))
     }
@@ -393,7 +398,7 @@ final class SessionScanService {
     func threadListArchived(processCallbacks: HelperCommandProcessCallbacks? = nil) -> Result<[SessionSnapshot], Failure> {
         let result = run(arguments: ["thread-list", "--archived"], processCallbacks: processCallbacks)
         guard result.status == 0 else {
-            return .failure(Failure(detail: result.stderr.isEmpty ? result.stdout : result.stderr))
+            return .failure(Failure(detail: result.primaryDetail ?? "thread-list --archived 失败"))
         }
         return .success(parseThreadListOutput(result.stdout, archived: true))
     }
@@ -401,7 +406,7 @@ final class SessionScanService {
     func probeSession(threadID: String, processCallbacks: HelperCommandProcessCallbacks? = nil) -> Result<SessionSnapshot, Failure> {
         let result = run(arguments: ["probe", "-t", threadID], processCallbacks: processCallbacks)
         guard result.status == 0 else {
-            return .failure(Failure(detail: result.stderr.isEmpty ? result.stdout : result.stderr))
+            return .failure(Failure(detail: result.primaryDetail ?? "probe 失败"))
         }
         guard let snapshot = parseProbeAllOutput(result.stdout).first else {
             return .failure(Failure(detail: result.stdout.isEmpty ? "无法解析 session probe 输出" : result.stdout))
