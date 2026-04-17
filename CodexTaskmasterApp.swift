@@ -2265,6 +2265,15 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setStatus(statusText, key: "action")
     }
 
+    private func handleLoopValidationFailure(
+        statusText: String,
+        sideEffect: (() -> Void)? = nil
+    ) {
+        sideEffect?()
+        setStatus(statusText, key: "action", color: .systemRed)
+        setButtonsEnabled(true)
+    }
+
     private func removeSessionSnapshots(threadIDs: [String]) {
         let deletedSet = Set(threadIDs)
         guard !deletedSet.isEmpty else { return }
@@ -5408,11 +5417,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         validateUniqueTargetAsync(target: target, actionName: "开始循环") { isValid in
             guard isValid else {
                 let reason = self.lastTargetValidationFailureReason ?? "start_failed"
-                self.saveStoppedLoopEntryAsync(target: target, interval: interval, message: self.currentMessage(), forceSend: self.isForceSendEnabled(), reason: reason) { _ in
-                    self.requestLoopSnapshotRefresh()
+                self.handleLoopValidationFailure(statusText: "开始循环失败") {
+                    self.saveStoppedLoopEntryAsync(
+                        target: target,
+                        interval: interval,
+                        message: self.currentMessage(),
+                        forceSend: self.isForceSendEnabled(),
+                        reason: reason
+                    ) { _ in
+                        self.requestLoopSnapshotRefresh()
+                    }
                 }
-                self.setStatus("开始循环失败", key: "action", color: .systemRed)
-                self.setButtonsEnabled(true)
                 return
             }
 
@@ -5562,9 +5577,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         beginLoopActionValidation(statusText: "恢复当前校验中…")
         validateUniqueTargetAsync(target: loop.target, actionName: "恢复当前") { isValid in
             guard isValid else {
-                self.setStatus("恢复当前失败", key: "action", color: .systemRed)
-                self.requestLoopSnapshotRefresh()
-                self.setButtonsEnabled(true)
+                self.handleLoopValidationFailure(statusText: "恢复当前失败") {
+                    self.requestLoopSnapshotRefresh()
+                }
                 return
             }
             self.runHelper(actionName: "恢复当前", displayArguments: ["loop-resume", "-t", loop.target]) { completion in
