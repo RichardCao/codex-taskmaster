@@ -322,6 +322,7 @@
 - loop status 加载失败详情改为复用 `HelperCommandResult.primaryDetail`
 - rename/archive/restore/delete 的 session 选择读取统一复用 `selectedSessionSnapshot()`
 - session detail 面板的选中 session 读取统一复用 `selectedSessionSnapshot()`
+- 导出当前 Session 日志的未选中分支复用 `handleSessionSelectionRequired`
 
 下一步建议：
 

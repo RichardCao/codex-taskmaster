@@ -4253,9 +4253,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func exportSelectedSessionLogs() {
         guard let session = selectedSessionSnapshot() else {
-            appendOutput("请先选择一条 Session，再导出相关日志。")
-            setStatus("请选择一个 Session", key: "general")
-            NSSound.beep()
+            handleSessionSelectionRequired(logText: "请先选择一条 Session，再导出相关日志。")
             return
         }
 
