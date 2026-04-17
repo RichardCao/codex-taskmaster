@@ -2274,6 +2274,19 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setButtonsEnabled(true)
     }
 
+    private func runLoopTargetAction(
+        actionName: String,
+        commandName: String,
+        loop: LoopSnapshot,
+        invoke: @escaping (String, @escaping (HelperCommandResult) -> Void) -> Void
+    ) {
+        targetField.stringValue = loop.target
+        let target = loop.target
+        runHelper(actionName: actionName, displayArguments: [commandName, "-t", target]) { completion in
+            invoke(target, completion)
+        }
+    }
+
     private func removeSessionSnapshots(threadIDs: [String]) {
         let deletedSet = Set(threadIDs)
         guard !deletedSet.isEmpty else { return }
@@ -5534,9 +5547,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             )
             return
         }
-        targetField.stringValue = loop.target
-        let target = loop.target
-        runHelper(actionName: "停止当前", displayArguments: ["stop", "-t", target]) { completion in
+        runLoopTargetAction(actionName: "停止当前", commandName: "stop", loop: loop) { target, completion in
             self.loopCommandService.stopLoopAsync(target: target, completion: completion)
         }
     }
@@ -5594,10 +5605,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             handleLoopSelectionRequired()
             return
         }
-
-        targetField.stringValue = loop.target
-        let target = loop.target
-        runHelper(actionName: "删除当前", displayArguments: ["loop-delete", "-t", target]) { completion in
+        runLoopTargetAction(actionName: "删除当前", commandName: "loop-delete", loop: loop) { target, completion in
             self.loopCommandService.deleteLoopAsync(target: target, completion: completion)
         }
     }
