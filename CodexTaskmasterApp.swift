@@ -2459,6 +2459,30 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         appendOutput(startLogText)
     }
 
+    private func performProviderMigrationExecution(
+        runningStatusText: String,
+        startLogText: String,
+        completionStatusText: String,
+        failureStatusText: String,
+        work: @escaping () -> (success: Bool, detail: String)
+    ) {
+        beginProviderMigrationExecution(
+            runningStatusText: runningStatusText,
+            startLogText: startLogText
+        )
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = work()
+            DispatchQueue.main.async {
+                self.applyProviderMigrationExecutionResult(
+                    success: result.success,
+                    detail: result.detail,
+                    completionStatusText: completionStatusText,
+                    failureStatusText: failureStatusText
+                )
+            }
+        }
+    }
+
     private func applyProviderMigrationExecutionResult(
         success: Bool,
         detail: String,
@@ -6007,25 +6031,21 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     includeFamily = false
                 }
 
-                self.beginProviderMigrationExecution(
+                self.performProviderMigrationExecution(
                     runningStatusText: sessionProviderMigrationRunningStatusText(),
                     startLogText: sessionProviderMigrationStartLogText(
                         threadID: session.threadID,
                         targetProvider: targetProvider,
                         includeFamily: includeFamily
+                    ),
+                    completionStatusText: sessionProviderMigrationCompletionStatusText(),
+                    failureStatusText: sessionProviderMigrationFailureStatusText()
+                ) {
+                    self.migrateSessionProvider(
+                        threadID: session.threadID,
+                        targetProvider: targetProvider,
+                        includeFamily: includeFamily
                     )
-                )
-
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let result = self.migrateSessionProvider(threadID: session.threadID, targetProvider: targetProvider, includeFamily: includeFamily)
-                    DispatchQueue.main.async {
-                        self.applyProviderMigrationExecutionResult(
-                            success: result.success,
-                            detail: result.detail,
-                            completionStatusText: sessionProviderMigrationCompletionStatusText(),
-                            failureStatusText: sessionProviderMigrationFailureStatusText()
-                        )
-                    }
                 }
             }
         }
@@ -6070,21 +6090,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     return
                 }
 
-                self.beginProviderMigrationExecution(
+                self.performProviderMigrationExecution(
                     runningStatusText: allSessionProviderMigrationRunningStatusText(),
-                    startLogText: allSessionProviderMigrationStartLogText(targetProvider: targetProvider)
-                )
-
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let result = self.migrateAllSessionsProvider(targetProvider: targetProvider)
-                    DispatchQueue.main.async {
-                        self.applyProviderMigrationExecutionResult(
-                            success: result.success,
-                            detail: result.detail,
-                            completionStatusText: allSessionProviderMigrationCompletionStatusText(),
-                            failureStatusText: allSessionProviderMigrationFailureStatusText()
-                        )
-                    }
+                    startLogText: allSessionProviderMigrationStartLogText(targetProvider: targetProvider),
+                    completionStatusText: allSessionProviderMigrationCompletionStatusText(),
+                    failureStatusText: allSessionProviderMigrationFailureStatusText()
+                ) {
+                    self.migrateAllSessionsProvider(targetProvider: targetProvider)
                 }
             }
         }
