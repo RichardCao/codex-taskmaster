@@ -4780,7 +4780,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         lastTargetValidationFailureReason = nil
         lastTargetValidationFailureDetail = ""
         guard result.status == 0 else {
-            let detail = result.stderr.isEmpty ? result.stdout : result.stderr
+            let detail = result.primaryDetail ?? ""
             if isAmbiguousTargetError(detail) {
                 lastTargetValidationFailureReason = "ambiguous_target"
                 lastTargetValidationFailureDetail = detail
@@ -5072,7 +5072,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             for conflict in conflicts {
                 let stopResult = self.loopCommandService.runCommand(arguments: ["stop", "-t", conflict.target])
                 if stopResult.status != 0 {
-                    failureText = [stopResult.stderr, stopResult.stdout].first(where: { !$0.isEmpty }) ?? "停止旧循环失败"
+                    failureText = stopResult.primaryDetail ?? "停止旧循环失败"
                     break
                 }
             }
