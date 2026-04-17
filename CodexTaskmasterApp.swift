@@ -2382,8 +2382,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func handleProviderMigrationMissingProvider() {
-        setButtonsEnabled(true)
-        updateProviderMigrationButtons()
+        finishProviderMigrationInteraction()
         appendOutput(sessionProviderMissingLogText())
         setStatus(sessionProviderMissingStatusText(), key: "action")
         NSSound.beep()
@@ -2401,6 +2400,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func finishProviderMigrationPlanLoading() {
+        finishProviderMigrationInteraction()
+    }
+
+    private func finishProviderMigrationInteraction() {
         setButtonsEnabled(true)
         updateProviderMigrationButtons()
     }
@@ -2428,8 +2431,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         completionStatusText: String,
         failureStatusText: String
     ) {
-        setButtonsEnabled(true)
-        updateProviderMigrationButtons()
+        finishProviderMigrationInteraction()
         if success {
             setStatus(completionStatusText, key: "action")
             appendOutput(detail)
