@@ -2390,6 +2390,23 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         )
     }
 
+    private func failSessionDeleteAction(
+        session: SessionSnapshot,
+        detail: String,
+        failedFields: [String: String]?
+    ) {
+        showSessionDeleteBlockedAlertIfNeeded(
+            session: session,
+            detail: detail,
+            failedFields: failedFields
+        )
+        updateSessionDetailView()
+        handleSelectedSessionActionFailure(
+            statusText: sessionDeleteFailureStatusText(),
+            detail: detail
+        )
+    }
+
     private func completeSelectedSessionRemovalAction(
         threadIDs: [String],
         completionStatusText: String,
@@ -6005,15 +6022,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                                 completionLogText: sessionDeleteCompletionLogText(detail: result.detail, deletedThreadIDs: threadIDs.ordered)
                             )
                         } else {
-                            self.showSessionDeleteBlockedAlertIfNeeded(
+                            self.failSessionDeleteAction(
                                 session: session,
                                 detail: result.detail,
                                 failedFields: result.failedFields
-                            )
-                            self.updateSessionDetailView()
-                            self.handleSelectedSessionActionFailure(
-                                statusText: sessionDeleteFailureStatusText(),
-                                detail: result.detail
                             )
                         }
                     }

@@ -311,6 +311,7 @@
 - session delete 取消状态回写收口到控制器 helper
 - session delete 的展示/执行线程 ID 计算收口到控制器 helper
 - session delete live-session 阻止告警分支收口到控制器 helper
+- session delete 失败时的告警、详情刷新与失败态回写收口到控制器 helper
 - session action 被当前 session 状态阻止时的日志/状态/beep 收口到控制器 helper
 - provider migration noop 提示框/日志/状态收口到控制器 helper
 - loop action 未选中循环任务的日志/状态/beep 分支收口到控制器 helper
