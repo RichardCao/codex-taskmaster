@@ -2251,6 +2251,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         appendOutput(startLogText)
     }
 
+    private func completeSelectedSessionRemovalAction(
+        threadIDs: [String],
+        completionStatusText: String,
+        completionLogText: String
+    ) {
+        removeSessionSnapshots(threadIDs: threadIDs)
+        setStatus(completionStatusText, key: "action")
+        appendOutput(completionLogText)
+        refreshLoopsSnapshot()
+    }
+
     private func handleSelectedSessionActionFailure(statusText: String, detail: String) {
         setStatus(statusText, key: "action")
         appendStderrDetailIfPresent(detail)
@@ -5654,10 +5665,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
             DispatchQueue.main.async {
                 if result.success {
-                    self.removeSessionSnapshots(threadIDs: [session.threadID])
-                    self.setStatus(sessionArchiveCompletionStatusText(), key: "action")
-                    self.appendOutput(archivedSessionCompletionLogText(threadID: session.threadID))
-                    self.refreshLoopsSnapshot()
+                    self.completeSelectedSessionRemovalAction(
+                        threadIDs: [session.threadID],
+                        completionStatusText: sessionArchiveCompletionStatusText(),
+                        completionLogText: archivedSessionCompletionLogText(threadID: session.threadID)
+                    )
                 } else {
                     if let fields = self.parseStructuredHelperFields(result.error) {
                         let reason = fields["reason"] ?? ""
@@ -5721,10 +5733,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
             DispatchQueue.main.async {
                 if result.success {
-                    self.removeSessionSnapshots(threadIDs: [session.threadID])
-                    self.setStatus(sessionRestoreCompletionStatusText(), key: "action")
-                    self.appendOutput(sessionRestoreCompletionLogText(threadID: session.threadID))
-                    self.refreshLoopsSnapshot()
+                    self.completeSelectedSessionRemovalAction(
+                        threadIDs: [session.threadID],
+                        completionStatusText: sessionRestoreCompletionStatusText(),
+                        completionLogText: sessionRestoreCompletionLogText(threadID: session.threadID)
+                    )
                 } else {
                     self.renameField.isEnabled = false
                     self.saveRenameButton.isEnabled = false
@@ -5787,10 +5800,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
                     DispatchQueue.main.async {
                         if result.success {
-                            self.removeSessionSnapshots(threadIDs: orderedThreadIDs)
-                            self.setStatus(sessionDeleteCompletionStatusText(), key: "action")
-                            self.appendOutput(sessionDeleteCompletionLogText(detail: result.detail, deletedThreadIDs: orderedThreadIDs))
-                            self.refreshLoopsSnapshot()
+                            self.completeSelectedSessionRemovalAction(
+                                threadIDs: orderedThreadIDs,
+                                completionStatusText: sessionDeleteCompletionStatusText(),
+                                completionLogText: sessionDeleteCompletionLogText(detail: result.detail, deletedThreadIDs: orderedThreadIDs)
+                            )
                         } else {
                             if let fields = result.failedFields {
                                 let reason = fields["reason"] ?? ""
