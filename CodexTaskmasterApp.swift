@@ -2390,6 +2390,24 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         )
     }
 
+    private func showSessionArchiveBlockedAlertIfNeeded(
+        session: SessionSnapshot,
+        error: String
+    ) {
+        guard let fields = parseStructuredHelperFields(error) else { return }
+        let reason = fields["reason"] ?? ""
+        guard reason == "session_archive_live" || reason == "session_archive_live_ambiguous" else {
+            return
+        }
+        let detail = fields["detail"] ?? error
+        showSessionActionBlockedAlert(
+            actionLabel: "归档",
+            session: session,
+            detail: detail,
+            ambiguous: reason == "session_archive_live_ambiguous"
+        )
+    }
+
     private func failSessionDeleteAction(
         session: SessionSnapshot,
         detail: String,
@@ -5950,13 +5968,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             completionLogText: archivedSessionCompletionLogText(threadID: session.threadID),
             failureStatusText: sessionArchiveFailureStatusText(),
             beforeFailure: { error in
-                if let fields = self.parseStructuredHelperFields(error) {
-                    let reason = fields["reason"] ?? ""
-                    if reason == "session_archive_live" || reason == "session_archive_live_ambiguous" {
-                        let detail = fields["detail"] ?? error
-                        self.showSessionActionBlockedAlert(actionLabel: "归档", session: session, detail: detail, ambiguous: reason == "session_archive_live_ambiguous")
-                    }
-                }
+                self.showSessionArchiveBlockedAlertIfNeeded(session: session, error: error)
             }
         ) {
             self.archiveSession(threadID: session.threadID)
