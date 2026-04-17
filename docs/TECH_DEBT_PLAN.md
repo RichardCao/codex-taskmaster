@@ -328,6 +328,7 @@
 - 发送一次/开始循环的空消息失败回写收口到控制器 helper
 - 发送一次/开始循环/恢复当前进入校验态的按钮/状态切换收口到控制器 helper
 - 开始循环/恢复当前的目标校验失败分支收口到控制器 helper
+- 开始循环/恢复当前的目标校验失败回写收口到 `performValidatedLoopAction` 重载
 - 发送一次/开始循环/冲突替换启动的 force-send 展示参数拼装收口到控制器 helper
 - stop/delete loop 的 target 填充与 helper 调用收口到控制器 helper
 - `HelperCommandResult` 的首选错误详情访问收口到 core accessor

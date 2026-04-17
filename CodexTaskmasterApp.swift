@@ -2308,6 +2308,28 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
+    private func performValidatedLoopAction(
+        target: String,
+        actionName: String,
+        validationStatusText: String,
+        failureStatusText: String,
+        failureSideEffect: (() -> Void)? = nil,
+        onValid: @escaping () -> Void
+    ) {
+        performValidatedLoopAction(
+            target: target,
+            actionName: actionName,
+            validationStatusText: validationStatusText
+        ) {
+            self.handleLoopValidationFailure(
+                statusText: failureStatusText,
+                sideEffect: failureSideEffect
+            )
+        } onValid: {
+            onValid()
+        }
+    }
+
     private func handleLoopValidationFailure(
         statusText: String,
         sideEffect: (() -> Void)? = nil
@@ -5756,13 +5778,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         performValidatedLoopAction(
             target: target,
             actionName: "开始循环",
-            validationStatusText: "开始循环校验中…"
-        ) {
-            let reason = self.lastTargetValidationFailureReason ?? "start_failed"
-            self.handleLoopValidationFailure(statusText: "开始循环失败") {
+            validationStatusText: "开始循环校验中…",
+            failureStatusText: "开始循环失败",
+            failureSideEffect: {
+                let reason = self.lastTargetValidationFailureReason ?? "start_failed"
                 self.saveCurrentLoopAsStoppedAsync(target: target, interval: interval, reason: reason)
             }
-        } onValid: {
+        ) {
             let options = self.currentLoopMessageOptions()
             let conflicts = self.conflictingLoops(for: target)
             if !conflicts.isEmpty {
@@ -5895,12 +5917,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         performValidatedLoopAction(
             target: loop.target,
             actionName: "恢复当前",
-            validationStatusText: "恢复当前校验中…"
-        ) {
-            self.handleLoopValidationFailure(statusText: "恢复当前失败") {
+            validationStatusText: "恢复当前校验中…",
+            failureStatusText: "恢复当前失败",
+            failureSideEffect: {
                 self.requestLoopSnapshotRefresh()
             }
-        } onValid: {
+        ) {
             self.runHelper(actionName: "恢复当前", displayArguments: ["loop-resume", "-t", loop.target]) { completion in
                 self.loopCommandService.resumeLoopAsync(target: loop.target, completion: completion)
             }
