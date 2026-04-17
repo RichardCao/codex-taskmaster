@@ -323,6 +323,7 @@
 - rename/archive/restore/delete 的 session 选择读取统一复用 `selectedSessionSnapshot()`
 - session detail 面板的选中 session 读取统一复用 `selectedSessionSnapshot()`
 - 导出当前 Session 日志的未选中分支复用 `handleSessionSelectionRequired`
+- rename/archive/restore 失败后的 session 操作区按钮恢复收口到控制器 helper
 
 下一步建议：
 

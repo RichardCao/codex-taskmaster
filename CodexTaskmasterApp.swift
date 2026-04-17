@@ -2350,6 +2350,16 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         refreshLoopsSnapshot()
     }
 
+    private func restoreSelectedSessionActionControls(selectedSessionIsArchived: Bool) {
+        let hasSelection = selectedSessionSnapshot() != nil
+        renameField.isEnabled = hasSelection && !selectedSessionIsArchived
+        saveRenameButton.isEnabled = hasSelection && !selectedSessionIsArchived
+        archiveSessionButton.isEnabled = hasSelection && !selectedSessionIsArchived
+        restoreSessionButton.isEnabled = hasSelection && selectedSessionIsArchived
+        deleteSessionButton.isEnabled = hasSelection
+        updateProviderMigrationButtons()
+    }
+
     private func handleSelectedSessionActionFailure(statusText: String, detail: String) {
         setStatus(statusText, key: "action")
         appendStderrDetailIfPresent(detail)
@@ -5658,12 +5668,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             let result = self.updateSessionName(threadID: session.threadID, newName: newName)
 
             DispatchQueue.main.async {
-                self.saveRenameButton.isEnabled = true
-                self.renameField.isEnabled = true
-                self.archiveSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
-                self.restoreSessionButton.isEnabled = false
-                self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
-                self.updateProviderMigrationButtons()
+                self.restoreSelectedSessionActionControls(selectedSessionIsArchived: false)
 
                 if result.success {
                     if let index = self.allSessionSnapshots.firstIndex(where: { $0.threadID == session.threadID }) {
@@ -5759,12 +5764,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                             self.showSessionActionBlockedAlert(actionLabel: "归档", session: session, detail: detail, ambiguous: reason == "session_archive_live_ambiguous")
                         }
                     }
-                    self.renameField.isEnabled = self.sessionStatusTableView.selectedRow >= 0
-                    self.saveRenameButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
-                    self.archiveSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
-                    self.restoreSessionButton.isEnabled = false
-                    self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
-                    self.updateProviderMigrationButtons()
+                    self.restoreSelectedSessionActionControls(selectedSessionIsArchived: false)
                     self.handleSelectedSessionActionFailure(
                         statusText: sessionArchiveFailureStatusText(),
                         detail: result.error
@@ -5818,12 +5818,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                         completionLogText: sessionRestoreCompletionLogText(threadID: session.threadID)
                     )
                 } else {
-                    self.renameField.isEnabled = false
-                    self.saveRenameButton.isEnabled = false
-                    self.archiveSessionButton.isEnabled = false
-                    self.restoreSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
-                    self.deleteSessionButton.isEnabled = self.sessionStatusTableView.selectedRow >= 0
-                    self.updateProviderMigrationButtons()
+                    self.restoreSelectedSessionActionControls(selectedSessionIsArchived: true)
                     self.handleSelectedSessionActionFailure(
                         statusText: sessionRestoreFailureStatusText(),
                         detail: result.error
