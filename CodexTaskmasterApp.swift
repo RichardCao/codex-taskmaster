@@ -2265,6 +2265,23 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setStatus(statusText, key: "action")
     }
 
+    private func performValidatedLoopAction(
+        target: String,
+        actionName: String,
+        validationStatusText: String,
+        onInvalid: @escaping () -> Void,
+        onValid: @escaping () -> Void
+    ) {
+        beginLoopActionValidation(statusText: validationStatusText)
+        validateUniqueTargetAsync(target: target, actionName: actionName) { isValid in
+            guard isValid else {
+                onInvalid()
+                return
+            }
+            onValid()
+        }
+    }
+
     private func handleLoopValidationFailure(
         statusText: String,
         sideEffect: (() -> Void)? = nil
@@ -5378,12 +5395,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             )
             return
         }
-        beginLoopActionValidation(statusText: "发送一次校验中…")
-        validateUniqueTargetAsync(target: target, actionName: "发送") { isValid in
-            guard isValid else {
-                self.setButtonsEnabled(true)
-                return
-            }
+        performValidatedLoopAction(
+            target: target,
+            actionName: "发送",
+            validationStatusText: "发送一次校验中…"
+        ) {
+            self.setButtonsEnabled(true)
+        } onValid: {
             let message = self.currentMessage()
             let forceSend = self.isForceSendEnabled()
             let displayArguments = self.helperDisplayArguments(
@@ -5429,24 +5447,26 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             }
             return
         }
-        beginLoopActionValidation(statusText: "开始循环校验中…")
-        validateUniqueTargetAsync(target: target, actionName: "开始循环") { isValid in
-            guard isValid else {
-                let reason = self.lastTargetValidationFailureReason ?? "start_failed"
-                self.handleLoopValidationFailure(statusText: "开始循环失败") {
-                    self.saveStoppedLoopEntryAsync(
-                        target: target,
-                        interval: interval,
-                        message: self.currentMessage(),
-                        forceSend: self.isForceSendEnabled(),
-                        reason: reason
-                    ) { _ in
-                        self.requestLoopSnapshotRefresh()
-                    }
+        performValidatedLoopAction(
+            target: target,
+            actionName: "开始循环",
+            validationStatusText: "开始循环校验中…"
+        ) {
+            let reason = self.lastTargetValidationFailureReason ?? "start_failed"
+            self.handleLoopValidationFailure(statusText: "开始循环失败") {
+                self.saveStoppedLoopEntryAsync(
+                    target: target,
+                    interval: interval,
+                    message: self.currentMessage(),
+                    forceSend: self.isForceSendEnabled(),
+                    reason: reason
+                ) { _ in
+                    self.requestLoopSnapshotRefresh()
                 }
-                return
             }
-
+        } onValid: {
+            let message = self.currentMessage()
+            let forceSend = self.isForceSendEnabled()
             let conflicts = self.conflictingLoops(for: target)
             if !conflicts.isEmpty {
                 self.setButtonsEnabled(true)
@@ -5458,15 +5478,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.runLoopReplacement(
                     target: target,
                     interval: interval,
-                    message: self.currentMessage(),
-                    forceSend: self.isForceSendEnabled(),
+                    message: message,
+                    forceSend: forceSend,
                     conflicts: conflicts
                 )
                 return
             }
-
-            let message = self.currentMessage()
-            let forceSend = self.isForceSendEnabled()
             let displayArguments = self.helperDisplayArguments(
                 base: ["start", "-t", target, "-i", interval, "-m", message],
                 forceSend: forceSend
@@ -5585,14 +5602,15 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
 
         targetField.stringValue = loop.target
-        beginLoopActionValidation(statusText: "恢复当前校验中…")
-        validateUniqueTargetAsync(target: loop.target, actionName: "恢复当前") { isValid in
-            guard isValid else {
-                self.handleLoopValidationFailure(statusText: "恢复当前失败") {
-                    self.requestLoopSnapshotRefresh()
-                }
-                return
+        performValidatedLoopAction(
+            target: loop.target,
+            actionName: "恢复当前",
+            validationStatusText: "恢复当前校验中…"
+        ) {
+            self.handleLoopValidationFailure(statusText: "恢复当前失败") {
+                self.requestLoopSnapshotRefresh()
             }
+        } onValid: {
             self.runHelper(actionName: "恢复当前", displayArguments: ["loop-resume", "-t", loop.target]) { completion in
                 self.loopCommandService.resumeLoopAsync(target: loop.target, completion: completion)
             }
