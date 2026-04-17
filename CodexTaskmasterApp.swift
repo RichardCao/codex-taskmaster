@@ -2482,6 +2482,27 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
+    private func renamedSessionSnapshot(from previous: SessionSnapshot, newName: String) -> SessionSnapshot {
+        SessionSnapshot(
+            name: newName,
+            target: newName.isEmpty ? previous.threadID : newName,
+            threadID: previous.threadID,
+            provider: previous.provider,
+            source: previous.source,
+            parentThreadID: previous.parentThreadID,
+            agentNickname: previous.agentNickname,
+            agentRole: previous.agentRole,
+            status: previous.status,
+            reason: previous.reason,
+            terminalState: previous.terminalState,
+            tty: previous.tty,
+            updatedAtEpoch: previous.updatedAtEpoch,
+            rolloutPath: previous.rolloutPath,
+            preview: previous.preview,
+            isArchived: previous.isArchived
+        )
+    }
+
     private func completeSelectedSessionRemovalAction(
         threadIDs: [String],
         completionStatusText: String,
@@ -5915,24 +5936,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 if result.success {
                     if let index = self.allSessionSnapshots.firstIndex(where: { $0.threadID == session.threadID }) {
                         let previous = self.allSessionSnapshots[index]
-                        self.allSessionSnapshots[index] = SessionSnapshot(
-                            name: newName,
-                            target: newName.isEmpty ? previous.threadID : newName,
-                            threadID: previous.threadID,
-                            provider: previous.provider,
-                            source: previous.source,
-                            parentThreadID: previous.parentThreadID,
-                            agentNickname: previous.agentNickname,
-                            agentRole: previous.agentRole,
-                            status: previous.status,
-                            reason: previous.reason,
-                            terminalState: previous.terminalState,
-                            tty: previous.tty,
-                            updatedAtEpoch: previous.updatedAtEpoch,
-                            rolloutPath: previous.rolloutPath,
-                            preview: previous.preview,
-                            isArchived: previous.isArchived
-                        )
+                        self.allSessionSnapshots[index] = self.renamedSessionSnapshot(from: previous, newName: newName)
                     }
                     self.invalidateSessionSearch()
                     self.renderSessionSnapshots(
