@@ -2260,6 +2260,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func beginLoopActionValidation(statusText: String) {
+        setButtonsEnabled(false)
+        setStatus(statusText, key: "action")
+    }
+
     private func removeSessionSnapshots(threadIDs: [String]) {
         let deletedSet = Set(threadIDs)
         guard !deletedSet.isEmpty else { return }
@@ -5345,8 +5350,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             )
             return
         }
-        setButtonsEnabled(false)
-        setStatus("发送一次校验中…", key: "action")
+        beginLoopActionValidation(statusText: "发送一次校验中…")
         validateUniqueTargetAsync(target: target, actionName: "发送") { isValid in
             guard isValid else {
                 self.setButtonsEnabled(true)
@@ -5400,8 +5404,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             }
             return
         }
-        setButtonsEnabled(false)
-        setStatus("开始循环校验中…", key: "action")
+        beginLoopActionValidation(statusText: "开始循环校验中…")
         validateUniqueTargetAsync(target: target, actionName: "开始循环") { isValid in
             guard isValid else {
                 let reason = self.lastTargetValidationFailureReason ?? "start_failed"
@@ -5556,8 +5559,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
 
         targetField.stringValue = loop.target
-        setButtonsEnabled(false)
-        setStatus("恢复当前校验中…", key: "action")
+        beginLoopActionValidation(statusText: "恢复当前校验中…")
         validateUniqueTargetAsync(target: loop.target, actionName: "恢复当前") { isValid in
             guard isValid else {
                 self.setStatus("恢复当前失败", key: "action", color: .systemRed)
