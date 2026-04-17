@@ -314,6 +314,7 @@
 - session delete 失败时的告警、详情刷新与失败态回写收口到控制器 helper
 - session delete 执行态后台调度与结果回写收口到控制器 helper
 - session archive live-session 阻止告警分支收口到控制器 helper
+- session archive 失败时的阻止告警与失败态回写收口到控制器 helper
 - session action 被当前 session 状态阻止时的日志/状态/beep 收口到控制器 helper
 - provider migration noop 提示框/日志/状态收口到控制器 helper
 - loop action 未选中循环任务的日志/状态/beep 分支收口到控制器 helper

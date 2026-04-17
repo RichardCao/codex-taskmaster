@@ -2408,6 +2408,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         )
     }
 
+    private func failSessionArchiveAction(
+        session: SessionSnapshot,
+        error: String
+    ) {
+        showSessionArchiveBlockedAlertIfNeeded(session: session, error: error)
+        handleSelectedSessionActionFailure(
+            statusText: sessionArchiveFailureStatusText(),
+            detail: error
+        )
+    }
+
     private func failSessionDeleteAction(
         session: SessionSnapshot,
         detail: String,
@@ -5968,7 +5979,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             completionLogText: archivedSessionCompletionLogText(threadID: session.threadID),
             failureStatusText: sessionArchiveFailureStatusText(),
             beforeFailure: { error in
-                self.showSessionArchiveBlockedAlertIfNeeded(session: session, error: error)
+                self.failSessionArchiveAction(session: session, error: error)
             }
         ) {
             self.archiveSession(threadID: session.threadID)
