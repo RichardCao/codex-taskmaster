@@ -2240,6 +2240,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func handleAccessibilityPermissionDenied(
+        logText: String,
+        actionStatusText: String? = nil,
+        sideEffect: (() -> Void)? = nil
+    ) {
+        appendOutput(logText)
+        setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
+        sideEffect?()
+        if let actionStatusText {
+            setStatus(actionStatusText, key: "action", color: .systemRed)
+        }
+        NSSound.beep()
+    }
+
     private func removeSessionSnapshots(threadIDs: [String]) {
         let deletedSet = Set(threadIDs)
         guard !deletedSet.isEmpty else { return }
@@ -5322,9 +5336,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
         guard sendRequestCoordinator.ensurePermission(prompt: true) else {
-            appendOutput("Codex Taskmaster 缺少辅助功能权限，无法发送按键。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
-            setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
-            NSSound.beep()
+            handleAccessibilityPermissionDenied(
+                logText: "Codex Taskmaster 缺少辅助功能权限，无法发送按键。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。"
+            )
             return
         }
         setButtonsEnabled(false)
@@ -5368,13 +5382,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
         guard sendRequestCoordinator.ensurePermission(prompt: true) else {
-            appendOutput("Codex Taskmaster 缺少辅助功能权限，无法处理循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
-            setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
-            saveStoppedLoopEntryAsync(target: target, interval: interval, message: currentMessage(), forceSend: isForceSendEnabled(), reason: "missing_accessibility_permission") { _ in
-                self.requestLoopSnapshotRefresh()
+            handleAccessibilityPermissionDenied(
+                logText: "Codex Taskmaster 缺少辅助功能权限，无法处理循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。",
+                actionStatusText: "开始循环失败"
+            ) {
+                self.saveStoppedLoopEntryAsync(
+                    target: target,
+                    interval: interval,
+                    message: self.currentMessage(),
+                    forceSend: self.isForceSendEnabled(),
+                    reason: "missing_accessibility_permission"
+                ) { _ in
+                    self.requestLoopSnapshotRefresh()
+                }
             }
-            setStatus("开始循环失败", key: "action", color: .systemRed)
-            NSSound.beep()
             return
         }
         setButtonsEnabled(false)
@@ -5525,10 +5546,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
 
         guard sendRequestCoordinator.ensurePermission(prompt: true) else {
-            appendOutput("Codex Taskmaster 缺少辅助功能权限，无法恢复循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。")
-            setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
-            setStatus("恢复当前失败", key: "action", color: .systemRed)
-            NSSound.beep()
+            handleAccessibilityPermissionDenied(
+                logText: "Codex Taskmaster 缺少辅助功能权限，无法恢复循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。",
+                actionStatusText: "恢复当前失败"
+            )
             return
         }
 
