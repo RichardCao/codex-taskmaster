@@ -36,20 +36,21 @@
      当前结论：先保留 raw storage + typed accessor，等第 4 项 parser / merge / fallback 规则进一步收口后，再决定是否把底层存储直接切成 enum，避免在协议边界仍未稳定时做双重迁移。
    - `done` 类型化回归测试补齐
 
-4. `in_progress` merge / parser / fallback 规则收口
+4. `done` merge / parser / fallback 规则收口
    目标：继续把快照合并、字段保留和 fallback 规则从 UI 下沉到 core / service。
    当前子任务：
    - `done` loop snapshot merge fallback 下沉到 core
    - `done` session refresh merge fallback 下沉到 core
-   - `in_progress` parser 入口统一使用共享 helper
+   - `done` parser 入口统一使用共享 helper
    - `done` rollout recent user message parser 下沉到 core
    - `done` session refresh 覆盖式快照合并 helper 下沉到 core
+   - `done` 批量 loop 快照合并 helper 下沉到 core
    - `done` 移除旧 loop 状态文本 parser
    - `done` send helper 结构化结果 parser 下沉到 core
    - `done` recent send result JSON parser 下沉到 core
-   - `pending` UI 层只保留展示，不再携带 merge 语义
+   - `done` UI 层只保留展示，不再携带 merge 语义
 
-5. `pending` 刷新调度边界收口
+5. `in_progress` 刷新调度边界收口
    目标：统一 loop 刷新、request pump、session 状态自动刷新等调度入口，明确去重、节流和取消。
    当前子任务：
    - `pending` loop 刷新触发源盘点与收口

@@ -18,6 +18,7 @@ struct TaskMasterCoreRegressionRunner {
         runMergeSessionSnapshotChecks()
         runOverlaySessionSnapshotChecks()
         runMergeLoopSnapshotChecks()
+        runMergeLoopSnapshotListChecks()
         runLocalizationChecks()
         runLoopStateLabelChecks()
         runProbeStateRuleChecks()
@@ -400,6 +401,62 @@ struct TaskMasterCoreRegressionRunner {
         expect(merged.pauseReason == "verification_pending", "expected loop merge to preserve prior pause reason when incoming is underspecified")
         expect(merged.logPath == "/tmp/previous.log", "expected loop merge to preserve prior log path placeholder fallback")
         expect(merged.lastLogLine == "status=failed", "expected loop merge to preserve prior last log line when incoming is underspecified")
+    }
+
+    private static func runMergeLoopSnapshotListChecks() {
+        let previous = LoopSnapshot(
+            target: "demo",
+            loopDaemonRunning: true,
+            intervalSeconds: "30",
+            forceSend: false,
+            message: "hello",
+            nextRunEpoch: 100,
+            stopped: false,
+            stoppedReason: "",
+            paused: false,
+            failureCount: "2",
+            failureReason: "tty_unavailable",
+            pauseReason: "",
+            logPath: "/tmp/demo.log",
+            lastLogLine: "failed"
+        )
+        let incomingMerged = LoopSnapshot(
+            target: "demo",
+            loopDaemonRunning: true,
+            intervalSeconds: "30",
+            forceSend: false,
+            message: "hello",
+            nextRunEpoch: 120,
+            stopped: false,
+            stoppedReason: "",
+            paused: false,
+            failureCount: "0",
+            failureReason: "",
+            pauseReason: "",
+            logPath: "-",
+            lastLogLine: ""
+        )
+        let incomingFresh = LoopSnapshot(
+            target: "demo-2",
+            loopDaemonRunning: true,
+            intervalSeconds: "60",
+            forceSend: true,
+            message: "world",
+            nextRunEpoch: 150,
+            stopped: false,
+            stoppedReason: "",
+            paused: false,
+            failureCount: "0",
+            failureReason: "",
+            pauseReason: "",
+            logPath: "/tmp/demo-2.log",
+            lastLogLine: ""
+        )
+
+        let merged = mergeLoopSnapshots(previous: [previous], incoming: [incomingMerged, incomingFresh])
+        expect(merged.map(\.target) == ["demo", "demo-2"], "expected mergeLoopSnapshots to preserve incoming order")
+        expect(merged[0].failureReason == "tty_unavailable", "expected mergeLoopSnapshots to reuse per-target fallback merge")
+        expect(merged[1].target == "demo-2", "expected mergeLoopSnapshots to keep brand new entries untouched")
     }
 
     private static func runLocalizationChecks() {

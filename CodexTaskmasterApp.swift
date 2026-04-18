@@ -5081,8 +5081,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func applyLoopSnapshotResult(loops: [LoopSnapshot], warnings: [String], failureMessage: String? = nil) {
-        let previousByTarget = Dictionary(uniqueKeysWithValues: loopSnapshots.map { ($0.target, $0) })
-        loopSnapshots = loops.map { mergeLoopSnapshot(previous: previousByTarget[$0.target], incoming: $0) }
+        loopSnapshots = mergeLoopSnapshots(previous: loopSnapshots, incoming: loops)
         loopWarnings = warnings
         applyLoopSorting()
 

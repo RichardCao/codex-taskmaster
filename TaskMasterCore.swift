@@ -1194,6 +1194,13 @@ func mergeLoopSnapshot(previous: LoopSnapshot?, incoming: LoopSnapshot) -> LoopS
     )
 }
 
+func mergeLoopSnapshots(previous: [LoopSnapshot], incoming: [LoopSnapshot]) -> [LoopSnapshot] {
+    guard !incoming.isEmpty else { return [] }
+
+    let previousByTarget = Dictionary(uniqueKeysWithValues: previous.map { ($0.target, $0) })
+    return incoming.map { mergeLoopSnapshot(previous: previousByTarget[$0.target], incoming: $0) }
+}
+
 func parsedEpochTimeInterval(_ rawValue: Any?) -> TimeInterval {
     switch rawValue {
     case let value as TimeInterval:
