@@ -1065,6 +1065,28 @@ final class SendRequestCoordinator {
         }
     }
 
+    private func performQueuedSendPreflight(
+        target: String,
+        forceSend: Bool,
+        context: QueuedSendExecutionContext,
+        finish: ([String: Any]) -> Void
+    ) -> Bool {
+        guard context.preflightDecision.canSend else {
+            finishQueuedSendPreflightFailure(
+                target: target,
+                forceSend: forceSend,
+                probeStatus: context.probeStatus,
+                terminalState: context.terminalState,
+                detail: context.preflightDetail,
+                failureReason: context.preflightDecision.failureReason,
+                finish: finish
+            )
+            return false
+        }
+
+        return true
+    }
+
     private func appendLiveTTYResolutionDetail(_ baseDetail: String, resolution: LiveTTYResolution?) -> String {
         guard let resolution else { return baseDetail }
 
@@ -1188,16 +1210,12 @@ final class SendRequestCoordinator {
         let forceSend = execution.forceSend
         let context = execution.context
 
-        guard context.preflightDecision.canSend else {
-            finishQueuedSendPreflightFailure(
-                target: target,
-                forceSend: forceSend,
-                probeStatus: context.probeStatus,
-                terminalState: context.terminalState,
-                detail: context.preflightDetail,
-                failureReason: context.preflightDecision.failureReason,
-                finish: finishQueuedRequest
-            )
+        guard performQueuedSendPreflight(
+            target: target,
+            forceSend: forceSend,
+            context: context,
+            finish: finishQueuedRequest
+        ) else {
             return
         }
 
