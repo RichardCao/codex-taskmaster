@@ -2532,6 +2532,37 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
+    private func performSessionRenameExecution(
+        session: SessionSnapshot,
+        newName: String
+    ) {
+        beginSelectedSessionAction(
+            runningStatusText: sessionRenameRunningStatusText(),
+            startLogText: sessionRenameStartLogText(threadID: session.threadID, newName: newName)
+        )
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = self.updateSessionName(threadID: session.threadID, newName: newName)
+
+            DispatchQueue.main.async {
+                self.restoreSelectedSessionActionControls(selectedSessionIsArchived: false)
+
+                if result.success {
+                    self.completeSessionRenameAction(
+                        threadID: session.threadID,
+                        newName: newName
+                    )
+                } else {
+                    self.failSelectedSessionAction(
+                        statusText: sessionRenameFailureStatusText(),
+                        detail: result.error,
+                        selectedSessionIsArchived: false
+                    )
+                }
+            }
+        }
+    }
+
     private func renamedSessionSnapshot(from previous: SessionSnapshot, newName: String) -> SessionSnapshot {
         SessionSnapshot(
             name: newName,
@@ -6105,31 +6136,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
         let newName = renameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        beginSelectedSessionAction(
-            runningStatusText: sessionRenameRunningStatusText(),
-            startLogText: sessionRenameStartLogText(threadID: session.threadID, newName: newName)
-        )
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = self.updateSessionName(threadID: session.threadID, newName: newName)
-
-            DispatchQueue.main.async {
-                self.restoreSelectedSessionActionControls(selectedSessionIsArchived: false)
-
-                if result.success {
-                    self.completeSessionRenameAction(
-                        threadID: session.threadID,
-                        newName: newName
-                    )
-                } else {
-                    self.failSelectedSessionAction(
-                        statusText: sessionRenameFailureStatusText(),
-                        detail: result.error,
-                        selectedSessionIsArchived: false
-                    )
-                }
-            }
-        }
+        performSessionRenameExecution(session: session, newName: newName)
     }
 
     @objc
