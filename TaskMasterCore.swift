@@ -610,6 +610,14 @@ func parseStructuredKeyValueFields(_ text: String, requireStatusAndReason: Bool 
     return fields.isEmpty ? nil : fields
 }
 
+func parseStructuredSendHelperResult(_ text: String) -> [String: String]? {
+    guard let fields = parseStructuredKeyValueFields(text),
+          fields["target"] != nil else {
+        return nil
+    }
+    return fields
+}
+
 func preferredCommandDetail(stdout: String, stderr: String) -> String? {
     let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? stdout : stderr
     let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)

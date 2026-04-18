@@ -2471,7 +2471,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         session: SessionSnapshot,
         error: String
     ) {
-        guard let fields = parseStructuredHelperFields(error) else { return }
+        guard let fields = parseStructuredKeyValueFields(error) else { return }
         let reason = fields["reason"] ?? ""
         guard reason == "session_archive_live" || reason == "session_archive_live_ambiguous" else {
             return
@@ -5398,22 +5398,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return nil
         }
         return currentInterval()
-    }
-
-    private func isStructuredSendHelperResult(_ text: String) -> Bool {
-        parseStructuredSendHelperResult(text) != nil
-    }
-
-    private func parseStructuredSendHelperResult(_ text: String) -> [String: String]? {
-        guard let fields = parseStructuredHelperFields(text),
-              fields["target"] != nil else {
-            return nil
-        }
-        return fields
-    }
-
-    private func parseStructuredHelperFields(_ text: String) -> [String: String]? {
-        parseStructuredKeyValueFields(text)
     }
 
     private func showSessionActionBlockedAlert(actionLabel: String, session: SessionSnapshot, detail: String, ambiguous: Bool) {
