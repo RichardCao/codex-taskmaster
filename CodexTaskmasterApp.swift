@@ -2232,6 +2232,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func withSelectedSession(
+        logText: String,
+        _ body: (SessionSnapshot) -> Void
+    ) {
+        guard let session = selectedSessionSnapshot() else {
+            handleSessionSelectionRequired(logText: logText)
+            return
+        }
+        body(session)
+    }
+
     private func handleLoopSelectionRequired() {
         appendOutput("请先在 Active Loops 中选择一条循环任务。")
         setStatus("请选择一个循环任务")
@@ -6124,180 +6135,170 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     @objc
     private func saveSessionRename() {
-        guard let session = selectedSessionSnapshot() else {
-            handleSessionSelectionRequired(logText: sessionRenameSelectionRequiredLogText())
-            return
+        withSelectedSession(logText: sessionRenameSelectionRequiredLogText()) { session in
+            guard !session.isArchived else {
+                handleSelectedSessionActionBlocked(
+                    logText: archivedSessionRenameBlockedLogText(),
+                    statusText: sessionRenameArchivedBlockedStatusText()
+                )
+                return
+            }
+            let newName = renameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            performSessionRenameExecution(session: session, newName: newName)
         }
-        guard !session.isArchived else {
-            handleSelectedSessionActionBlocked(
-                logText: archivedSessionRenameBlockedLogText(),
-                statusText: sessionRenameArchivedBlockedStatusText()
-            )
-            return
-        }
-        let newName = renameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        performSessionRenameExecution(session: session, newName: newName)
     }
 
     @objc
     private func archiveSelectedSession() {
-        guard let session = selectedSessionSnapshot() else {
-            handleSessionSelectionRequired(logText: sessionArchiveSelectionRequiredLogText())
-            return
-        }
-        guard !session.isArchived else {
-            handleSelectedSessionActionBlocked(
-                logText: sessionArchiveAlreadyArchivedLogText(),
-                statusText: sessionArchiveAlreadyArchivedStatusText()
-            )
-            return
-        }
-        let matchingLoopTargets = loopTargetsAffectingSession(session)
-        guard confirmSessionArchive(session: session, matchingLoopTargets: matchingLoopTargets) else {
-            return
-        }
-
-        performSelectedSessionRemovalAction(
-            threadID: session.threadID,
-            selectedSessionIsArchived: false,
-            runningStatusText: sessionArchiveRunningStatusText(),
-            startLogText: sessionArchiveStartLogText(threadID: session.threadID),
-            completionStatusText: sessionArchiveCompletionStatusText(),
-            completionLogText: archivedSessionCompletionLogText(threadID: session.threadID),
-            failureStatusText: sessionArchiveFailureStatusText(),
-            beforeFailure: { error in
-                self.failSessionArchiveAction(session: session, error: error)
+        withSelectedSession(logText: sessionArchiveSelectionRequiredLogText()) { session in
+            guard !session.isArchived else {
+                handleSelectedSessionActionBlocked(
+                    logText: sessionArchiveAlreadyArchivedLogText(),
+                    statusText: sessionArchiveAlreadyArchivedStatusText()
+                )
+                return
             }
-        ) {
-            self.archiveSession(threadID: session.threadID)
+            let matchingLoopTargets = loopTargetsAffectingSession(session)
+            guard confirmSessionArchive(session: session, matchingLoopTargets: matchingLoopTargets) else {
+                return
+            }
+
+            performSelectedSessionRemovalAction(
+                threadID: session.threadID,
+                selectedSessionIsArchived: false,
+                runningStatusText: sessionArchiveRunningStatusText(),
+                startLogText: sessionArchiveStartLogText(threadID: session.threadID),
+                completionStatusText: sessionArchiveCompletionStatusText(),
+                completionLogText: archivedSessionCompletionLogText(threadID: session.threadID),
+                failureStatusText: sessionArchiveFailureStatusText(),
+                beforeFailure: { error in
+                    self.failSessionArchiveAction(session: session, error: error)
+                }
+            ) {
+                self.archiveSession(threadID: session.threadID)
+            }
         }
     }
 
     @objc
     private func restoreSelectedSession() {
-        guard let session = selectedSessionSnapshot() else {
-            handleSessionSelectionRequired(logText: archivedSessionRestoreSelectionRequiredLogText())
-            return
-        }
-        guard session.isArchived else {
-            handleSelectedSessionActionBlocked(
-                logText: sessionRestoreNonArchivedSelectionLogText(),
-                statusText: archivedSessionRestoreSelectionRequiredStatusText()
-            )
-            return
-        }
+        withSelectedSession(logText: archivedSessionRestoreSelectionRequiredLogText()) { session in
+            guard session.isArchived else {
+                handleSelectedSessionActionBlocked(
+                    logText: sessionRestoreNonArchivedSelectionLogText(),
+                    statusText: archivedSessionRestoreSelectionRequiredStatusText()
+                )
+                return
+            }
 
-        guard confirmSessionRestore(session: session) else {
-            return
-        }
+            guard confirmSessionRestore(session: session) else {
+                return
+            }
 
-        performSelectedSessionRemovalAction(
-            threadID: session.threadID,
-            selectedSessionIsArchived: true,
-            runningStatusText: sessionRestoreRunningStatusText(),
-            startLogText: sessionRestoreStartLogText(threadID: session.threadID),
-            completionStatusText: sessionRestoreCompletionStatusText(),
-            completionLogText: sessionRestoreCompletionLogText(threadID: session.threadID),
-            failureStatusText: sessionRestoreFailureStatusText()
-        ) {
-            self.unarchiveSession(threadID: session.threadID)
+            performSelectedSessionRemovalAction(
+                threadID: session.threadID,
+                selectedSessionIsArchived: true,
+                runningStatusText: sessionRestoreRunningStatusText(),
+                startLogText: sessionRestoreStartLogText(threadID: session.threadID),
+                completionStatusText: sessionRestoreCompletionStatusText(),
+                completionLogText: sessionRestoreCompletionLogText(threadID: session.threadID),
+                failureStatusText: sessionRestoreFailureStatusText()
+            ) {
+                self.unarchiveSession(threadID: session.threadID)
+            }
         }
     }
 
     @objc
     private func deleteSelectedSession() {
-        guard let session = selectedSessionSnapshot() else {
-            handleSessionSelectionRequired(logText: sessionDeleteSelectionRequiredLogText())
-            return
-        }
-        let matchingLoopTargets = loopTargetsAffectingSession(session)
-        beginSessionDeletePlanLoading()
+        withSelectedSession(logText: sessionDeleteSelectionRequiredLogText()) { session in
+            let matchingLoopTargets = loopTargetsAffectingSession(session)
+            beginSessionDeletePlanLoading()
 
-        sessionFamilyPlanAsync(threadID: session.threadID) { familyPlan in
-            self.sessionDeletePlanAsync(threadID: session.threadID) { deletePlan in
-                self.finishSessionDeletePlanLoading()
+            sessionFamilyPlanAsync(threadID: session.threadID) { familyPlan in
+                self.sessionDeletePlanAsync(threadID: session.threadID) { deletePlan in
+                    self.finishSessionDeletePlanLoading()
 
-                guard let deletePlan else {
-                    self.handleSessionDeletePlanLoadingFailure()
-                    return
+                    guard let deletePlan else {
+                        self.handleSessionDeletePlanLoadingFailure()
+                        return
+                    }
+
+                    guard let deletionPlan = self.promptForSessionDeletion(
+                        session: session,
+                        matchingLoopTargets: matchingLoopTargets,
+                        familyPlan: familyPlan,
+                        deletePlan: deletePlan
+                    ) else {
+                        self.handleSessionDeleteCancelled()
+                        return
+                    }
+
+                    let threadIDs = self.resolvedSessionDeleteThreadIDs(
+                        threadID: session.threadID,
+                        deletionPlan: deletionPlan
+                    )
+                    self.performSessionDeleteAction(session: session, threadIDs: threadIDs)
                 }
-
-                guard let deletionPlan = self.promptForSessionDeletion(
-                    session: session,
-                    matchingLoopTargets: matchingLoopTargets,
-                    familyPlan: familyPlan,
-                    deletePlan: deletePlan
-                ) else {
-                    self.handleSessionDeleteCancelled()
-                    return
-                }
-
-                let threadIDs = self.resolvedSessionDeleteThreadIDs(
-                    threadID: session.threadID,
-                    deletionPlan: deletionPlan
-                )
-                self.performSessionDeleteAction(session: session, threadIDs: threadIDs)
             }
         }
     }
 
     @objc
     private func migrateSelectedSessionToCurrentProvider() {
-        guard let session = selectedSessionSnapshot() else {
-            handleSessionSelectionRequired(logText: sessionProviderMigrationSelectionRequiredLogText())
-            return
-        }
-        withProviderMigrationTargetProvider { targetProvider in
-            self.sessionProviderPlanAsync(threadID: session.threadID, targetProvider: targetProvider) { plan in
-                guard let plan = self.resolvedProviderMigrationPlan(
-                    plan,
-                    failureLogText: sessionProviderMigrationPlanFailureLogText()
-                ) else { return }
+        withSelectedSession(logText: sessionProviderMigrationSelectionRequiredLogText()) { session in
+            withProviderMigrationTargetProvider { targetProvider in
+                self.sessionProviderPlanAsync(threadID: session.threadID, targetProvider: targetProvider) { plan in
+                    guard let plan = self.resolvedProviderMigrationPlan(
+                        plan,
+                        failureLogText: sessionProviderMigrationPlanFailureLogText()
+                    ) else { return }
 
-                let isSubagent = (plan["is_subagent"] ?? "no") == "yes"
-                let familyCount = Int(plan["family_count"] ?? "1") ?? 1
-                let familyMigrateNeeded = Int(plan["family_migrate_needed_count"] ?? "0") ?? 0
-                let currentProvider = plan["current_provider"] ?? session.provider
-                let directChildCount = Int(plan["direct_child_count"] ?? "0") ?? 0
-                let currentProviderDisplay = currentProvider.isEmpty ? "-" : currentProvider
+                    let isSubagent = (plan["is_subagent"] ?? "no") == "yes"
+                    let familyCount = Int(plan["family_count"] ?? "1") ?? 1
+                    let familyMigrateNeeded = Int(plan["family_migrate_needed_count"] ?? "0") ?? 0
+                    let currentProvider = plan["current_provider"] ?? session.provider
+                    let directChildCount = Int(plan["direct_child_count"] ?? "0") ?? 0
+                    let currentProviderDisplay = currentProvider.isEmpty ? "-" : currentProvider
 
-                if currentProvider == targetProvider && familyMigrateNeeded == 0 {
-                    self.handleProviderMigrationNoop(
-                        informativeText: sessionProviderMigrationNoopAlertText(
-                            currentProviderDisplay: currentProviderDisplay,
+                    if currentProvider == targetProvider && familyMigrateNeeded == 0 {
+                        self.handleProviderMigrationNoop(
+                            informativeText: sessionProviderMigrationNoopAlertText(
+                                currentProviderDisplay: currentProviderDisplay,
+                                targetProvider: targetProvider,
+                                familyCount: familyCount
+                            ),
+                            logText: sessionProviderMigrationNoopLogText(targetProvider: targetProvider)
+                        )
+                        return
+                    }
+
+                    guard let includeFamily = self.promptForSessionProviderMigration(
+                        session: session,
+                        targetProvider: targetProvider,
+                        currentProviderDisplay: currentProviderDisplay,
+                        isSubagent: isSubagent,
+                        familyCount: familyCount,
+                        familyMigrateNeeded: familyMigrateNeeded,
+                        directChildCount: directChildCount
+                    ) else { return }
+
+                    self.performProviderMigrationExecution(
+                        runningStatusText: sessionProviderMigrationRunningStatusText(),
+                        startLogText: sessionProviderMigrationStartLogText(
+                            threadID: session.threadID,
                             targetProvider: targetProvider,
-                            familyCount: familyCount
+                            includeFamily: includeFamily
                         ),
-                        logText: sessionProviderMigrationNoopLogText(targetProvider: targetProvider)
-                    )
-                    return
-                }
-
-                guard let includeFamily = self.promptForSessionProviderMigration(
-                    session: session,
-                    targetProvider: targetProvider,
-                    currentProviderDisplay: currentProviderDisplay,
-                    isSubagent: isSubagent,
-                    familyCount: familyCount,
-                    familyMigrateNeeded: familyMigrateNeeded,
-                    directChildCount: directChildCount
-                ) else { return }
-
-                self.performProviderMigrationExecution(
-                    runningStatusText: sessionProviderMigrationRunningStatusText(),
-                    startLogText: sessionProviderMigrationStartLogText(
-                        threadID: session.threadID,
-                        targetProvider: targetProvider,
-                        includeFamily: includeFamily
-                    ),
-                    completionStatusText: sessionProviderMigrationCompletionStatusText(),
-                    failureStatusText: sessionProviderMigrationFailureStatusText()
-                ) {
-                    self.migrateSessionProvider(
-                        threadID: session.threadID,
-                        targetProvider: targetProvider,
-                        includeFamily: includeFamily
-                    )
+                        completionStatusText: sessionProviderMigrationCompletionStatusText(),
+                        failureStatusText: sessionProviderMigrationFailureStatusText()
+                    ) {
+                        self.migrateSessionProvider(
+                            threadID: session.threadID,
+                            targetProvider: targetProvider,
+                            includeFamily: includeFamily
+                        )
+                    }
                 }
             }
         }
