@@ -761,6 +761,11 @@ struct SendResultSnapshot {
     }
 }
 
+struct RecentUserMessageEntry: Equatable {
+    let timestamp: String
+    let message: String
+}
+
 func parseStoredSendResultSnapshot(data: Data, updatedAtEpoch: TimeInterval) -> SendResultSnapshot? {
     guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
         return nil
@@ -779,6 +784,33 @@ func parseStoredSendResultSnapshot(data: Data, updatedAtEpoch: TimeInterval) -> 
         terminalState: object["terminal_state"] as? String ?? "",
         updatedAtEpoch: updatedAtEpoch
     )
+}
+
+func parseRecentUserMessageEntries(from rolloutText: String, limit: Int? = nil) -> [RecentUserMessageEntry] {
+    var entries: [RecentUserMessageEntry] = []
+
+    for rawLine in rolloutText.split(separator: "\n", omittingEmptySubsequences: false) {
+        guard let lineData = rawLine.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+              let type = object["type"] as? String,
+              type == "event_msg",
+              let payload = object["payload"] as? [String: Any],
+              let payloadType = payload["type"] as? String,
+              payloadType == "user_message" else {
+            continue
+        }
+
+        let timestamp = object["timestamp"] as? String ?? "-"
+        let message = (payload["message"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !message.isEmpty {
+            entries.append(RecentUserMessageEntry(timestamp: timestamp, message: message))
+        }
+    }
+
+    if let limit, entries.count > limit {
+        return Array(entries.suffix(limit))
+    }
+    return entries
 }
 
 enum SendOutcomeStatus: Equatable {

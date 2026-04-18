@@ -3471,7 +3471,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return results
     }
 
-    private func recentUserMessageEntries(for session: SessionSnapshot, limit: Int? = nil) -> [(timestamp: String, message: String)]? {
+    private func recentUserMessageEntries(for session: SessionSnapshot, limit: Int? = nil) -> [RecentUserMessageEntry]? {
         guard !session.rolloutPath.isEmpty else {
             return nil
         }
@@ -3482,29 +3482,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return nil
         }
 
-        var entries: [(timestamp: String, message: String)] = []
-        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            guard let lineData = rawLine.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                  let type = object["type"] as? String,
-                  type == "event_msg",
-                  let payload = object["payload"] as? [String: Any],
-                  let payloadType = payload["type"] as? String,
-                  payloadType == "user_message" else {
-                continue
-            }
-
-            let timestamp = object["timestamp"] as? String ?? "-"
-            let message = (payload["message"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !message.isEmpty {
-                entries.append((timestamp, message))
-            }
-        }
-
-        if let limit, entries.count > limit {
-            return Array(entries.suffix(limit))
-        }
-        return entries
+        return parseRecentUserMessageEntries(from: text, limit: limit)
     }
 
     private func recentPromptSearchCorpus(for session: SessionSnapshot) -> String {
@@ -5486,7 +5464,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.appendOutput(result.stdout)
             }
             let structuredSendResult =
-                actionName == "发送一次" ? self.parseStructuredSendHelperResult(result.stderr) : nil
+                actionName == "发送一次" ? parseStructuredSendHelperResult(result.stderr) : nil
             if !result.stderr.isEmpty {
                 if structuredSendResult == nil {
                     self.appendOutput(accepted ? result.stderr : "stderr: \(result.stderr)")

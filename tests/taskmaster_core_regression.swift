@@ -12,6 +12,7 @@ struct TaskMasterCoreRegressionRunner {
         runSendProbeFailureReasonChecks()
         runSendRequestParsingChecks()
         runStoredSendResultParsingChecks()
+        runRecentUserMessageEntryParsingChecks()
         runLoopSnapshotAccessorChecks()
         runSessionSnapshotAccessorChecks()
         runMergeSessionSnapshotChecks()
@@ -178,6 +179,27 @@ struct TaskMasterCoreRegressionRunner {
         expect(parsed?.forceSend == true, "expected stored send result parser to preserve force-send flag")
         expect(parsed?.updatedAtEpoch == 42, "expected stored send result parser to preserve supplied timestamp")
         expect(parseStoredSendResultSnapshot(data: Data("{}".utf8), updatedAtEpoch: 1) == nil, "expected stored send result parser to reject missing target")
+    }
+
+    private static func runRecentUserMessageEntryParsingChecks() {
+        let rollout = """
+        {"type":"event_msg","timestamp":"2026-04-19T00:00:00Z","payload":{"type":"assistant_message","message":"ignore"}}
+        {"type":"event_msg","timestamp":"2026-04-19T00:00:01Z","payload":{"type":"user_message","message":" first "}}
+
+        {"type":"event_msg","timestamp":"2026-04-19T00:00:02Z","payload":{"type":"user_message","message":"second"}}
+        {"type":"event_msg","timestamp":"2026-04-19T00:00:03Z","payload":{"type":"user_message","message":"   "}}
+        """
+
+        let parsed = parseRecentUserMessageEntries(from: rollout)
+        expect(parsed == [
+            RecentUserMessageEntry(timestamp: "2026-04-19T00:00:01Z", message: "first"),
+            RecentUserMessageEntry(timestamp: "2026-04-19T00:00:02Z", message: "second")
+        ], "expected rollout parser to keep only non-empty user messages in order")
+
+        let limited = parseRecentUserMessageEntries(from: rollout, limit: 1)
+        expect(limited == [
+            RecentUserMessageEntry(timestamp: "2026-04-19T00:00:02Z", message: "second")
+        ], "expected rollout parser limit to keep trailing entries")
     }
 
     private static func runLoopSnapshotAccessorChecks() {
