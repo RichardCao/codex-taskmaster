@@ -18,10 +18,10 @@
 1. `done` 表格展示 formatter 收口
    目标：把 loop / session 表格列值、重复 target 展示、tooltip 与相关展示判断从 `CodexTaskmasterApp.swift` 下沉到 core formatter/helper。
 
-2. `in_progress` 顶部状态条规则收口
+2. `done` 顶部状态条规则收口
    目标：把状态条的颜色判定、优先级、自动清理时机与默认文案从控制器下沉到 core 纯规则。
 
-3. `pending` loop / send 交互提示模板收口
+3. `in_progress` loop / send 交互提示模板收口
    目标：把剩余的 loop conflict、ambiguous target、runtime permission 等提示框文案与交互模板从控制器中抽离。
 
 4. `pending` 主控制器残余展示编排清理

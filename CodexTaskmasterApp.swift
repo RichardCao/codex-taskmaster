@@ -4845,8 +4845,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             statusSegmentColors.removeValue(forKey: key)
         } else {
             statusSegments[key] = trimmed
-            statusSegmentColors[key] = resolvedStatusColor(text: trimmed, key: key, explicitColor: color)
-            if let delay = statusAutoClearDelay(for: trimmed, key: key) {
+            statusSegmentColors[key] = color ?? statusColor(for: resolvedStatusPresentationTone(text: trimmed, key: key))
+            if let delay = statusAutoClearDelay(text: trimmed, key: key) {
                 scheduleStatusAutoClear(key: key, expectedText: trimmed, delay: delay)
             }
         }
@@ -4854,78 +4854,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         refreshVisibleStatusLabel()
     }
 
-    private func resolvedStatusColor(text: String, key: String, explicitColor: NSColor?) -> NSColor {
-        if let explicitColor {
-            return explicitColor
-        }
-
-        if isStatusProgress(text) {
+    private func statusColor(for tone: StatusPresentationTone) -> NSColor {
+        switch tone {
+        case .neutralPrimary:
+            return .secondaryLabelColor
+        case .neutralSecondary:
+            return .tertiaryLabelColor
+        case .progress:
             return .systemBlue
-        }
-        if isStatusFailure(text) {
+        case .failure:
             return .systemRed
-        }
-        if isStatusWarning(text) {
+        case .warning:
             return .systemOrange
-        }
-        if isStatusSuccess(text) {
+        case .success:
             return .systemGreen
-        }
-        return key == "general" ? .secondaryLabelColor : .tertiaryLabelColor
-    }
-
-    private func statusAutoClearDelay(for text: String, key: String) -> TimeInterval? {
-        if isStatusProgress(text) {
-            return nil
-        }
-
-        switch key {
-        case "send":
-            if isStatusFailure(text) {
-                return 12
-            }
-            if text.contains("待确认") || text.contains("已受理") || text.contains("已排队") {
-                return 9
-            }
-            if isStatusSuccess(text) {
-                return 5
-            }
-            return 7
-        case "action":
-            if isStatusFailure(text) {
-                return 10
-            }
-            if isStatusWarning(text) {
-                return 7
-            }
-            if isStatusSuccess(text) {
-                return 4
-            }
-            return 6
-        case "scan":
-            if isStatusFailure(text) {
-                return 10
-            }
-            if isStatusSuccess(text) {
-                return 4
-            }
-            return 6
-        case "general":
-            if isStatusFailure(text) {
-                return 10
-            }
-            if isStatusWarning(text) {
-                return 8
-            }
-            return 4
-        default:
-            if isStatusFailure(text) {
-                return 10
-            }
-            if isStatusSuccess(text) {
-                return 4
-            }
-            return 6
         }
     }
 
@@ -4942,45 +4884,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
-    private func isStatusProgress(_ text: String) -> Bool {
-        text.contains("执行中") || text.contains("保存名称中") || text.contains("归档 Session 中") ||
-        text.contains("恢复归档中") || text.contains("彻底删除中") || text.contains("读取已归档 session 中")
-    }
-
-    private func isStatusFailure(_ text: String) -> Bool {
-        text.contains("失败") || text.contains("缺少辅助功能权限") || text.contains("目标不唯一")
-    }
-
-    private func isStatusWarning(_ text: String) -> Bool {
-        text.contains("已受理") || text.contains("待确认") || text.contains("已排队") ||
-        text.contains("已取消") || text.contains("请选择") || text.contains("无效")
-    }
-
-    private func isStatusSuccess(_ text: String) -> Bool {
-        text.contains("完成") || text.contains("已加载") || text.contains("已保存") ||
-        text.contains("已清空") || text.contains("已填入") || text.contains("Ready") ||
-        text.contains("已停止")
-    }
-
     private func refreshVisibleStatusLabel() {
-        let orderedKeys = ["send", "action", "scan", "general"]
-        if let winningKey = orderedKeys.first(where: { statusSegments[$0]?.isEmpty == false }),
-           let winningText = statusSegments[winningKey] {
-            statusLabel.stringValue = winningText
-            statusLabel.textColor = statusSegmentColors[winningKey] ?? .secondaryLabelColor
+        if let visibleSegment = resolvedVisibleStatusSegment(segments: statusSegments) {
+            statusLabel.stringValue = visibleSegment.text
+            statusLabel.textColor = statusSegmentColors[visibleSegment.key] ?? .secondaryLabelColor
             return
         }
 
-        if let fallback = statusSegments
-            .filter({ !$0.value.isEmpty && !orderedKeys.contains($0.key) })
-            .sorted(by: { $0.key < $1.key })
-            .first {
-            statusLabel.stringValue = fallback.value
-            statusLabel.textColor = statusSegmentColors[fallback.key] ?? .secondaryLabelColor
-            return
-        }
-
-        statusLabel.stringValue = "Ready"
+        statusLabel.stringValue = defaultVisibleStatusText()
         statusLabel.textColor = .secondaryLabelColor
     }
 

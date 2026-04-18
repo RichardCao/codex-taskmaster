@@ -2456,6 +2456,132 @@ func formattedSessionStatusMetaText(
     return parts.joined(separator: " | ")
 }
 
+enum StatusPresentationTone: Equatable {
+    case neutralPrimary
+    case neutralSecondary
+    case progress
+    case failure
+    case warning
+    case success
+}
+
+struct VisibleStatusSegment: Equatable {
+    let key: String
+    let text: String
+}
+
+func resolvedStatusPresentationTone(text: String, key: String) -> StatusPresentationTone {
+    if isProgressStatusText(text) {
+        return .progress
+    }
+    if isFailureStatusText(text) {
+        return .failure
+    }
+    if isWarningStatusText(text) {
+        return .warning
+    }
+    if isSuccessStatusText(text) {
+        return .success
+    }
+    return key == "general" ? .neutralPrimary : .neutralSecondary
+}
+
+func statusAutoClearDelay(text: String, key: String) -> TimeInterval? {
+    if isProgressStatusText(text) {
+        return nil
+    }
+
+    switch key {
+    case "send":
+        if isFailureStatusText(text) {
+            return 12
+        }
+        if text.contains("待确认") || text.contains("已受理") || text.contains("已排队") {
+            return 9
+        }
+        if isSuccessStatusText(text) {
+            return 5
+        }
+        return 7
+    case "action":
+        if isFailureStatusText(text) {
+            return 10
+        }
+        if isWarningStatusText(text) {
+            return 7
+        }
+        if isSuccessStatusText(text) {
+            return 4
+        }
+        return 6
+    case "scan":
+        if isFailureStatusText(text) {
+            return 10
+        }
+        if isSuccessStatusText(text) {
+            return 4
+        }
+        return 6
+    case "general":
+        if isFailureStatusText(text) {
+            return 10
+        }
+        if isWarningStatusText(text) {
+            return 8
+        }
+        return 4
+    default:
+        if isFailureStatusText(text) {
+            return 10
+        }
+        if isSuccessStatusText(text) {
+            return 4
+        }
+        return 6
+    }
+}
+
+func resolvedVisibleStatusSegment(segments: [String: String]) -> VisibleStatusSegment? {
+    let orderedKeys = ["send", "action", "scan", "general"]
+    if let winningKey = orderedKeys.first(where: { segments[$0]?.isEmpty == false }),
+       let winningText = segments[winningKey] {
+        return VisibleStatusSegment(key: winningKey, text: winningText)
+    }
+
+    if let fallback = segments
+        .filter({ !$0.value.isEmpty && !orderedKeys.contains($0.key) })
+        .sorted(by: { $0.key < $1.key })
+        .first {
+        return VisibleStatusSegment(key: fallback.key, text: fallback.value)
+    }
+
+    return nil
+}
+
+func defaultVisibleStatusText() -> String {
+    "Ready"
+}
+
+private func isProgressStatusText(_ text: String) -> Bool {
+    text.contains("执行中") || text.contains("保存名称中") || text.contains("归档 Session 中") ||
+    text.contains("恢复归档中") || text.contains("彻底删除中") || text.contains("读取已归档 session 中")
+}
+
+private func isFailureStatusText(_ text: String) -> Bool {
+    text.contains("失败") || text.contains("缺少辅助功能权限") || text.contains("目标不唯一")
+}
+
+private func isWarningStatusText(_ text: String) -> Bool {
+    text.contains("已受理") || text.contains("待确认") || text.contains("已排队") ||
+    text.contains("已取消") || text.contains("请选择") || text.contains("无效")
+}
+
+private func isSuccessStatusText(_ text: String) -> Bool {
+    text.contains("完成") || text.contains("已加载") || text.contains("已保存") ||
+    text.contains("已清空") || text.contains("已填入") || text.contains("Ready") ||
+    text.contains("已停止")
+}
+
 func sessionScanStoppedMetaText(isArchived: Bool) -> String {
     "视图: \(sessionScopeDisplayText(isArchived: isArchived)) | 检测已停止。"
 }

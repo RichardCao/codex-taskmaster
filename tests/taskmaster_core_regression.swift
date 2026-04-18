@@ -23,6 +23,7 @@ struct TaskMasterCoreRegressionRunner {
         runTableCellFormattingChecks()
         runLoopConflictResolutionChecks()
         runLocalizationChecks()
+        runStatusPresentationChecks()
         runLoopStateLabelChecks()
         runProbeStateRuleChecks()
         runQueuedAcceptanceRuleChecks()
@@ -642,6 +643,35 @@ struct TaskMasterCoreRegressionRunner {
             ) == "检测到已开始的回合，但后面没有看到 task_complete，当前可能仍在执行",
             "expected session table formatter to localize session reason"
         )
+    }
+
+    private static func runStatusPresentationChecks() {
+        expect(resolvedStatusPresentationTone(text: "开始循环执行中…", key: "action") == .progress, "expected running action status to map to progress tone")
+        expect(resolvedStatusPresentationTone(text: "开始循环失败", key: "action") == .failure, "expected failed action status to map to failure tone")
+        expect(resolvedStatusPresentationTone(text: "请选择一个循环任务", key: "action") == .warning, "expected selection prompt to map to warning tone")
+        expect(resolvedStatusPresentationTone(text: "开始循环完成", key: "action") == .success, "expected completed action status to map to success tone")
+        expect(statusAutoClearDelay(text: "开始循环执行中…", key: "action") == nil, "expected progress status to disable auto clear")
+        expect(statusAutoClearDelay(text: "开始循环失败", key: "action") == 10, "expected failure action status to keep failure delay")
+        expect(
+            resolvedVisibleStatusSegment(
+                segments: [
+                    "general": "General",
+                    "scan": "Scan",
+                    "action": "Action"
+                ]
+            ) == VisibleStatusSegment(key: "action", text: "Action"),
+            "expected action segment to outrank scan and general"
+        )
+        expect(
+            resolvedVisibleStatusSegment(
+                segments: [
+                    "zzz": "Fallback",
+                    "aaa": "Earlier"
+                ]
+            ) == VisibleStatusSegment(key: "aaa", text: "Earlier"),
+            "expected fallback segment resolution to stay stable by key order"
+        )
+        expect(defaultVisibleStatusText() == "Ready", "expected default visible status text to remain Ready")
     }
 
     private static func runLoopConflictResolutionChecks() {
