@@ -1146,6 +1146,19 @@ final class SendRequestCoordinator {
         return startingTTY
     }
 
+    private func makeResolvedTTYFocusFailure(
+        target: String,
+        startingTTY: String,
+        resolution: LiveTTYResolution
+    ) -> NSError {
+        makeTTYFocusFailureError(
+            target: target,
+            initialTTY: startingTTY,
+            resolvedTTY: resolution.tty,
+            resolveDetail: resolution.detail
+        )
+    }
+
     private func sendWithLiveTTYRecovery(target: String, initialTTY: String, message: String, clearExistingInput: Bool) throws -> String {
         let startingTTY = normalizeTTYIdentifier(initialTTY)
 
@@ -1163,11 +1176,10 @@ final class SendRequestCoordinator {
 
             let resolved = recoverLiveTTY(target: target, previousTTY: startingTTY)
             guard let liveTTY = resolved.tty, !liveTTY.isEmpty, resolved.changed else {
-                throw makeTTYFocusFailureError(
+                throw makeResolvedTTYFocusFailure(
                     target: target,
-                    initialTTY: startingTTY,
-                    resolvedTTY: resolved.tty,
-                    resolveDetail: resolved.detail
+                    startingTTY: startingTTY,
+                    resolution: resolved
                 )
             }
 
@@ -1180,11 +1192,10 @@ final class SendRequestCoordinator {
                 )
             } catch {
                 if isTTYFocusFailure(error) {
-                    throw makeTTYFocusFailureError(
+                    throw makeResolvedTTYFocusFailure(
                         target: target,
-                        initialTTY: startingTTY,
-                        resolvedTTY: liveTTY,
-                        resolveDetail: resolved.detail
+                        startingTTY: startingTTY,
+                        resolution: resolved
                     )
                 }
                 throw error
