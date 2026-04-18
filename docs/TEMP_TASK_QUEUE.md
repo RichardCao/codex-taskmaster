@@ -68,7 +68,7 @@
 7. `in_progress` 单 loop + 多策略模型
    目标：同一 session 保留多个停止态历史 loop 配置，但同一时刻只允许一个运行态 loop。
    当前子任务：
-   - `pending` 运行态唯一约束下沉到 core/helper
+   - `done` 运行态唯一约束下沉到 core/helper
    - `pending` 停止态历史 loop 存储模型梳理
    - `pending` UI 展示与操作路径适配
    - `pending` 互斥与迁移测试

@@ -983,6 +983,26 @@ func sessionPossibleTargets(_ session: SessionSnapshot) -> [String] {
     return ordered
 }
 
+func loopTargetsAffectingSession(_ session: SessionSnapshot, loopSnapshots: [LoopSnapshot]) -> [String] {
+    let candidates = Set(sessionPossibleTargets(session))
+    guard !candidates.isEmpty else { return [] }
+    return loopSnapshots
+        .map(\.target)
+        .filter { candidates.contains($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+}
+
+func runningLoopConflicts(for target: String, sessionSnapshots: [SessionSnapshot], loopSnapshots: [LoopSnapshot]) -> [LoopSnapshot] {
+    let trimmedTarget = target.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedTarget.isEmpty else { return [] }
+
+    if let session = sessionSnapshots.first(where: { sessionPossibleTargets($0).contains(trimmedTarget) }) {
+        let targets = Set(loopTargetsAffectingSession(session, loopSnapshots: loopSnapshots))
+        return loopSnapshots.filter { targets.contains($0.target) && !$0.isStopped }
+    }
+
+    return loopSnapshots.filter { $0.target == trimmedTarget && !$0.isStopped }
+}
+
 func sessionTypeLabel(_ session: SessionSnapshot) -> String {
     let source = session.source.trimmingCharacters(in: .whitespacesAndNewlines)
     if source == "cli" {

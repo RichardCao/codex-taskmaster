@@ -19,6 +19,7 @@ struct TaskMasterCoreRegressionRunner {
         runOverlaySessionSnapshotChecks()
         runMergeLoopSnapshotChecks()
         runMergeLoopSnapshotListChecks()
+        runLoopConflictResolutionChecks()
         runLocalizationChecks()
         runLoopStateLabelChecks()
         runProbeStateRuleChecks()
@@ -459,6 +460,92 @@ struct TaskMasterCoreRegressionRunner {
         expect(merged.map(\.target) == ["demo", "demo-2"], "expected mergeLoopSnapshots to preserve incoming order")
         expect(merged[0].failureReason == "tty_unavailable", "expected mergeLoopSnapshots to reuse per-target fallback merge")
         expect(merged[1].target == "demo-2", "expected mergeLoopSnapshots to keep brand new entries untouched")
+    }
+
+    private static func runLoopConflictResolutionChecks() {
+        let session = SessionSnapshot(
+            name: "friendly-name",
+            target: "session-target",
+            threadID: "thread-1",
+            provider: "openai",
+            source: "cli",
+            parentThreadID: "",
+            agentNickname: "",
+            agentRole: "",
+            status: "idle_stable",
+            reason: "",
+            terminalState: "prompt_ready",
+            tty: "ttys001",
+            updatedAtEpoch: 1,
+            rolloutPath: "",
+            preview: "preview-name",
+            isArchived: false
+        )
+        let runningAlias = LoopSnapshot(
+            target: "friendly-name",
+            loopDaemonRunning: true,
+            intervalSeconds: "30",
+            forceSend: false,
+            message: "hello",
+            nextRunEpoch: 0,
+            stopped: false,
+            stoppedReason: "",
+            paused: false,
+            failureCount: "0",
+            failureReason: "",
+            pauseReason: "",
+            logPath: "-",
+            lastLogLine: ""
+        )
+        let stoppedAlias = LoopSnapshot(
+            target: "thread-1",
+            loopDaemonRunning: false,
+            intervalSeconds: "60",
+            forceSend: false,
+            message: "old",
+            nextRunEpoch: 0,
+            stopped: true,
+            stoppedReason: "manual_stop",
+            paused: false,
+            failureCount: "0",
+            failureReason: "",
+            pauseReason: "",
+            logPath: "-",
+            lastLogLine: ""
+        )
+        let unrelated = LoopSnapshot(
+            target: "other-session",
+            loopDaemonRunning: true,
+            intervalSeconds: "45",
+            forceSend: false,
+            message: "world",
+            nextRunEpoch: 0,
+            stopped: false,
+            stoppedReason: "",
+            paused: false,
+            failureCount: "0",
+            failureReason: "",
+            pauseReason: "",
+            logPath: "-",
+            lastLogLine: ""
+        )
+
+        let targets = loopTargetsAffectingSession(session, loopSnapshots: [runningAlias, stoppedAlias, unrelated])
+        expect(targets == ["friendly-name", "thread-1"], "expected loopTargetsAffectingSession to preserve matching target order")
+
+        let conflicts = runningLoopConflicts(
+            for: "thread-1",
+            sessionSnapshots: [session],
+            loopSnapshots: [runningAlias, stoppedAlias, unrelated]
+        )
+        expect(conflicts.map(\.target) == ["friendly-name"], "expected runningLoopConflicts to keep only running loops affecting the same session")
+
+        let directConflicts = runningLoopConflicts(
+            for: "other-session",
+            sessionSnapshots: [session],
+            loopSnapshots: [runningAlias, stoppedAlias, unrelated]
+        )
+        expect(directConflicts.map(\.target) == ["other-session"], "expected runningLoopConflicts to fall back to direct target matching")
     }
 
     private static func runLocalizationChecks() {

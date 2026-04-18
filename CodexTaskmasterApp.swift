@@ -3124,14 +3124,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         startSessionPromptSearch(query: normalizedQuery, revision: sessionSearchRevision, snapshots: allSessionSnapshots)
     }
 
-    private func loopTargetsAffectingSession(_ session: SessionSnapshot) -> [String] {
-        let candidates = Set(sessionPossibleTargets(session))
-        guard !candidates.isEmpty else { return [] }
-        return loopSnapshots
-            .map(\.target)
-            .filter { candidates.contains($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-    }
-
     private func selectedLoopTarget() -> String? {
         let selectedRow = activeLoopsTableView.selectedRow
         guard selectedRow >= 0, selectedRow < loopSnapshots.count else { return nil }
@@ -5537,15 +5529,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func conflictingLoops(for target: String) -> [LoopSnapshot] {
-        let trimmedTarget = target.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedTarget.isEmpty else { return [] }
-
-        if let session = sessionSnapshots.first(where: { sessionPossibleTargets($0).contains(trimmedTarget) }) {
-            let targets = Set(loopTargetsAffectingSession(session))
-            return loopSnapshots.filter { targets.contains($0.target) && !$0.isStopped }
-        }
-
-        return loopSnapshots.filter { $0.target == trimmedTarget && !$0.isStopped }
+        runningLoopConflicts(for: target, sessionSnapshots: sessionSnapshots, loopSnapshots: loopSnapshots)
     }
 
     private func promptToReplaceExistingLoops(conflicts: [LoopSnapshot], target: String) -> Bool {
@@ -6136,7 +6120,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 )
                 return
             }
-            let matchingLoopTargets = loopTargetsAffectingSession(session)
+            let matchingLoopTargets = loopTargetsAffectingSession(session, loopSnapshots: loopSnapshots)
             guard confirmSessionArchive(session: session, matchingLoopTargets: matchingLoopTargets) else {
                 return
             }
@@ -6190,7 +6174,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func deleteSelectedSession() {
         withSelectedSession(logText: sessionDeleteSelectionRequiredLogText()) { session in
-            let matchingLoopTargets = loopTargetsAffectingSession(session)
+            let matchingLoopTargets = loopTargetsAffectingSession(session, loopSnapshots: loopSnapshots)
             self.loadAndExecuteSessionDelete(
                 session: session,
                 matchingLoopTargets: matchingLoopTargets
