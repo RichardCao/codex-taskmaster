@@ -2783,6 +2783,29 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return false
     }
 
+    private func confirmAllSessionProviderMigration(
+        targetProvider: String,
+        totalThreads: Int,
+        migrateNeeded: Int
+    ) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = allSessionProviderMigrationAlertTitle()
+        alert.informativeText = allSessionProviderMigrationAlertText(
+            targetProvider: targetProvider,
+            totalThreads: totalThreads,
+            migrateNeeded: migrateNeeded
+        )
+        alert.addButton(withTitle: "全部迁移")
+        alert.addButton(withTitle: "取消")
+        alert.buttons.first?.hasDestructiveAction = true
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            handleProviderMigrationCancelled(statusText: allSessionProviderMigrationCancelledStatusText())
+            return false
+        }
+        return true
+    }
+
     private func beginProviderMigrationExecution(runningStatusText: String, startLogText: String) {
         setButtonsEnabled(false)
         setStatus(runningStatusText, key: "action")
@@ -6290,21 +6313,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     return
                 }
 
-                let alert = NSAlert()
-                alert.alertStyle = .warning
-                alert.messageText = allSessionProviderMigrationAlertTitle()
-                alert.informativeText = allSessionProviderMigrationAlertText(
+                guard self.confirmAllSessionProviderMigration(
                     targetProvider: targetProvider,
                     totalThreads: totalThreads,
                     migrateNeeded: migrateNeeded
-                )
-                alert.addButton(withTitle: "全部迁移")
-                alert.addButton(withTitle: "取消")
-                alert.buttons.first?.hasDestructiveAction = true
-                guard alert.runModal() == .alertFirstButtonReturn else {
-                    self.handleProviderMigrationCancelled(statusText: allSessionProviderMigrationCancelledStatusText())
-                    return
-                }
+                ) else { return }
 
                 self.performProviderMigrationExecution(
                     runningStatusText: allSessionProviderMigrationRunningStatusText(),
