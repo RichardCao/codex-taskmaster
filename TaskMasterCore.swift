@@ -1797,10 +1797,10 @@ func loopResultLabel(_ loop: LoopSnapshot) -> String {
         return "成功"
     }
     if outcome.statusKind == .accepted {
-        if outcome.reason == "verification_pending" {
+        if outcome.reasonKind == .verificationPending {
             return "等待确认"
         }
-        if outcome.reason == "queued_pending_feedback" {
+        if outcome.reasonKind == .queuedPendingFeedback {
             return "消息排队中"
         }
         return "已受理"
