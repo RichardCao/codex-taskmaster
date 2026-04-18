@@ -802,6 +802,13 @@ final class SendRequestCoordinator {
         return parts.filter { !$0.isEmpty }.joined(separator: " | ")
     }
 
+    private func probeDetail(_ probe: ProbeResult, resolution: LiveTTYResolution?) -> String {
+        appendLiveTTYResolutionDetail(
+            compactProbeSummary(status: probe.status, values: probe.values, stdout: probe.stdout, stderr: probe.stderr),
+            resolution: resolution
+        )
+    }
+
     private func makeTTYFocusFailureError(target: String, initialTTY: String, resolvedTTY: String?, resolveDetail: String) -> NSError {
         var detailParts = [
             "target=\(target)",
@@ -944,10 +951,7 @@ final class SendRequestCoordinator {
         let terminalState = activeProbe.values["terminal_state"] ?? "unknown"
         let tty = preparedProbe.tty
         let previousUserTimestamp = activeProbe.values["last_user_message_at"] ?? ""
-        let preflightDetail = appendLiveTTYResolutionDetail(
-            compactProbeSummary(status: activeProbe.status, values: activeProbe.values, stdout: activeProbe.stdout, stderr: activeProbe.stderr),
-            resolution: preparedProbe.resolution
-        )
+        let preflightDetail = probeDetail(activeProbe, resolution: preparedProbe.resolution)
         let preflightDecision = evaluateSendPreflight(
             forceSend: forceSend,
             tty: tty,
@@ -1030,10 +1034,7 @@ final class SendRequestCoordinator {
         }
 
         if verificationDecision.reason == "queued_pending_feedback" {
-            let detail = appendLiveTTYResolutionDetail(
-                compactProbeSummary(status: verification.probe.status, values: verification.probe.values, stdout: verification.probe.stdout, stderr: verification.probe.stderr),
-                resolution: preparedProbe.resolution
-            )
+            let detail = probeDetail(verification.probe, resolution: preparedProbe.resolution)
             finishCompletedSendRequest(
                 logPrefix: "发送请求已排队:",
                 status: "accepted",
@@ -1049,10 +1050,7 @@ final class SendRequestCoordinator {
             return
         }
 
-        let verificationDetail = appendLiveTTYResolutionDetail(
-            compactProbeSummary(status: verification.probe.status, values: verification.probe.values, stdout: verification.probe.stdout, stderr: verification.probe.stderr),
-            resolution: preparedProbe.resolution
-        )
+        let verificationDetail = probeDetail(verification.probe, resolution: preparedProbe.resolution)
         finishCompletedSendRequest(
             logPrefix: "发送请求待确认:",
             status: "accepted",
