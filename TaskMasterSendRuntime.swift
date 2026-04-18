@@ -601,6 +601,43 @@ final class SendRequestCoordinator {
         try FileManager.default.moveItem(at: tempURL, to: url)
     }
 
+    private func finishFailedSendRequest(
+        target: String,
+        forceSend: Bool,
+        reason: String,
+        detail: String,
+        probeStatus: String? = nil,
+        terminalState: String? = nil,
+        finish: ([String: Any]) -> Void
+    ) {
+        let targetText = target.isEmpty ? "-" : target
+        var logParts = [
+            "发送请求失败:",
+            "status=failed",
+            "reason=\(reason)",
+            "target=\(targetText)",
+            "force_send=\(forceSend ? "yes" : "no")"
+        ]
+        if let probeStatus, !probeStatus.isEmpty {
+            logParts.append("probe_status=\(probeStatus)")
+        }
+        if let terminalState, !terminalState.isEmpty {
+            logParts.append("terminal_state=\(terminalState)")
+        }
+        logParts.append("detail=\(detail)")
+        callbacks.logActivity(logParts.joined(separator: " "))
+        callbacks.updateSendStatus("failed", targetText, reason, probeStatus, terminalState, .systemRed)
+        finish(makeSendRequestResultPayload(
+            status: "failed",
+            reason: reason,
+            target: targetText,
+            forceSend: forceSend,
+            detail: detail,
+            probeStatus: probeStatus,
+            terminalState: terminalState
+        ))
+    }
+
     private func shouldAutoClearResidualInput(probeStatus: String, terminalState: String) -> Bool {
         probeStatus == "idle_with_residual_input" && terminalState == "prompt_with_input"
     }
@@ -823,26 +860,26 @@ final class SendRequestCoordinator {
         do {
             payload = try readJSONFile(at: processingURL)
         } catch {
-            callbacks.logActivity("发送请求失败: status=failed reason=invalid_request detail=failed to read request: \(error.localizedDescription)")
-            callbacks.updateSendStatus("failed", "-", "invalid_request", nil, nil, .systemRed)
-            finish(with: [
-                "status": "failed",
-                "reason": "invalid_request",
-                "detail": "failed to read request: \(error.localizedDescription)"
-            ])
+            finishFailedSendRequest(
+                target: "-",
+                forceSend: false,
+                reason: "invalid_request",
+                detail: "failed to read request: \(error.localizedDescription)",
+                finish: finish
+            )
             return
         }
 
         guard let target = payload["target"] as? String,
               let message = payload["message"] as? String,
               let timeoutSeconds = payload["timeout_seconds"] as? NSNumber else {
-            callbacks.logActivity("发送请求失败: status=failed reason=invalid_request detail=request file is missing target, message, or timeout_seconds")
-            callbacks.updateSendStatus("failed", "-", "invalid_request", nil, nil, .systemRed)
-            finish(with: [
-                "status": "failed",
-                "reason": "invalid_request",
-                "detail": "request file is missing target, message, or timeout_seconds"
-            ])
+            finishFailedSendRequest(
+                target: "-",
+                forceSend: false,
+                reason: "invalid_request",
+                detail: "request file is missing target, message, or timeout_seconds",
+                finish: finish
+            )
             return
         }
 
@@ -851,15 +888,13 @@ final class SendRequestCoordinator {
         guard initialProbe.status == 0 else {
             let detail = compactProbeSummary(status: initialProbe.status, values: initialProbe.values, stdout: initialProbe.stdout, stderr: initialProbe.stderr)
             let failureReason = isAmbiguousTargetDetail(detail) ? "ambiguous_target" : "probe_failed"
-            callbacks.logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") detail=\(detail)")
-            callbacks.updateSendStatus("failed", target, failureReason, nil, nil, .systemRed)
-            finish(with: makeSendRequestResultPayload(
-                status: "failed",
-                reason: failureReason,
+            finishFailedSendRequest(
                 target: target,
                 forceSend: forceSend,
-                detail: detail
-            ))
+                reason: failureReason,
+                detail: detail,
+                finish: finish
+            )
             return
         }
 
@@ -885,17 +920,15 @@ final class SendRequestCoordinator {
         guard preflightDecision.canSend else {
             let failureReason = preflightDecision.failureReason
             let detail = preflightDetail
-            callbacks.logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
-            callbacks.updateSendStatus("failed", target, failureReason, probeStatus, terminalState, .systemRed)
-            finish(with: makeSendRequestResultPayload(
-                status: "failed",
-                reason: failureReason,
+            finishFailedSendRequest(
                 target: target,
                 forceSend: forceSend,
+                reason: failureReason,
                 detail: detail,
                 probeStatus: probeStatus,
-                terminalState: terminalState
-            ))
+                terminalState: terminalState,
+                finish: finish
+            )
             return
         }
 
@@ -910,17 +943,15 @@ final class SendRequestCoordinator {
         } catch {
             let failureReason = sendFailureReason(for: error)
             let detail = appendLiveTTYResolutionDetail(error.localizedDescription, resolution: preparedProbe.resolution)
-            callbacks.logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
-            callbacks.updateSendStatus("failed", target, failureReason, probeStatus, terminalState, .systemRed)
-            finish(with: makeSendRequestResultPayload(
-                status: "failed",
-                reason: failureReason,
+            finishFailedSendRequest(
                 target: target,
                 forceSend: forceSend,
+                reason: failureReason,
                 detail: detail,
                 probeStatus: probeStatus,
-                terminalState: terminalState
-            ))
+                terminalState: terminalState,
+                finish: finish
+            )
             return
         }
 
