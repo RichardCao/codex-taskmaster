@@ -2244,6 +2244,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         NSSound.beep()
     }
 
+    private func handleStoppedLoopBlocked() {
+        handleLoopActionBlocked(
+            logText: "当前选中的循环已经是停止状态。",
+            statusText: "当前循环已停止"
+        )
+    }
+
+    private func handleResumeLoopBlocked() {
+        handleLoopActionBlocked(
+            logText: "当前选中的循环既不是暂停状态，也不是停止状态。",
+            statusText: "当前循环不可恢复"
+        )
+    }
+
     private func handleAccessibilityPermissionDenied(
         logText: String,
         actionStatusText: String? = nil,
@@ -5890,10 +5904,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func stopLoop() {
         guard let loop = selectedLoopSnapshotForAction() else { return }
         guard loop.stopped != "yes" else {
-            handleLoopActionBlocked(
-                logText: "当前选中的循环已经是停止状态。",
-                statusText: "当前循环已停止"
-            )
+            handleStoppedLoopBlocked()
             return
         }
         runLoopTargetAction(actionName: "停止当前", commandName: "stop", loop: loop) { target, completion in
@@ -5912,10 +5923,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func resumeSelectedLoop() {
         guard let loop = selectedLoopSnapshotForAction() else { return }
         guard loop.paused == "yes" || loop.stopped == "yes" else {
-            handleLoopActionBlocked(
-                logText: "当前选中的循环既不是暂停状态，也不是停止状态。",
-                statusText: "当前循环不可恢复"
-            )
+            handleResumeLoopBlocked()
             return
         }
         guard preflightRuntimePermissions(actionName: "恢复当前", requiresLoopState: true) else {
