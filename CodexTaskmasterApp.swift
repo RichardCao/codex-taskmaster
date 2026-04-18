@@ -2806,6 +2806,34 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return true
     }
 
+    private func confirmSessionArchive(session: SessionSnapshot, matchingLoopTargets: [String]) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = sessionArchiveAlertTitle()
+        alert.informativeText = sessionArchiveAlertText(
+            threadID: session.threadID,
+            target: sessionEffectiveTarget(session),
+            matchingLoopTargets: matchingLoopTargets
+        )
+        alert.addButton(withTitle: "归档")
+        alert.addButton(withTitle: "取消")
+        alert.buttons.first?.hasDestructiveAction = true
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func confirmSessionRestore(session: SessionSnapshot) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = sessionRestoreAlertTitle()
+        alert.informativeText = sessionRestoreAlertText(
+            threadID: session.threadID,
+            name: sessionActualName(session).isEmpty ? "-" : sessionActualName(session)
+        )
+        alert.addButton(withTitle: "恢复")
+        alert.addButton(withTitle: "取消")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     private func beginProviderMigrationExecution(runningStatusText: String, startLogText: String) {
         setButtonsEnabled(false)
         setStatus(runningStatusText, key: "action")
@@ -6118,19 +6146,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
         let matchingLoopTargets = loopTargetsAffectingSession(session)
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = sessionArchiveAlertTitle()
-        alert.informativeText = sessionArchiveAlertText(
-            threadID: session.threadID,
-            target: sessionEffectiveTarget(session),
-            matchingLoopTargets: matchingLoopTargets
-        )
-        alert.addButton(withTitle: "归档")
-        alert.addButton(withTitle: "取消")
-        alert.buttons.first?.hasDestructiveAction = true
-
-        guard alert.runModal() == .alertFirstButtonReturn else {
+        guard confirmSessionArchive(session: session, matchingLoopTargets: matchingLoopTargets) else {
             return
         }
 
@@ -6164,17 +6180,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
 
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = sessionRestoreAlertTitle()
-        alert.informativeText = sessionRestoreAlertText(
-            threadID: session.threadID,
-            name: sessionActualName(session).isEmpty ? "-" : sessionActualName(session)
-        )
-        alert.addButton(withTitle: "恢复")
-        alert.addButton(withTitle: "取消")
-
-        guard alert.runModal() == .alertFirstButtonReturn else {
+        guard confirmSessionRestore(session: session) else {
             return
         }
 
