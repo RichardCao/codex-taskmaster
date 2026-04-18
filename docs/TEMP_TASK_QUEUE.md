@@ -41,7 +41,8 @@
    当前子任务：
    - `done` loop snapshot merge fallback 下沉到 core
    - `pending` session refresh merge fallback 下沉到 core
-   - `pending` parser 入口统一使用共享 helper
+   - `in_progress` parser 入口统一使用共享 helper
+   - `done` 移除旧 loop 状态文本 parser
    - `pending` UI 层只保留展示，不再携带 merge 语义
 
 5. `pending` 刷新调度边界收口

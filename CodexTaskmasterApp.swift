@@ -5125,67 +5125,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
-    private func parseStatusOutput(_ output: String) -> [LoopSnapshot] {
-        var loops: [LoopSnapshot] = []
-        var current: [String: String] = [:]
-
-        func flushCurrent() {
-            guard let target = current["target"] else {
-                current.removeAll()
-                return
-            }
-            loops.append(
-                LoopSnapshot(
-                    target: target,
-                    loopDaemonRunning: parsedLoopSnapshotBool(current["loop_daemon_running"]),
-                    intervalSeconds: current["interval_seconds"] ?? "unknown",
-                    forceSend: parsedLoopSnapshotBool(current["force_send"]),
-                    message: current["message"] ?? "unknown",
-                    nextRunEpoch: parsedEpochTimeInterval(current["next_run_epoch"]),
-                    stopped: parsedLoopSnapshotBool(current["stopped"]),
-                    stoppedReason: current["stopped_reason"] ?? "",
-                    paused: parsedLoopSnapshotBool(current["paused"]),
-                    failureCount: current["failure_count"] ?? "0",
-                    failureReason: current["failure_reason"] ?? "",
-                    pauseReason: current["pause_reason"] ?? "",
-                    logPath: current["log"] ?? "-",
-                    lastLogLine: current["last_log_line"] ?? ""
-                )
-            )
-            current.removeAll()
-        }
-
-        for rawLine in output.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            if line.isEmpty {
-                continue
-            }
-            if line == "---" {
-                flushCurrent()
-                continue
-            }
-            if line == "no active loops" || line == "no loops" {
-                continue
-            }
-            if let range = line.range(of: ": ") {
-                let key = String(line[..<range.lowerBound])
-                let value = String(line[range.upperBound...])
-                current[key] = value
-            }
-        }
-
-        flushCurrent()
-        return loops
-    }
-
-    private func parseWarnings(from output: String) -> [String] {
-        output.split(separator: "\n").compactMap { rawLine in
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard line.hasPrefix("warning: ") else { return nil }
-            return line
-        }
-    }
-
     private func updateActiveLoopsWarningDisplay() {
         let warningText = loopWarnings.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         activeLoopsWarningLabel.stringValue = warningText
