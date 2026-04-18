@@ -638,6 +638,46 @@ final class SendRequestCoordinator {
         ))
     }
 
+    private func finishCompletedSendRequest(
+        logPrefix: String,
+        status: String,
+        target: String,
+        forceSend: Bool,
+        reason: String,
+        detail: String,
+        probeStatus: String? = nil,
+        terminalState: String? = nil,
+        color: NSColor,
+        finish: ([String: Any]) -> Void
+    ) {
+        let targetText = target.isEmpty ? "-" : target
+        var logParts = [
+            logPrefix,
+            "status=\(status)",
+            "reason=\(reason)",
+            "target=\(targetText)",
+            "force_send=\(forceSend ? "yes" : "no")"
+        ]
+        if let probeStatus, !probeStatus.isEmpty {
+            logParts.append("probe_status=\(probeStatus)")
+        }
+        if let terminalState, !terminalState.isEmpty {
+            logParts.append("terminal_state=\(terminalState)")
+        }
+        logParts.append("detail=\(detail)")
+        callbacks.logActivity(logParts.joined(separator: " "))
+        callbacks.updateSendStatus(status, targetText, reason, probeStatus, terminalState, color)
+        finish(makeSendRequestResultPayload(
+            status: status,
+            reason: reason,
+            target: targetText,
+            forceSend: forceSend,
+            detail: detail,
+            probeStatus: probeStatus,
+            terminalState: terminalState
+        ))
+    }
+
     private func shouldAutoClearResidualInput(probeStatus: String, terminalState: String) -> Bool {
         probeStatus == "idle_with_residual_input" && terminalState == "prompt_with_input"
     }
@@ -965,17 +1005,18 @@ final class SendRequestCoordinator {
             let reason = forceSend ? "forced_sent" : "sent"
             let baseDetail = "sent message via app sender to target=\(target) tty=\(usedTTY) clear_existing_input=\(clearResidualInputBeforeSend ? "yes" : "no")"
             let detail = appendLiveTTYResolutionDetail(baseDetail, resolution: preparedProbe.resolution)
-            callbacks.logActivity("发送请求完成: status=success reason=\(reason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
-            callbacks.updateSendStatus("success", target, reason, probeStatus, terminalState, .systemGreen)
-            finish(with: makeSendRequestResultPayload(
+            finishCompletedSendRequest(
+                logPrefix: "发送请求完成:",
                 status: "success",
-                reason: reason,
                 target: target,
                 forceSend: forceSend,
+                reason: reason,
                 detail: detail,
                 probeStatus: probeStatus,
-                terminalState: terminalState
-            ))
+                terminalState: terminalState,
+                color: .systemGreen,
+                finish: finish
+            )
             return
         }
 
@@ -990,17 +1031,18 @@ final class SendRequestCoordinator {
                 compactProbeSummary(status: verification.probe.status, values: verification.probe.values, stdout: verification.probe.stdout, stderr: verification.probe.stderr),
                 resolution: preparedProbe.resolution
             )
-            callbacks.logActivity("发送请求已排队: status=accepted reason=queued_pending_feedback target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(queuedProbeStatus) terminal_state=\(queuedTerminalState) detail=\(detail)")
-            callbacks.updateSendStatus("accepted", target, "queued_pending_feedback", queuedProbeStatus, queuedTerminalState, .systemOrange)
-            finish(with: makeSendRequestResultPayload(
+            finishCompletedSendRequest(
+                logPrefix: "发送请求已排队:",
                 status: "accepted",
-                reason: "queued_pending_feedback",
                 target: target,
                 forceSend: forceSend,
+                reason: "queued_pending_feedback",
                 detail: detail,
                 probeStatus: queuedProbeStatus,
-                terminalState: queuedTerminalState
-            ))
+                terminalState: queuedTerminalState,
+                color: .systemOrange,
+                finish: finish
+            )
             return
         }
 
@@ -1008,23 +1050,17 @@ final class SendRequestCoordinator {
             compactProbeSummary(status: verification.probe.status, values: verification.probe.values, stdout: verification.probe.stdout, stderr: verification.probe.stderr),
             resolution: preparedProbe.resolution
         )
-        callbacks.logActivity("发送请求待确认: status=accepted reason=verification_pending target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(verification.probe.values["status"] ?? "unknown") terminal_state=\(verification.probe.values["terminal_state"] ?? "unknown") detail=\(verificationDetail)")
-        callbacks.updateSendStatus(
-            "accepted",
-            target,
-            "verification_pending",
-            verification.probe.values["status"] ?? "unknown",
-            verification.probe.values["terminal_state"] ?? "unknown",
-            .systemOrange
-        )
-        finish(with: makeSendRequestResultPayload(
+        finishCompletedSendRequest(
+            logPrefix: "发送请求待确认:",
             status: "accepted",
-            reason: "verification_pending",
             target: target,
             forceSend: forceSend,
+            reason: "verification_pending",
             detail: verificationDetail,
             probeStatus: verification.probe.values["status"] ?? "unknown",
-            terminalState: verification.probe.values["terminal_state"] ?? "unknown"
-        ))
+            terminalState: verification.probe.values["terminal_state"] ?? "unknown",
+            color: .systemOrange,
+            finish: finish
+        )
     }
 }
