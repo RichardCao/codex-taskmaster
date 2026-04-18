@@ -629,6 +629,26 @@ struct LoopSnapshot {
     let pauseReason: String
     let logPath: String
     let lastLogLine: String
+
+    var isLoopDaemonRunning: Bool {
+        loopDaemonRunning == "yes"
+    }
+
+    var isForceSendEnabled: Bool {
+        forceSend == "yes"
+    }
+
+    var isStopped: Bool {
+        stopped == "yes"
+    }
+
+    var isPaused: Bool {
+        paused == "yes"
+    }
+
+    var nextRunTimeInterval: TimeInterval? {
+        TimeInterval(nextRunEpoch)
+    }
 }
 
 struct SessionSnapshot {
@@ -648,6 +668,10 @@ struct SessionSnapshot {
     let rolloutPath: String
     let preview: String
     let isArchived: Bool
+
+    var updatedAtTimeInterval: TimeInterval? {
+        TimeInterval(updatedAtEpoch)
+    }
 }
 
 struct SendResultSnapshot {
@@ -990,8 +1014,8 @@ func mergeSessionSnapshots(existing: [SessionSnapshot], newSnapshots: [SessionSn
     }
 
     return mergedByID.values.sorted { lhs, rhs in
-        let lhsEpoch = TimeInterval(lhs.updatedAtEpoch) ?? 0
-        let rhsEpoch = TimeInterval(rhs.updatedAtEpoch) ?? 0
+        let lhsEpoch = lhs.updatedAtTimeInterval ?? 0
+        let rhsEpoch = rhs.updatedAtTimeInterval ?? 0
         if lhsEpoch == rhsEpoch {
             return lhs.threadID < rhs.threadID
         }
@@ -1323,10 +1347,10 @@ func detailedNotSendableLabel(probeStatus: String, terminalState: String) -> Str
 }
 
 func loopResultLabel(_ loop: LoopSnapshot) -> String {
-    if loop.stopped == "yes" {
+    if loop.isStopped {
         return "已停止"
     }
-    if loop.paused == "yes" {
+    if loop.isPaused {
         return "已暂停"
     }
 
@@ -1386,10 +1410,10 @@ func loopResultLabel(_ loop: LoopSnapshot) -> String {
 }
 
 func loopStateLabel(_ loop: LoopSnapshot) -> String {
-    if loop.stopped == "yes" {
+    if loop.isStopped {
         return "停止"
     }
-    if loop.paused == "yes" {
+    if loop.isPaused {
         return "暂停"
     }
 
@@ -1421,10 +1445,10 @@ func loopStateLabel(_ loop: LoopSnapshot) -> String {
 }
 
 func loopResultReasonLabel(_ loop: LoopSnapshot) -> String {
-    if loop.stopped == "yes" {
+    if loop.isStopped {
         return localizedSendReason(loop.stoppedReason)
     }
-    if loop.paused == "yes" {
+    if loop.isPaused {
         return localizedSendReason(loop.pauseReason.isEmpty ? loop.failureReason : loop.pauseReason)
     }
     let outcome = loopLastOutcome(loop)
@@ -1584,12 +1608,12 @@ func formattedLoopOccupancyText(loops: [LoopSnapshot], formatEpoch: (String) -> 
     }
 
     return (["相关 Loop"] + loops.map { loop in
-        let nextRun = loop.stopped == "yes" ? "-" : formatEpoch(loop.nextRunEpoch)
+        let nextRun = loop.isStopped ? "-" : formatEpoch(loop.nextRunEpoch)
         let reason = loopResultReasonLabel(loop)
         var lines = [
             "Target: \(loop.target)",
             "状态: \(loopStateLabel(loop)) | 结果: \(loopResultLabel(loop))",
-            "间隔: \(loop.intervalSeconds)s | 模式: \(loop.forceSend == "yes" ? "force" : "idle") | 下次: \(nextRun)"
+            "间隔: \(loop.intervalSeconds)s | 模式: \(loop.isForceSendEnabled ? "force" : "idle") | 下次: \(nextRun)"
         ]
         if !reason.isEmpty {
             lines.append("原因: \(reason)")

@@ -1707,9 +1707,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         case "interval":
             return "\(loop.intervalSeconds)s"
         case "forceSend":
-            return loop.forceSend == "yes" ? "force" : "idle"
+            return loop.isForceSendEnabled ? "force" : "idle"
         case "nextRun":
-            if loop.stopped == "yes" {
+            if loop.isStopped {
                 return "-"
             }
             return formatEpoch(loop.nextRunEpoch)
@@ -2922,8 +2922,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             deleteLoopButton.isEnabled = false
             return
         }
-        stopButton.isEnabled = (loop.stopped != "yes")
-        resumeLoopButton.isEnabled = (loop.paused == "yes" || loop.stopped == "yes")
+        stopButton.isEnabled = !loop.isStopped
+        resumeLoopButton.isEnabled = (loop.isPaused || loop.isStopped)
         deleteLoopButton.isEnabled = true
     }
 
@@ -3025,7 +3025,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             case "forceSend":
                 orderedAscending = lhs.forceSend.localizedStandardCompare(rhs.forceSend) == .orderedAscending
             case "nextRun":
-                orderedAscending = (TimeInterval(lhs.nextRunEpoch) ?? 0) < (TimeInterval(rhs.nextRunEpoch) ?? 0)
+                orderedAscending = (lhs.nextRunTimeInterval ?? 0) < (rhs.nextRunTimeInterval ?? 0)
             case "message":
                 orderedAscending = lhs.message.localizedStandardCompare(rhs.message) == .orderedAscending
             case "lastLog":
@@ -3087,11 +3087,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             case "tty":
                 orderedAscending = sessionTTYDisplayValue(lhs).localizedStandardCompare(sessionTTYDisplayValue(rhs)) == .orderedAscending
             case "updatedAt":
-                orderedAscending = (TimeInterval(lhs.updatedAtEpoch) ?? 0) < (TimeInterval(rhs.updatedAtEpoch) ?? 0)
+                orderedAscending = (lhs.updatedAtTimeInterval ?? 0) < (rhs.updatedAtTimeInterval ?? 0)
             case "reason":
                 orderedAscending = localizedSessionReason(lhs.reason).localizedStandardCompare(localizedSessionReason(rhs.reason)) == .orderedAscending
             default:
-                orderedAscending = (TimeInterval(lhs.updatedAtEpoch) ?? 0) < (TimeInterval(rhs.updatedAtEpoch) ?? 0)
+                orderedAscending = (lhs.updatedAtTimeInterval ?? 0) < (rhs.updatedAtTimeInterval ?? 0)
             }
 
             if compareSessionValuesEqual(lhs: lhs, rhs: rhs, key: key) {
@@ -4910,8 +4910,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func mergedLoopSnapshot(previous: LoopSnapshot?, incoming: LoopSnapshot) -> LoopSnapshot {
         guard let previous else { return incoming }
 
-        let incomingIsUnderspecified = incoming.stopped != "yes"
-            && incoming.paused != "yes"
+        let incomingIsUnderspecified = !incoming.isStopped
+            && !incoming.isPaused
             && incoming.failureReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && incoming.lastLogLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
@@ -5258,7 +5258,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             target: target,
             loopDaemonRunning: "yes",
             intervalSeconds: interval ?? existingSnapshot?.intervalSeconds ?? "unknown",
-            forceSend: (forceSend ?? (existingSnapshot?.forceSend == "yes")) ? "yes" : (existingSnapshot?.forceSend ?? "no"),
+            forceSend: (forceSend ?? existingSnapshot?.isForceSendEnabled ?? false) ? "yes" : (existingSnapshot?.forceSend ?? "no"),
             message: message ?? existingSnapshot?.message ?? "",
             nextRunEpoch: String(Int(Date().timeIntervalSince1970)),
             stopped: "no",
@@ -5338,7 +5338,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                         target: target,
                         interval: existingSnapshot?.intervalSeconds,
                         message: existingSnapshot?.message,
-                        forceSend: existingSnapshot?.forceSend == "yes"
+                        forceSend: existingSnapshot?.isForceSendEnabled
                     )
                     self.scheduleLoopSnapshotRefreshes(after: [1.5, 5.0])
                 }
@@ -5405,10 +5405,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         if let session = sessionSnapshots.first(where: { sessionPossibleTargets($0).contains(trimmedTarget) }) {
             let targets = Set(loopTargetsAffectingSession(session))
-            return loopSnapshots.filter { targets.contains($0.target) && $0.stopped != "yes" }
+            return loopSnapshots.filter { targets.contains($0.target) && !$0.isStopped }
         }
 
-        return loopSnapshots.filter { $0.target == trimmedTarget && $0.stopped != "yes" }
+        return loopSnapshots.filter { $0.target == trimmedTarget && !$0.isStopped }
     }
 
     private func promptToReplaceExistingLoops(conflicts: [LoopSnapshot], target: String) -> Bool {
@@ -5903,7 +5903,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func stopLoop() {
         guard let loop = selectedLoopSnapshotForAction() else { return }
-        guard loop.stopped != "yes" else {
+        guard !loop.isStopped else {
             handleStoppedLoopBlocked()
             return
         }
@@ -5922,7 +5922,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func resumeSelectedLoop() {
         guard let loop = selectedLoopSnapshotForAction() else { return }
-        guard loop.paused == "yes" || loop.stopped == "yes" else {
+        guard loop.isPaused || loop.isStopped else {
             handleResumeLoopBlocked()
             return
         }
