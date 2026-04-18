@@ -186,7 +186,7 @@ struct TaskMasterCoreRegressionRunner {
             reason: "",
             terminalState: "ready",
             tty: "ttys001",
-            updatedAtEpoch: "4567",
+            updatedAtEpoch: 4567,
             rolloutPath: "",
             preview: "",
             isArchived: false
@@ -209,7 +209,7 @@ struct TaskMasterCoreRegressionRunner {
             reason: "",
             terminalState: "ready",
             tty: "ttys001",
-            updatedAtEpoch: "100",
+            updatedAtEpoch: 100,
             rolloutPath: "",
             preview: "",
             isArchived: false
@@ -227,7 +227,7 @@ struct TaskMasterCoreRegressionRunner {
             reason: "",
             terminalState: "ready",
             tty: "ttys002",
-            updatedAtEpoch: "200",
+            updatedAtEpoch: 200,
             rolloutPath: "",
             preview: "",
             isArchived: false

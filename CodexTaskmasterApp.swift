@@ -5265,6 +5265,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return Self.loopTimeFormatter.string(from: Date(timeIntervalSince1970: epoch))
     }
 
+    private func formatEpoch(_ epoch: TimeInterval) -> String {
+        guard epoch > 0 else { return "0" }
+        return Self.loopTimeFormatter.string(from: Date(timeIntervalSince1970: epoch))
+    }
+
     private func renderSessionSnapshots(scannedCount: Int? = nil, totalCount: Int? = nil, isComplete: Bool = true) {
         let selectedThreadID = selectedSessionThreadID()
         lastSessionRenderScannedCount = scannedCount

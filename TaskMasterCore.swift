@@ -704,13 +704,13 @@ struct SessionSnapshot {
     let reason: String
     let terminalState: String
     let tty: String
-    let updatedAtEpoch: String
+    let updatedAtEpoch: TimeInterval
     let rolloutPath: String
     let preview: String
     let isArchived: Bool
 
     var updatedAtTimeInterval: TimeInterval? {
-        TimeInterval(updatedAtEpoch)
+        updatedAtEpoch
     }
 }
 
@@ -864,7 +864,7 @@ func parseProbeAllOutput(_ output: String) -> [SessionSnapshot] {
                 reason: current["reason"] ?? "",
                 terminalState: current["terminal_state"] ?? "unavailable",
                 tty: current["tty"] ?? "",
-                updatedAtEpoch: current["updated_at_epoch"] ?? "0",
+                updatedAtEpoch: parsedEpochTimeInterval(current["updated_at_epoch"]),
                 rolloutPath: current["rollout_path"] ?? "",
                 preview: "",
                 isArchived: false
@@ -918,7 +918,7 @@ func parseProbeAllJSONOutput(_ output: String, archived: Bool = false) -> [Sessi
             reason: item["reason"] as? String ?? "",
             terminalState: item["terminal_state"] as? String ?? "unavailable",
             tty: item["tty"] as? String ?? "",
-            updatedAtEpoch: item["updated_at_epoch"] as? String ?? "0",
+            updatedAtEpoch: parsedEpochTimeInterval(item["updated_at_epoch"]),
             rolloutPath: item["rollout_path"] as? String ?? "",
             preview: "",
             isArchived: archived
@@ -938,18 +938,6 @@ func parseThreadListOutput(_ output: String, archived: Bool) -> [SessionSnapshot
             return nil
         }
 
-        let updatedAtValue = item["updatedAt"]
-        let updatedAtEpoch: String
-        if let intValue = updatedAtValue as? Int {
-            updatedAtEpoch = String(intValue)
-        } else if let doubleValue = updatedAtValue as? Double {
-            updatedAtEpoch = String(Int(doubleValue))
-        } else if let stringValue = updatedAtValue as? String {
-            updatedAtEpoch = stringValue
-        } else {
-            updatedAtEpoch = "0"
-        }
-
         let source = item["source"] as? String ?? ""
         return SessionSnapshot(
             name: item["name"] as? String ?? "",
@@ -964,7 +952,7 @@ func parseThreadListOutput(_ output: String, archived: Bool) -> [SessionSnapshot
             reason: archived ? "session is archived and can be restored" : "",
             terminalState: archived ? "archived" : "unavailable",
             tty: "",
-            updatedAtEpoch: updatedAtEpoch,
+            updatedAtEpoch: parsedEpochTimeInterval(item["updatedAt"]),
             rolloutPath: item["path"] as? String ?? "",
             preview: item["preview"] as? String ?? "",
             isArchived: archived
@@ -986,11 +974,28 @@ func mergeSessionSnapshotAfterStatusRefresh(previous: SessionSnapshot, refreshed
         reason: refreshed.reason,
         terminalState: refreshed.terminalState,
         tty: refreshed.tty,
-        updatedAtEpoch: refreshed.updatedAtEpoch == "0" ? previous.updatedAtEpoch : refreshed.updatedAtEpoch,
+        updatedAtEpoch: refreshed.updatedAtEpoch == 0 ? previous.updatedAtEpoch : refreshed.updatedAtEpoch,
         rolloutPath: refreshed.rolloutPath.isEmpty ? previous.rolloutPath : refreshed.rolloutPath,
         preview: refreshed.preview.isEmpty ? previous.preview : refreshed.preview,
         isArchived: previous.isArchived || refreshed.isArchived
     )
+}
+
+func parsedEpochTimeInterval(_ rawValue: Any?) -> TimeInterval {
+    switch rawValue {
+    case let value as TimeInterval:
+        return value
+    case let value as Int:
+        return TimeInterval(value)
+    case let value as Double:
+        return value
+    case let value as String:
+        return TimeInterval(value.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+    case let value as NSNumber:
+        return value.doubleValue
+    default:
+        return 0
+    }
 }
 
 final class SessionStatusRefreshCoordinator {
