@@ -357,6 +357,7 @@
 - send runtime 的 probe/sendability/queued-acceptance/ambiguous-target 纯判定下沉到 core
 - send runtime 的发送前 preflight 分支收口到 core `evaluateSendPreflight`
 - send runtime 的 probe 文本解析与摘要拼装继续复用 core parser/helper
+- send runtime 的结果 payload 拼装收口到 core helper
 
 下一步建议：
 
@@ -437,6 +438,7 @@
 - send runtime 的基础判定矩阵样例已进入 core 回归
 - send runtime 的 preflight 决策矩阵样例已进入 core 回归
 - probe parser / detail / compact summary 的基础回归样例已进入 core 回归
+- send runtime 的结果 payload 样例已进入 core 回归
 
 建议覆盖：
 

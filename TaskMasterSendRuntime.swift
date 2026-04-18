@@ -853,13 +853,13 @@ final class SendRequestCoordinator {
             let failureReason = isAmbiguousTargetDetail(detail) ? "ambiguous_target" : "probe_failed"
             callbacks.logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") detail=\(detail)")
             callbacks.updateSendStatus("failed", target, failureReason, nil, nil, .systemRed)
-            finish(with: [
-                "status": "failed",
-                "reason": failureReason,
-                "target": target,
-                "force_send": forceSend,
-                "detail": detail
-            ])
+            finish(with: makeSendRequestResultPayload(
+                status: "failed",
+                reason: failureReason,
+                target: target,
+                forceSend: forceSend,
+                detail: detail
+            ))
             return
         }
 
@@ -887,15 +887,15 @@ final class SendRequestCoordinator {
             let detail = preflightDetail
             callbacks.logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
             callbacks.updateSendStatus("failed", target, failureReason, probeStatus, terminalState, .systemRed)
-            finish(with: [
-                "status": "failed",
-                "reason": failureReason,
-                "target": target,
-                "force_send": forceSend,
-                "detail": detail,
-                "probe_status": probeStatus,
-                "terminal_state": terminalState
-            ])
+            finish(with: makeSendRequestResultPayload(
+                status: "failed",
+                reason: failureReason,
+                target: target,
+                forceSend: forceSend,
+                detail: detail,
+                probeStatus: probeStatus,
+                terminalState: terminalState
+            ))
             return
         }
 
@@ -912,15 +912,15 @@ final class SendRequestCoordinator {
             let detail = appendLiveTTYResolutionDetail(error.localizedDescription, resolution: preparedProbe.resolution)
             callbacks.logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
             callbacks.updateSendStatus("failed", target, failureReason, probeStatus, terminalState, .systemRed)
-            finish(with: [
-                "status": "failed",
-                "reason": failureReason,
-                "target": target,
-                "force_send": forceSend,
-                "detail": detail,
-                "probe_status": probeStatus,
-                "terminal_state": terminalState
-            ])
+            finish(with: makeSendRequestResultPayload(
+                status: "failed",
+                reason: failureReason,
+                target: target,
+                forceSend: forceSend,
+                detail: detail,
+                probeStatus: probeStatus,
+                terminalState: terminalState
+            ))
             return
         }
 
@@ -936,15 +936,15 @@ final class SendRequestCoordinator {
             let detail = appendLiveTTYResolutionDetail(baseDetail, resolution: preparedProbe.resolution)
             callbacks.logActivity("发送请求完成: status=success reason=\(reason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
             callbacks.updateSendStatus("success", target, reason, probeStatus, terminalState, .systemGreen)
-            finish(with: [
-                "status": "success",
-                "reason": reason,
-                "target": target,
-                "force_send": forceSend,
-                "probe_status": probeStatus,
-                "terminal_state": terminalState,
-                "detail": detail
-            ])
+            finish(with: makeSendRequestResultPayload(
+                status: "success",
+                reason: reason,
+                target: target,
+                forceSend: forceSend,
+                detail: detail,
+                probeStatus: probeStatus,
+                terminalState: terminalState
+            ))
             return
         }
 
@@ -961,15 +961,15 @@ final class SendRequestCoordinator {
             )
             callbacks.logActivity("发送请求已排队: status=accepted reason=queued_pending_feedback target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(queuedProbeStatus) terminal_state=\(queuedTerminalState) detail=\(detail)")
             callbacks.updateSendStatus("accepted", target, "queued_pending_feedback", queuedProbeStatus, queuedTerminalState, .systemOrange)
-            finish(with: [
-                "status": "accepted",
-                "reason": "queued_pending_feedback",
-                "target": target,
-                "force_send": forceSend,
-                "detail": detail,
-                "probe_status": queuedProbeStatus,
-                "terminal_state": queuedTerminalState
-            ])
+            finish(with: makeSendRequestResultPayload(
+                status: "accepted",
+                reason: "queued_pending_feedback",
+                target: target,
+                forceSend: forceSend,
+                detail: detail,
+                probeStatus: queuedProbeStatus,
+                terminalState: queuedTerminalState
+            ))
             return
         }
 
@@ -986,14 +986,14 @@ final class SendRequestCoordinator {
             verification.probe.values["terminal_state"] ?? "unknown",
             .systemOrange
         )
-        finish(with: [
-            "status": "accepted",
-            "reason": "verification_pending",
-            "target": target,
-            "force_send": forceSend,
-            "detail": verificationDetail,
-            "probe_status": verification.probe.values["status"] ?? "unknown",
-            "terminal_state": verification.probe.values["terminal_state"] ?? "unknown"
-        ])
+        finish(with: makeSendRequestResultPayload(
+            status: "accepted",
+            reason: "verification_pending",
+            target: target,
+            forceSend: forceSend,
+            detail: verificationDetail,
+            probeStatus: verification.probe.values["status"] ?? "unknown",
+            terminalState: verification.probe.values["terminal_state"] ?? "unknown"
+        ))
     }
 }

@@ -6,6 +6,7 @@ struct TaskMasterCoreRegressionRunner {
         runStructuredFieldParsingChecks()
         runCommandDetailChecks()
         runCompactProbeSummaryChecks()
+        runSendRequestPayloadChecks()
         runLoopSnapshotAccessorChecks()
         runSessionSnapshotAccessorChecks()
         runMergeSessionSnapshotChecks()
@@ -52,6 +53,26 @@ struct TaskMasterCoreRegressionRunner {
         )
 
         expect(summary == "target: demo | thread_id: thread-1 | tty: ttys001 | status: idle_stable | reason: ready | terminal_state: prompt_ready", "expected compact probe summary to preserve known keys in order")
+    }
+
+    private static func runSendRequestPayloadChecks() {
+        let payload = makeSendRequestResultPayload(
+            status: "accepted",
+            reason: "verification_pending",
+            target: "demo",
+            forceSend: true,
+            detail: "detail",
+            probeStatus: "idle_stable",
+            terminalState: "prompt_ready"
+        )
+
+        expect(payload["status"] as? String == "accepted", "expected payload to preserve status")
+        expect(payload["reason"] as? String == "verification_pending", "expected payload to preserve reason")
+        expect(payload["target"] as? String == "demo", "expected payload to preserve target")
+        expect(payload["force_send"] as? Bool == true, "expected payload to preserve force-send flag")
+        expect(payload["detail"] as? String == "detail", "expected payload to preserve detail")
+        expect(payload["probe_status"] as? String == "idle_stable", "expected payload to preserve probe status")
+        expect(payload["terminal_state"] as? String == "prompt_ready", "expected payload to preserve terminal state")
     }
 
     private static func runLoopSnapshotAccessorChecks() {

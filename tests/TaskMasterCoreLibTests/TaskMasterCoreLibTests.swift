@@ -39,6 +39,26 @@ final class TaskMasterCoreLibTests: XCTestCase {
         XCTAssertEqual(summary, "target: demo | thread_id: thread-1 | tty: ttys001 | status: idle_stable | reason: ready | terminal_state: prompt_ready")
     }
 
+    func testMakeSendRequestResultPayloadBuildsExpectedFields() {
+        let payload = makeSendRequestResultPayload(
+            status: "accepted",
+            reason: "verification_pending",
+            target: "demo",
+            forceSend: true,
+            detail: "detail",
+            probeStatus: "idle_stable",
+            terminalState: "prompt_ready"
+        )
+
+        XCTAssertEqual(payload["status"] as? String, "accepted")
+        XCTAssertEqual(payload["reason"] as? String, "verification_pending")
+        XCTAssertEqual(payload["target"] as? String, "demo")
+        XCTAssertEqual(payload["force_send"] as? Bool, true)
+        XCTAssertEqual(payload["detail"] as? String, "detail")
+        XCTAssertEqual(payload["probe_status"] as? String, "idle_stable")
+        XCTAssertEqual(payload["terminal_state"] as? String, "prompt_ready")
+    }
+
     func testLoopSnapshotTypedAccessors() {
         let snapshot = LoopSnapshot(
             target: "demo",

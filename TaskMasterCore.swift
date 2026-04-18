@@ -1362,6 +1362,31 @@ func evaluateSendPreflight(forceSend: Bool, tty: String, probeStatus: String, te
     )
 }
 
+func makeSendRequestResultPayload(
+    status: String,
+    reason: String,
+    target: String,
+    forceSend: Bool,
+    detail: String,
+    probeStatus: String? = nil,
+    terminalState: String? = nil
+) -> [String: Any] {
+    var payload: [String: Any] = [
+        "status": status,
+        "reason": reason,
+        "target": target,
+        "force_send": forceSend,
+        "detail": detail
+    ]
+    if let probeStatus {
+        payload["probe_status"] = probeStatus
+    }
+    if let terminalState {
+        payload["terminal_state"] = terminalState
+    }
+    return payload
+}
+
 struct ParsedLoopOutcome {
     let status: String
     let reason: String
