@@ -660,7 +660,7 @@ struct LoopSnapshot {
     let intervalSeconds: String
     let forceSend: Bool
     let message: String
-    let nextRunEpoch: String
+    let nextRunEpoch: TimeInterval
     let stopped: Bool
     let stoppedReason: String
     let paused: Bool
@@ -687,7 +687,7 @@ struct LoopSnapshot {
     }
 
     var nextRunTimeInterval: TimeInterval? {
-        TimeInterval(nextRunEpoch)
+        nextRunEpoch > 0 ? nextRunEpoch : nil
     }
 }
 
@@ -744,7 +744,7 @@ func parseLoopStatusJSONOutput(_ output: String) -> (loops: [LoopSnapshot], warn
             intervalSeconds: item["interval_seconds"] as? String ?? "unknown",
             forceSend: parsedLoopSnapshotBool(item["force_send"]),
             message: item["message"] as? String ?? "unknown",
-            nextRunEpoch: item["next_run_epoch"] as? String ?? "unknown",
+            nextRunEpoch: parsedEpochTimeInterval(item["next_run_epoch"]),
             stopped: parsedLoopSnapshotBool(item["stopped"]),
             stoppedReason: item["stopped_reason"] as? String ?? "",
             paused: parsedLoopSnapshotBool(item["paused"]),
@@ -1819,7 +1819,7 @@ func formattedRecentSendResultsText(results: [SendResultSnapshot], formatEpoch: 
     }.joined(separator: "\n\n")
 }
 
-func formattedLoopOccupancyText(loops: [LoopSnapshot], formatEpoch: (String) -> String) -> String {
+func formattedLoopOccupancyText(loops: [LoopSnapshot], formatEpoch: (TimeInterval) -> String) -> String {
     guard !loops.isEmpty else {
         return "相关 Loop\n无"
     }
