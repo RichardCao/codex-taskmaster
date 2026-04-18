@@ -1087,6 +1087,53 @@ final class SendRequestCoordinator {
         return true
     }
 
+    private func performQueuedSendExecution(
+        execution: QueuedSendRequestExecution,
+        finish: ([String: Any]) -> Void
+    ) {
+        let target = execution.target
+        let message = execution.message
+        let timeoutSeconds = execution.timeoutSeconds
+        let forceSend = execution.forceSend
+        let context = execution.context
+
+        guard performQueuedSendPreflight(
+            target: target,
+            forceSend: forceSend,
+            context: context,
+            finish: finish
+        ) else {
+            return
+        }
+
+        guard let usedTTY = performQueuedSendDelivery(
+            target: target,
+            message: message,
+            forceSend: forceSend,
+            context: context,
+            finish: finish
+        ) else {
+            return
+        }
+
+        let verificationContext = performQueuedSendVerification(
+            target: target,
+            forceSend: forceSend,
+            timeoutSeconds: timeoutSeconds,
+            context: context
+        )
+        finishQueuedSendVerification(
+            target: target,
+            forceSend: forceSend,
+            usedTTY: usedTTY,
+            clearExistingInput: context.clearResidualInputBeforeSend,
+            verification: verificationContext.verification,
+            verificationDecision: verificationContext.decision,
+            resolution: context.resolution,
+            finish: finish
+        )
+    }
+
     private func appendLiveTTYResolutionDetail(_ baseDetail: String, resolution: LiveTTYResolution?) -> String {
         guard let resolution else { return baseDetail }
 
@@ -1227,47 +1274,6 @@ final class SendRequestCoordinator {
         guard let execution = loadQueuedSendRequestExecution(request: request, finish: finishQueuedRequest) else {
             return
         }
-
-        let target = execution.target
-        let message = execution.message
-        let timeoutSeconds = execution.timeoutSeconds
-        let forceSend = execution.forceSend
-        let context = execution.context
-
-        guard performQueuedSendPreflight(
-            target: target,
-            forceSend: forceSend,
-            context: context,
-            finish: finishQueuedRequest
-        ) else {
-            return
-        }
-
-        guard let usedTTY = performQueuedSendDelivery(
-            target: target,
-            message: message,
-            forceSend: forceSend,
-            context: context,
-            finish: finishQueuedRequest
-        ) else {
-            return
-        }
-
-        let verificationContext = performQueuedSendVerification(
-            target: target,
-            forceSend: forceSend,
-            timeoutSeconds: timeoutSeconds,
-            context: context
-        )
-        finishQueuedSendVerification(
-            target: target,
-            forceSend: forceSend,
-            usedTTY: usedTTY,
-            clearExistingInput: context.clearResidualInputBeforeSend,
-            verification: verificationContext.verification,
-            verificationDecision: verificationContext.decision,
-            resolution: context.resolution,
-            finish: finishQueuedRequest
-        )
+        performQueuedSendExecution(execution: execution, finish: finishQueuedRequest)
     }
 }
