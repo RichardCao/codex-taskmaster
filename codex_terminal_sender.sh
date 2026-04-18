@@ -153,6 +153,11 @@ hash_target() {
   printf '%s' "$target" | shasum -a 256 | awk '{print $1}'
 }
 
+generate_loop_key() {
+  local target="$1"
+  printf '%s|%s|%s|%s\n' "$target" "$(date +%s)" "$$" "$RANDOM" | shasum -a 256 | awk '{print $1}'
+}
+
 paths_for_target() {
   local key="$1"
   LOOP_FILE="${LOOPS_DIR}/${key}.loop"
@@ -224,12 +229,15 @@ load_current_loop_status_file() {
 }
 
 write_loop_definition() {
+  local loop_id="$1"
+  shift
   local target="$1"
   local interval="$2"
   local message="$3"
   local force_send="${4:-0}"
   local thread_id="${5:-}"
   write_kv_file "$LOOP_FILE" \
+    LOOP_ID "$loop_id" \
     TARGET "$target" \
     INTERVAL "$interval" \
     MESSAGE "$message" \
@@ -260,14 +268,87 @@ mark_loop_stopped_entry() {
   local key
   local source_tag
 
-  key="$(hash_target "$target")"
+  key="$(generate_loop_key "$target")"
   paths_for_target "$key"
-  write_loop_definition "$target" "$interval" "$message" "$force_send" "$thread_id"
+  write_loop_definition "$key" "$target" "$interval" "$message" "$force_send" "$thread_id"
   source_tag="$(loop_source_tag)"
   write_loop_status_kv "$source_tag" "" "0" "" "0" "" "1" "$stopped_reason"
   if [[ -n "$log_message" ]]; then
     append_loop_log_line "$LOOP_LOG_FILE" "$log_message"
   fi
+}
+
+resolve_loop_key() {
+  local target="${1:-}"
+  local loop_id="${2:-}"
+  local loop_file
+  local key
+  local source_tag
+  local matched_key=""
+  local fallback_key=""
+
+  if [[ -n "$loop_id" ]]; then
+    if [[ -f "${LOOPS_DIR}/${loop_id}.loop" ]]; then
+      printf '%s\n' "$loop_id"
+      return 0
+    fi
+
+    shopt -s nullglob
+    for loop_file in "$LOOPS_DIR"/*.loop; do
+      key="$(basename "${loop_file%.loop}")"
+      LOOP_ID=""
+      load_kv_file "$loop_file"
+      if [[ "${LOOP_ID:-}" == "$loop_id" ]]; then
+        printf '%s\n' "$key"
+        shopt -u nullglob
+        return 0
+      fi
+    done
+    shopt -u nullglob
+    return 1
+  fi
+
+  [[ -n "$target" ]] || return 1
+
+  key="$(hash_target "$target")"
+  if [[ -f "${LOOPS_DIR}/${key}.loop" ]]; then
+    paths_for_target "$key"
+    if load_current_loop_status_file "$(loop_source_tag)" >/dev/null 2>&1; then
+      if [[ "${STOPPED:-0}" != "1" && "${PAUSED:-0}" != "1" ]]; then
+        printf '%s\n' "$key"
+        return 0
+      fi
+    fi
+    fallback_key="$key"
+  fi
+
+  shopt -s nullglob
+  for loop_file in "$LOOPS_DIR"/*.loop; do
+    key="$(basename "${loop_file%.loop}")"
+    TARGET=""
+    load_kv_file "$loop_file"
+    [[ "${TARGET:-}" == "$target" ]] || continue
+    paths_for_target "$key"
+    source_tag="$(loop_source_tag)"
+    if load_current_loop_status_file "$source_tag" >/dev/null 2>&1; then
+      if [[ "${STOPPED:-0}" != "1" && "${PAUSED:-0}" != "1" ]]; then
+        matched_key="$key"
+        break
+      fi
+    fi
+    [[ -n "$fallback_key" ]] || fallback_key="$key"
+  done
+  shopt -u nullglob
+
+  if [[ -n "$matched_key" ]]; then
+    printf '%s\n' "$matched_key"
+    return 0
+  fi
+  if [[ -n "$fallback_key" ]]; then
+    printf '%s\n' "$fallback_key"
+    return 0
+  fi
+  return 1
 }
 
 find_conflicting_running_loop_target() {
@@ -2969,7 +3050,7 @@ start_loop() {
 
   key="$(hash_target "$target")"
   paths_for_target "$key"
-  write_loop_definition "$target" "$interval" "$message" "$force_send"
+  write_loop_definition "$key" "$target" "$interval" "$message" "$force_send"
 
   if ! start_detail="$(resolve_thread_id "$target" 2>&1)"; then
     failure_reason="$(classify_loop_reason "$start_detail")"
@@ -3018,12 +3099,13 @@ start_loop() {
     return 1
   fi
 
-  write_loop_definition "$target" "$interval" "$message" "$force_send" "$thread_id"
+  write_loop_definition "$key" "$target" "$interval" "$message" "$force_send" "$thread_id"
   source_tag="$(loop_source_tag)"
   write_loop_status_kv "$source_tag" "$(date +%s)" "0" "" "0" "" "0" ""
   append_loop_log_line "$LOOP_LOG_FILE" "loop started target=${target} interval=${interval}s force_send=$([[ "$force_send" == "1" ]] && echo yes || echo no) message=${message}"
 
   printf 'started loop\n'
+  printf 'loop_id: %s\n' "$key"
   printf 'target: %s\n' "$target"
   printf 'interval_seconds: %s\n' "$interval"
   printf 'force_send: %s\n' "$([[ "$force_send" == "1" ]] && echo yes || echo no)"
@@ -3031,7 +3113,8 @@ start_loop() {
 }
 
 resume_loop() {
-  local target="$1"
+  local target="${1:-}"
+  local loop_id="${2:-}"
   local key
   local source_tag
   local failure_reason=""
@@ -3041,10 +3124,11 @@ resume_loop() {
   local first_user_message
   local session_name
   local conflicting_target
-  key="$(hash_target "$target")"
+  key="$(resolve_loop_key "$target" "$loop_id")" || die "no loop found for selector"
   paths_for_target "$key"
-  [[ -f "$LOOP_FILE" ]] || die "no loop found for target '${target}'"
+  [[ -f "$LOOP_FILE" ]] || die "no loop found for selector"
 
+  LOOP_ID="$key"
   TARGET=""
   INTERVAL=""
   MESSAGE=""
@@ -3067,12 +3151,13 @@ resume_loop() {
   IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name model_provider session_source agent_nickname agent_role <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
   resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path" >/dev/null
   ensure_loop_daemon
-  write_loop_definition "$target" "${INTERVAL:-$DEFAULT_INTERVAL}" "${MESSAGE:-$DEFAULT_MESSAGE}" "${FORCE_SEND:-0}" "$thread_id"
+  write_loop_definition "$key" "$target" "${INTERVAL:-$DEFAULT_INTERVAL}" "${MESSAGE:-$DEFAULT_MESSAGE}" "${FORCE_SEND:-0}" "$thread_id"
 
   write_loop_status_kv "$source_tag" "$(date +%s)" "0" "" "0" "" "0" ""
   append_loop_log_line "$LOOP_LOG_FILE" "loop resumed target=${target}${failure_reason:+ previous_reason=${failure_reason}}"
 
   printf 'resumed loop\n'
+  printf 'loop_id: %s\n' "$key"
   printf 'target: %s\n' "$target"
   if [[ -n "$failure_reason" ]]; then
     printf 'previous_reason: %s\n' "$failure_reason"
@@ -3081,12 +3166,13 @@ resume_loop() {
 }
 
 stop_one() {
-  local target="$1"
+  local target="${1:-}"
+  local loop_id="${2:-}"
   local key
   local source_tag
-  key="$(hash_target "$target")"
+  key="$(resolve_loop_key "$target" "$loop_id")" || die "no loop found for selector"
   paths_for_target "$key"
-  [[ -f "$LOOP_FILE" ]] || die "no loop found for target '${target}'"
+  [[ -f "$LOOP_FILE" ]] || die "no loop found for selector"
   TARGET=""
   INTERVAL=""
   MESSAGE=""
@@ -3129,16 +3215,17 @@ stop_all() {
 }
 
 delete_loop() {
-  local target="$1"
+  local target="${1:-}"
+  local loop_id="${2:-}"
   local key
-  key="$(hash_target "$target")"
+  key="$(resolve_loop_key "$target" "$loop_id")" || die "no loop found for selector"
   paths_for_target "$key"
-  [[ -f "$LOOP_FILE" ]] || die "no loop found for target '${target}'"
+  [[ -f "$LOOP_FILE" ]] || die "no loop found for selector"
   rm -f "$LOOP_FILE"
   rm -f "$LOOP_STATUS_FILE" 2>/dev/null || true
   rm -f "$LOOP_LOG_FILE" 2>/dev/null || true
   stop_loop_daemon_if_idle
-  printf 'deleted loop for target=%s\n' "$target"
+  printf 'deleted loop for target=%s\n' "${target:-$key}"
 }
 
 save_loop_stopped() {
@@ -3147,8 +3234,16 @@ save_loop_stopped() {
   local message="$3"
   local force_send="${4:-0}"
   local stopped_reason="${5:-start_failed}"
-  mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$stopped_reason" "loop saved as stopped target=${target} reason=${stopped_reason}"
+  local loop_id="${6:-}"
+  [[ -n "$loop_id" ]] || loop_id="$(generate_loop_key "$target")"
+  paths_for_target "$loop_id"
+  write_loop_definition "$loop_id" "$target" "$interval" "$message" "$force_send"
+  local source_tag
+  source_tag="$(loop_source_tag)"
+  write_loop_status_kv "$source_tag" "" "0" "" "0" "" "1" "$stopped_reason"
+  append_loop_log_line "$LOOP_LOG_FILE" "loop saved as stopped target=${target} reason=${stopped_reason}"
   printf 'saved stopped loop\n'
+  printf 'loop_id: %s\n' "$loop_id"
   printf 'target: %s\n' "$target"
   printf 'interval_seconds: %s\n' "$interval"
   printf 'force_send: %s\n' "$([[ "$force_send" == "1" ]] && echo yes || echo no)"
@@ -3194,17 +3289,17 @@ print(json.dumps({"loops": loops, "warnings": warnings}, ensure_ascii=False))
 PY
 }
 
-status_one_text() {
-  local target="$1"
-  local key
-  key="$(hash_target "$target")"
+status_one_text_by_key() {
+  local key="$1"
   paths_for_target "$key"
-  [[ -f "$LOOP_FILE" ]] || die "no loop status found for target '${target}'"
+  [[ -f "$LOOP_FILE" ]] || die "no loop status found for key '${key}'"
 
+  LOOP_ID="$key"
   TARGET=""
   INTERVAL=""
   MESSAGE=""
   FORCE_SEND="0"
+  THREAD_ID=""
   load_kv_file "$LOOP_FILE"
 
   local next_run="unknown"
@@ -3230,7 +3325,8 @@ status_one_text() {
   fi
   last_log_line="$(last_nonempty_log_line "$LOOP_LOG_FILE")"
 
-  printf 'target: %s\n' "${TARGET:-$target}"
+  printf 'loop_id: %s\n' "${LOOP_ID:-$key}"
+  printf 'target: %s\n' "${TARGET:-$key}"
   printf 'loop_daemon_running: %s\n' "$(loop_daemon_running && echo yes || echo no)"
   printf 'interval_seconds: %s\n' "${INTERVAL:-unknown}"
   printf 'force_send: %s\n' "$([[ "${FORCE_SEND:-0}" == "1" ]] && echo yes || echo no)"
@@ -3254,12 +3350,21 @@ status_one_text() {
   fi
 }
 
+status_one_text() {
+  local target="${1:-}"
+  local loop_id="${2:-}"
+  local key
+  key="$(resolve_loop_key "$target" "$loop_id")" || die "no loop status found for selector"
+  status_one_text_by_key "$key"
+}
+
 status_one() {
-  local target="$1"
+  local target="${1:-}"
+  local loop_id="${2:-}"
   if [[ "${STATUS_JSON:-0}" == "1" ]]; then
     local status_text=""
     set +e
-    status_text="$(status_one_text "$target" 2>&1)"
+    status_text="$(status_one_text "$target" "$loop_id" 2>&1)"
     local exit_code=$?
     set -e
     if [[ "$exit_code" -ne 0 ]]; then
@@ -3270,7 +3375,7 @@ status_one() {
     return 0
   fi
 
-  status_one_text "$target"
+  status_one_text "$target" "$loop_id"
 }
 
 status_all_text() {
@@ -3280,10 +3385,10 @@ status_all_text() {
   shopt -s nullglob
   for loop_file in "$LOOPS_DIR"/*.loop; do
     found=1
-    TARGET=""
-    load_kv_file "$loop_file"
+    local key
+    key="$(basename "${loop_file%.loop}")"
     echo "---"
-    status_one_text "$TARGET"
+    status_one_text_by_key "$key"
   done
   shopt -u nullglob
 
@@ -3348,13 +3453,15 @@ parse_loop_args() {
 
 parse_loop_save_stopped_args() {
   TARGET=""
+  LOOP_ID=""
   MESSAGE="$DEFAULT_MESSAGE"
   INTERVAL="$DEFAULT_INTERVAL"
   FORCE_SEND=0
   LOOP_STOPPED_REASON="start_failed"
-  while getopts ":t:m:i:r:fh" opt; do
+  while getopts ":t:k:m:i:r:fh" opt; do
     case "$opt" in
       t) TARGET="$OPTARG" ;;
+      k) LOOP_ID="$OPTARG" ;;
       m) MESSAGE="$OPTARG" ;;
       i) INTERVAL="$OPTARG" ;;
       r) LOOP_STOPPED_REASON="$OPTARG" ;;
@@ -3372,12 +3479,18 @@ parse_loop_save_stopped_args() {
 
 parse_stop_args() {
   TARGET=""
+  LOOP_ID=""
   STOP_ALL=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -t)
         [[ $# -ge 2 ]] || die "option -t requires an argument"
         TARGET="$2"
+        shift 2
+        ;;
+      -k)
+        [[ $# -ge 2 ]] || die "option -k requires an argument"
+        LOOP_ID="$2"
         shift 2
         ;;
       --all)
@@ -3393,34 +3506,42 @@ parse_stop_args() {
         ;;
     esac
   done
-  if [[ "$STOP_ALL" -eq 0 && -z "$TARGET" ]]; then
-    die "stop requires -t TARGET or --all"
+  if [[ "$STOP_ALL" -eq 0 && -z "$TARGET" && -z "$LOOP_ID" ]]; then
+    die "stop requires -t TARGET, -k LOOP_ID or --all"
   fi
 }
 
 parse_loop_delete_args() {
   TARGET=""
-  while getopts ":t:h" opt; do
+  LOOP_ID=""
+  while getopts ":t:k:h" opt; do
     case "$opt" in
       t) TARGET="$OPTARG" ;;
+      k) LOOP_ID="$OPTARG" ;;
       h) usage; exit 0 ;;
       :) die "option -$OPTARG requires an argument" ;;
       \?) die "unknown option: -$OPTARG" ;;
     esac
   done
   shift $((OPTIND - 1))
-  [[ -n "$TARGET" ]] || die "loop-delete requires -t TARGET"
+  [[ -n "$TARGET" || -n "$LOOP_ID" ]] || die "loop-delete requires -t TARGET or -k LOOP_ID"
   [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
 }
 
 parse_status_args() {
   TARGET=""
+  LOOP_ID=""
   STATUS_JSON=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -t)
         [[ $# -ge 2 ]] || die "option -t requires an argument"
         TARGET="$2"
+        shift 2
+        ;;
+      -k)
+        [[ $# -ge 2 ]] || die "option -k requires an argument"
+        LOOP_ID="$2"
         shift 2
         ;;
       --json)
@@ -3448,16 +3569,18 @@ parse_status_args() {
 
 parse_probe_args() {
   TARGET=""
-  while getopts ":t:h" opt; do
+  LOOP_ID=""
+  while getopts ":t:k:h" opt; do
     case "$opt" in
       t) TARGET="$OPTARG" ;;
+      k) LOOP_ID="$OPTARG" ;;
       h) usage; exit 0 ;;
       :) die "option -$OPTARG requires an argument" ;;
       \?) die "unknown option: -$OPTARG" ;;
     esac
   done
   shift $((OPTIND - 1))
-  [[ -n "$TARGET" ]] || die "probe requires -t TARGET"
+  [[ -n "$TARGET" || -n "$LOOP_ID" ]] || die "command requires -t TARGET or -k LOOP_ID"
   [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
 }
 
@@ -3742,21 +3865,21 @@ main() {
       if [[ "${STOP_ALL:-0}" -eq 1 ]]; then
         stop_all
       else
-        stop_one "$TARGET"
+        stop_one "$TARGET" "$LOOP_ID"
       fi
       ;;
     loop-delete)
       parse_loop_delete_args "$@"
-      delete_loop "$TARGET"
+      delete_loop "$TARGET" "$LOOP_ID"
       ;;
     loop-save-stopped)
       parse_loop_save_stopped_args "$@"
-      save_loop_stopped "$TARGET" "$INTERVAL" "$MESSAGE" "$FORCE_SEND" "$LOOP_STOPPED_REASON"
+      save_loop_stopped "$TARGET" "$INTERVAL" "$MESSAGE" "$FORCE_SEND" "$LOOP_STOPPED_REASON" "$LOOP_ID"
       ;;
     status)
       parse_status_args "$@"
-      if [[ -n "$TARGET" ]]; then
-        status_one "$TARGET"
+      if [[ -n "$TARGET" || -n "$LOOP_ID" ]]; then
+        status_one "$TARGET" "$LOOP_ID"
       else
         status_all
       fi
@@ -3839,7 +3962,7 @@ main() {
       ;;
     loop-resume)
       parse_probe_args "$@"
-      resume_loop "$TARGET"
+      resume_loop "$TARGET" "$LOOP_ID"
       ;;
     loop-daemon)
       [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"

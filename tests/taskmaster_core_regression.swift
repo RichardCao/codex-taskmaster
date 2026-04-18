@@ -19,6 +19,7 @@ struct TaskMasterCoreRegressionRunner {
         runOverlaySessionSnapshotChecks()
         runMergeLoopSnapshotChecks()
         runMergeLoopSnapshotListChecks()
+        runLoopSnapshotIdentityChecks()
         runLoopConflictResolutionChecks()
         runLocalizationChecks()
         runLoopStateLabelChecks()
@@ -460,6 +461,85 @@ struct TaskMasterCoreRegressionRunner {
         expect(merged.map(\.target) == ["demo", "demo-2"], "expected mergeLoopSnapshots to preserve incoming order")
         expect(merged[0].failureReason == "tty_unavailable", "expected mergeLoopSnapshots to reuse per-target fallback merge")
         expect(merged[1].target == "demo-2", "expected mergeLoopSnapshots to keep brand new entries untouched")
+    }
+
+    private static func runLoopSnapshotIdentityChecks() {
+        let parsed = parseLoopStatusJSONOutput("""
+        {
+          "loops": [
+            {
+              "loop_id": "loop-1",
+              "target": "demo",
+              "loop_daemon_running": true,
+              "interval_seconds": "30",
+              "force_send": false,
+              "message": "hello",
+              "next_run_epoch": 100,
+              "stopped": false,
+              "paused": false,
+              "failure_count": "0",
+              "log": "/tmp/demo.log"
+            }
+          ],
+          "warnings": []
+        }
+        """)
+        expect(parsed?.loops.first?.loopID == "loop-1", "expected loop status parser to preserve loop_id")
+
+        let previousStopped = LoopSnapshot(
+            loopID: "stopped-history",
+            target: "demo",
+            loopDaemonRunning: false,
+            intervalSeconds: "30",
+            forceSend: false,
+            message: "old",
+            nextRunEpoch: 0,
+            stopped: true,
+            stoppedReason: "manual_stop",
+            paused: false,
+            failureCount: "0",
+            failureReason: "",
+            pauseReason: "",
+            logPath: "-",
+            lastLogLine: ""
+        )
+        let optimisticRunning = LoopSnapshot(
+            loopID: "",
+            target: "demo",
+            loopDaemonRunning: true,
+            intervalSeconds: "30",
+            forceSend: false,
+            message: "hello",
+            nextRunEpoch: 120,
+            stopped: false,
+            stoppedReason: "",
+            paused: false,
+            failureCount: "0",
+            failureReason: "",
+            pauseReason: "",
+            logPath: "-",
+            lastLogLine: ""
+        )
+        let refreshedRunning = LoopSnapshot(
+            loopID: "active-key",
+            target: "demo",
+            loopDaemonRunning: true,
+            intervalSeconds: "30",
+            forceSend: false,
+            message: "hello",
+            nextRunEpoch: 140,
+            stopped: false,
+            stoppedReason: "",
+            paused: false,
+            failureCount: "0",
+            failureReason: "",
+            pauseReason: "",
+            logPath: "/tmp/active.log",
+            lastLogLine: ""
+        )
+
+        let merged = mergeLoopSnapshots(previous: [previousStopped, optimisticRunning], incoming: [refreshedRunning, previousStopped])
+        expect(merged.map(\.loopID) == ["active-key", "stopped-history"], "expected mergeLoopSnapshots to preserve distinct identities for active and historical loops")
     }
 
     private static func runLoopConflictResolutionChecks() {

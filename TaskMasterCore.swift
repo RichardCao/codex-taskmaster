@@ -527,16 +527,25 @@ final class LoopCommandService {
         helperService.runAsync(arguments: arguments, qos: qos, completion: completion)
     }
 
-    func stopLoop(target: String) -> HelperCommandResult {
-        helperService.run(arguments: ["stop", "-t", target])
+    private func loopSelectorArguments(target: String, loopID: String?) -> [String] {
+        let trimmedLoopID = loopID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedLoopID.isEmpty {
+            return ["-k", trimmedLoopID]
+        }
+        return ["-t", target]
+    }
+
+    func stopLoop(target: String, loopID: String? = nil) -> HelperCommandResult {
+        helperService.run(arguments: ["stop"] + loopSelectorArguments(target: target, loopID: loopID))
     }
 
     func stopLoopAsync(
         target: String,
+        loopID: String? = nil,
         qos: DispatchQoS.QoSClass = .userInitiated,
         completion: @escaping (HelperCommandResult) -> Void
     ) {
-        helperService.runAsync(arguments: ["stop", "-t", target], qos: qos, completion: completion)
+        helperService.runAsync(arguments: ["stop"] + loopSelectorArguments(target: target, loopID: loopID), qos: qos, completion: completion)
     }
 
     func stopAllLoops() -> HelperCommandResult {
@@ -550,28 +559,30 @@ final class LoopCommandService {
         helperService.runAsync(arguments: ["stop", "--all"], qos: qos, completion: completion)
     }
 
-    func resumeLoop(target: String) -> HelperCommandResult {
-        helperService.run(arguments: ["loop-resume", "-t", target])
+    func resumeLoop(target: String, loopID: String? = nil) -> HelperCommandResult {
+        helperService.run(arguments: ["loop-resume"] + loopSelectorArguments(target: target, loopID: loopID))
     }
 
     func resumeLoopAsync(
         target: String,
+        loopID: String? = nil,
         qos: DispatchQoS.QoSClass = .userInitiated,
         completion: @escaping (HelperCommandResult) -> Void
     ) {
-        helperService.runAsync(arguments: ["loop-resume", "-t", target], qos: qos, completion: completion)
+        helperService.runAsync(arguments: ["loop-resume"] + loopSelectorArguments(target: target, loopID: loopID), qos: qos, completion: completion)
     }
 
-    func deleteLoop(target: String) -> HelperCommandResult {
-        helperService.run(arguments: ["loop-delete", "-t", target])
+    func deleteLoop(target: String, loopID: String? = nil) -> HelperCommandResult {
+        helperService.run(arguments: ["loop-delete"] + loopSelectorArguments(target: target, loopID: loopID))
     }
 
     func deleteLoopAsync(
         target: String,
+        loopID: String? = nil,
         qos: DispatchQoS.QoSClass = .userInitiated,
         completion: @escaping (HelperCommandResult) -> Void
     ) {
-        helperService.runAsync(arguments: ["loop-delete", "-t", target], qos: qos, completion: completion)
+        helperService.runAsync(arguments: ["loop-delete"] + loopSelectorArguments(target: target, loopID: loopID), qos: qos, completion: completion)
     }
 
     func sendMessageAsync(
@@ -663,6 +674,7 @@ func normalizeTTYIdentifier(_ tty: String) -> String {
 }
 
 struct LoopSnapshot {
+    let loopID: String
     let target: String
     let loopDaemonRunning: Bool
     let intervalSeconds: String
@@ -677,6 +689,40 @@ struct LoopSnapshot {
     let pauseReason: String
     let logPath: String
     let lastLogLine: String
+
+    init(
+        loopID: String = "",
+        target: String,
+        loopDaemonRunning: Bool,
+        intervalSeconds: String,
+        forceSend: Bool,
+        message: String,
+        nextRunEpoch: TimeInterval,
+        stopped: Bool,
+        stoppedReason: String,
+        paused: Bool,
+        failureCount: String,
+        failureReason: String,
+        pauseReason: String,
+        logPath: String,
+        lastLogLine: String
+    ) {
+        self.loopID = loopID
+        self.target = target
+        self.loopDaemonRunning = loopDaemonRunning
+        self.intervalSeconds = intervalSeconds
+        self.forceSend = forceSend
+        self.message = message
+        self.nextRunEpoch = nextRunEpoch
+        self.stopped = stopped
+        self.stoppedReason = stoppedReason
+        self.paused = paused
+        self.failureCount = failureCount
+        self.failureReason = failureReason
+        self.pauseReason = pauseReason
+        self.logPath = logPath
+        self.lastLogLine = lastLogLine
+    }
 
     var isLoopDaemonRunning: Bool {
         loopDaemonRunning
@@ -708,6 +754,11 @@ struct LoopSnapshot {
 
     var failureReasonKind: SendOutcomeReason {
         SendOutcomeReason(rawValue: failureReason.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase)
+    }
+
+    var mergeIdentity: String {
+        let trimmedLoopID = loopID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedLoopID.isEmpty ? target : trimmedLoopID
     }
 }
 
@@ -924,6 +975,7 @@ func parseLoopStatusJSONOutput(_ output: String) -> (loops: [LoopSnapshot], warn
         }
 
         return LoopSnapshot(
+            loopID: item["loop_id"] as? String ?? "",
             target: target,
             loopDaemonRunning: parsedLoopSnapshotBool(item["loop_daemon_running"]),
             intervalSeconds: item["interval_seconds"] as? String ?? "unknown",
@@ -1197,6 +1249,7 @@ func mergeLoopSnapshot(previous: LoopSnapshot?, incoming: LoopSnapshot) -> LoopS
     guard incomingIsUnderspecified else { return incoming }
 
     return LoopSnapshot(
+        loopID: incoming.loopID,
         target: incoming.target,
         loopDaemonRunning: incoming.loopDaemonRunning,
         intervalSeconds: incoming.intervalSeconds,
@@ -1217,8 +1270,17 @@ func mergeLoopSnapshot(previous: LoopSnapshot?, incoming: LoopSnapshot) -> LoopS
 func mergeLoopSnapshots(previous: [LoopSnapshot], incoming: [LoopSnapshot]) -> [LoopSnapshot] {
     guard !incoming.isEmpty else { return [] }
 
-    let previousByTarget = Dictionary(uniqueKeysWithValues: previous.map { ($0.target, $0) })
-    return incoming.map { mergeLoopSnapshot(previous: previousByTarget[$0.target], incoming: $0) }
+    let previousByIdentity = Dictionary(uniqueKeysWithValues: previous.map { ($0.mergeIdentity, $0) })
+    let previousActiveByTarget = Dictionary(
+        uniqueKeysWithValues: previous
+            .filter { !$0.isStopped && !$0.isPaused }
+            .map { ($0.target, $0) }
+    )
+    return incoming.map { snapshot in
+        let previous = previousByIdentity[snapshot.mergeIdentity]
+            ?? (!snapshot.isStopped && !snapshot.isPaused ? previousActiveByTarget[snapshot.target] : nil)
+        return mergeLoopSnapshot(previous: previous, incoming: snapshot)
+    }
 }
 
 func parsedEpochTimeInterval(_ rawValue: Any?) -> TimeInterval {

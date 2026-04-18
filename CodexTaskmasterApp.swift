@@ -2385,12 +2385,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         actionName: String,
         commandName: String,
         loop: LoopSnapshot,
-        invoke: @escaping (String, @escaping (HelperCommandResult) -> Void) -> Void
+        invoke: @escaping (String, String?, @escaping (HelperCommandResult) -> Void) -> Void
     ) {
         targetField.stringValue = loop.target
         let target = loop.target
-        runHelper(actionName: actionName, displayArguments: [commandName, "-t", target]) { completion in
-            invoke(target, completion)
+        let trimmedLoopID = loop.loopID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayArguments = trimmedLoopID.isEmpty ? [commandName, "-t", target] : [commandName, "-k", trimmedLoopID]
+        runHelper(actionName: actionName, displayArguments: displayArguments) { completion in
+            invoke(target, trimmedLoopID.isEmpty ? nil : trimmedLoopID, completion)
         }
     }
 
@@ -5373,8 +5375,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func optimisticMarkLoopRunning(target: String, interval: String?, message: String?, forceSend: Bool?) {
-        let existingSnapshot = loopSnapshots.first(where: { $0.target == target })
+        let existingSnapshot = loopSnapshots.first(where: { $0.target == target && !$0.isStopped && !$0.isPaused })
+            ?? loopSnapshots.first(where: { $0.target == target })
         let updatedSnapshot = LoopSnapshot(
+            loopID: existingSnapshot?.loopID ?? "",
             target: target,
             loopDaemonRunning: true,
             intervalSeconds: interval ?? existingSnapshot?.intervalSeconds ?? "unknown",
@@ -5391,7 +5395,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             lastLogLine: ""
         )
 
-        if let index = loopSnapshots.firstIndex(where: { $0.target == target }) {
+        if let index = loopSnapshots.firstIndex(where: { $0.target == target && !$0.isStopped && !$0.isPaused }) {
             loopSnapshots[index] = updatedSnapshot
         } else {
             loopSnapshots.append(updatedSnapshot)
@@ -5570,7 +5574,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             var failureText: String?
 
             for conflict in conflicts {
-                let stopResult = self.loopCommandService.runCommand(arguments: ["stop", "-t", conflict.target])
+                let stopArguments = conflict.loopID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? ["stop", "-t", conflict.target]
+                    : ["stop", "-k", conflict.loopID]
+                let stopResult = self.loopCommandService.runCommand(arguments: stopArguments)
                 if stopResult.status != 0 {
                     failureText = stopResult.primaryDetail ?? "停止旧循环失败"
                     break
@@ -6028,8 +6035,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             handleStoppedLoopBlocked()
             return
         }
-        runLoopTargetAction(actionName: "停止当前", commandName: "stop", loop: loop) { target, completion in
-            self.loopCommandService.stopLoopAsync(target: target, completion: completion)
+        runLoopTargetAction(actionName: "停止当前", commandName: "stop", loop: loop) { target, loopID, completion in
+            self.loopCommandService.stopLoopAsync(target: target, loopID: loopID, completion: completion)
         }
     }
 
@@ -6068,8 +6075,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.scheduleLoopSnapshotRefresh()
             }
         ) {
-            self.runLoopTargetAction(actionName: "恢复当前", commandName: "loop-resume", loop: loop) { target, completion in
-                self.loopCommandService.resumeLoopAsync(target: target, completion: completion)
+            self.runLoopTargetAction(actionName: "恢复当前", commandName: "loop-resume", loop: loop) { target, loopID, completion in
+                self.loopCommandService.resumeLoopAsync(target: target, loopID: loopID, completion: completion)
             }
         }
     }
@@ -6077,8 +6084,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func deleteSelectedLoop() {
         guard let loop = selectedLoopSnapshotForAction() else { return }
-        runLoopTargetAction(actionName: "删除当前", commandName: "loop-delete", loop: loop) { target, completion in
-            self.loopCommandService.deleteLoopAsync(target: target, completion: completion)
+        runLoopTargetAction(actionName: "删除当前", commandName: "loop-delete", loop: loop) { target, loopID, completion in
+            self.loopCommandService.deleteLoopAsync(target: target, loopID: loopID, completion: completion)
         }
     }
 
