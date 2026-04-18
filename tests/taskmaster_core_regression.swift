@@ -16,6 +16,7 @@ struct TaskMasterCoreRegressionRunner {
         runLoopSnapshotAccessorChecks()
         runSessionSnapshotAccessorChecks()
         runMergeSessionSnapshotChecks()
+        runOverlaySessionSnapshotChecks()
         runMergeLoopSnapshotChecks()
         runLocalizationChecks()
         runLoopStateLabelChecks()
@@ -292,6 +293,71 @@ struct TaskMasterCoreRegressionRunner {
 
         let merged = mergeSessionSnapshots(existing: [older], newSnapshots: [newer])
         expect(merged.map(\.threadID) == ["thread-2", "thread-1"], "expected mergeSessionSnapshots to sort by newest updatedAt")
+    }
+
+    private static func runOverlaySessionSnapshotChecks() {
+        let existingA = SessionSnapshot(
+            name: "a-old",
+            target: "a",
+            threadID: "thread-a",
+            provider: "openai",
+            source: "cli",
+            parentThreadID: "",
+            agentNickname: "",
+            agentRole: "",
+            status: "ready",
+            reason: "",
+            terminalState: "prompt_ready",
+            tty: "ttys001",
+            updatedAtEpoch: 100,
+            rolloutPath: "",
+            preview: "",
+            isArchived: false
+        )
+        let existingB = SessionSnapshot(
+            name: "b-old",
+            target: "b",
+            threadID: "thread-b",
+            provider: "openai",
+            source: "cli",
+            parentThreadID: "",
+            agentNickname: "",
+            agentRole: "",
+            status: "ready",
+            reason: "",
+            terminalState: "prompt_ready",
+            tty: "ttys002",
+            updatedAtEpoch: 90,
+            rolloutPath: "",
+            preview: "",
+            isArchived: false
+        )
+        let refreshedB = SessionSnapshot(
+            name: "b-new",
+            target: "b",
+            threadID: "thread-b",
+            provider: "openai",
+            source: "cli",
+            parentThreadID: "",
+            agentNickname: "",
+            agentRole: "",
+            status: "busy_turn_open",
+            reason: "",
+            terminalState: "prompt_with_input",
+            tty: "ttys009",
+            updatedAtEpoch: 120,
+            rolloutPath: "",
+            preview: "",
+            isArchived: false
+        )
+
+        let overlaid = overlaySessionSnapshots(existing: [existingA, existingB], refreshed: [refreshedB])
+        expect(overlaid.map(\.threadID) == ["thread-a", "thread-b"], "expected overlaySessionSnapshots to preserve existing order")
+        expect(overlaid[0].name == "a-old", "expected overlaySessionSnapshots to preserve untouched entries")
+        expect(overlaid[1].name == "b-new", "expected overlaySessionSnapshots to replace matching entries")
+
+        let resolved = resolveClaimedSessionRefreshSnapshots(claimed: [existingB, existingA], refreshed: [refreshedB])
+        expect(resolved.map(\.name) == ["b-new", "a-old"], "expected resolveClaimedSessionRefreshSnapshots to resolve refreshed entries and preserve claimed order")
     }
 
     private static func runMergeLoopSnapshotChecks() {

@@ -2043,22 +2043,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func applyRefreshedSessionSnapshots(_ refreshedSnapshots: [SessionSnapshot], preserveSelectionThreadID: String?) {
         guard !refreshedSnapshots.isEmpty else { return }
 
-        var refreshedByThreadID: [String: SessionSnapshot] = [:]
-        for snapshot in refreshedSnapshots {
-            refreshedByThreadID[snapshot.threadID] = snapshot
-        }
-
-        var updatedSnapshots: [SessionSnapshot] = []
-        updatedSnapshots.reserveCapacity(allSessionSnapshots.count)
-        for snapshot in allSessionSnapshots {
-            if let refreshed = refreshedByThreadID[snapshot.threadID] {
-                updatedSnapshots.append(refreshed)
-            } else {
-                updatedSnapshots.append(snapshot)
-            }
-        }
-
-        allSessionSnapshots = updatedSnapshots
+        allSessionSnapshots = overlaySessionSnapshots(existing: allSessionSnapshots, refreshed: refreshedSnapshots)
         sessionStatusRefreshCoordinator.prune(to: allSessionSnapshots)
         renderSessionSnapshots(
             scannedCount: lastSessionRenderScannedCount ?? allSessionSnapshots.count,
@@ -2133,9 +2118,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         group.notify(queue: .main) {
             let completionDate = Date()
-            let refreshedByThreadID = Dictionary(uniqueKeysWithValues: refreshedSnapshots.map { ($0.threadID, $0) })
-            for snapshot in claimedSnapshots {
-                let resolved = refreshedByThreadID[snapshot.threadID] ?? snapshot
+            for resolved in resolveClaimedSessionRefreshSnapshots(claimed: claimedSnapshots, refreshed: refreshedSnapshots) {
                 self.sessionStatusRefreshCoordinator.scheduleNext(for: resolved, from: completionDate)
             }
 
@@ -3102,9 +3085,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         group.notify(queue: .main) {
             let completionDate = Date()
-            let refreshedByThreadID = Dictionary(uniqueKeysWithValues: refreshedSnapshots.map { ($0.threadID, $0) })
-            for snapshot in dueSnapshots {
-                let resolved = refreshedByThreadID[snapshot.threadID] ?? snapshot
+            for resolved in resolveClaimedSessionRefreshSnapshots(claimed: dueSnapshots, refreshed: refreshedSnapshots) {
                 self.sessionStatusRefreshCoordinator.scheduleNext(for: resolved, from: completionDate)
             }
 

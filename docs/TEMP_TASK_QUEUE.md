@@ -43,6 +43,7 @@
    - `done` session refresh merge fallback 下沉到 core
    - `in_progress` parser 入口统一使用共享 helper
    - `done` rollout recent user message parser 下沉到 core
+   - `done` session refresh 覆盖式快照合并 helper 下沉到 core
    - `done` 移除旧 loop 状态文本 parser
    - `done` send helper 结构化结果 parser 下沉到 core
    - `done` recent send result JSON parser 下沉到 core

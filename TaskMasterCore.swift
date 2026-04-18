@@ -1295,6 +1295,21 @@ func mergeSessionSnapshots(existing: [SessionSnapshot], newSnapshots: [SessionSn
     }
 }
 
+func overlaySessionSnapshots(existing: [SessionSnapshot], refreshed: [SessionSnapshot]) -> [SessionSnapshot] {
+    guard !existing.isEmpty, !refreshed.isEmpty else { return existing }
+
+    let refreshedByThreadID = Dictionary(uniqueKeysWithValues: refreshed.map { ($0.threadID, $0) })
+    return existing.map { refreshedByThreadID[$0.threadID] ?? $0 }
+}
+
+func resolveClaimedSessionRefreshSnapshots(claimed: [SessionSnapshot], refreshed: [SessionSnapshot]) -> [SessionSnapshot] {
+    guard !claimed.isEmpty else { return [] }
+    guard !refreshed.isEmpty else { return claimed }
+
+    let refreshedByThreadID = Dictionary(uniqueKeysWithValues: refreshed.map { ($0.threadID, $0) })
+    return claimed.map { refreshedByThreadID[$0.threadID] ?? $0 }
+}
+
 enum SessionTerminalState: String {
     case promptReady = "prompt_ready"
     case promptWithInput = "prompt_with_input"
