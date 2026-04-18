@@ -18,10 +18,10 @@
 1. `done` 发送运行时剩余收口
    目标：继续压缩 `TaskMasterSendRuntime.swift` 中的 orchestration、重试和失败分支，减少重复逻辑，收紧 helper 边界。
 
-2. `in_progress` 主控制器继续拆分
+2. `done` 主控制器继续拆分
    目标：继续把 `CodexTaskmasterApp.swift` 中的 session / loop / provider migration 业务编排从控制器下沉到 service / helper / formatter。
 
-3. `pending` 核心模型类型化
+3. `in_progress` 核心模型类型化
    目标：继续把布尔、时间和状态字段从字符串协议升级为更明确的类型。
 
 4. `pending` merge / parser / fallback 规则收口

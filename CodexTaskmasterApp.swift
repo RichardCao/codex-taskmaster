@@ -3300,7 +3300,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             case "interval":
                 orderedAscending = (Int(lhs.intervalSeconds) ?? 0) < (Int(rhs.intervalSeconds) ?? 0)
             case "forceSend":
-                orderedAscending = lhs.forceSend.localizedStandardCompare(rhs.forceSend) == .orderedAscending
+                orderedAscending = (lhs.isForceSendEnabled ? 1 : 0) < (rhs.isForceSendEnabled ? 1 : 0)
             case "nextRun":
                 orderedAscending = (lhs.nextRunTimeInterval ?? 0) < (rhs.nextRunTimeInterval ?? 0)
             case "message":
@@ -5137,14 +5137,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             loops.append(
                 LoopSnapshot(
                     target: target,
-                    loopDaemonRunning: current["loop_daemon_running"] ?? "unknown",
+                    loopDaemonRunning: parsedLoopSnapshotBool(current["loop_daemon_running"]),
                     intervalSeconds: current["interval_seconds"] ?? "unknown",
-                    forceSend: current["force_send"] ?? "no",
+                    forceSend: parsedLoopSnapshotBool(current["force_send"]),
                     message: current["message"] ?? "unknown",
                     nextRunEpoch: current["next_run_epoch"] ?? "unknown",
-                    stopped: current["stopped"] ?? "no",
+                    stopped: parsedLoopSnapshotBool(current["stopped"]),
                     stoppedReason: current["stopped_reason"] ?? "",
-                    paused: current["paused"] ?? "no",
+                    paused: parsedLoopSnapshotBool(current["paused"]),
                     failureCount: current["failure_count"] ?? "0",
                     failureReason: current["failure_reason"] ?? "",
                     pauseReason: current["pause_reason"] ?? "",
@@ -5542,14 +5542,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let existingSnapshot = loopSnapshots.first(where: { $0.target == target })
         let updatedSnapshot = LoopSnapshot(
             target: target,
-            loopDaemonRunning: "yes",
+            loopDaemonRunning: true,
             intervalSeconds: interval ?? existingSnapshot?.intervalSeconds ?? "unknown",
-            forceSend: (forceSend ?? existingSnapshot?.isForceSendEnabled ?? false) ? "yes" : (existingSnapshot?.forceSend ?? "no"),
+            forceSend: forceSend ?? existingSnapshot?.isForceSendEnabled ?? false,
             message: message ?? existingSnapshot?.message ?? "",
             nextRunEpoch: String(Int(Date().timeIntervalSince1970)),
-            stopped: "no",
+            stopped: false,
             stoppedReason: "",
-            paused: "no",
+            paused: false,
             failureCount: "0",
             failureReason: "",
             pauseReason: "",

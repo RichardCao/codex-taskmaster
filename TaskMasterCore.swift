@@ -656,14 +656,14 @@ func normalizeTTYIdentifier(_ tty: String) -> String {
 
 struct LoopSnapshot {
     let target: String
-    let loopDaemonRunning: String
+    let loopDaemonRunning: Bool
     let intervalSeconds: String
-    let forceSend: String
+    let forceSend: Bool
     let message: String
     let nextRunEpoch: String
-    let stopped: String
+    let stopped: Bool
     let stoppedReason: String
-    let paused: String
+    let paused: Bool
     let failureCount: String
     let failureReason: String
     let pauseReason: String
@@ -671,19 +671,19 @@ struct LoopSnapshot {
     let lastLogLine: String
 
     var isLoopDaemonRunning: Bool {
-        loopDaemonRunning == "yes"
+        loopDaemonRunning
     }
 
     var isForceSendEnabled: Bool {
-        forceSend == "yes"
+        forceSend
     }
 
     var isStopped: Bool {
-        stopped == "yes"
+        stopped
     }
 
     var isPaused: Bool {
-        paused == "yes"
+        paused
     }
 
     var nextRunTimeInterval: TimeInterval? {
@@ -740,14 +740,14 @@ func parseLoopStatusJSONOutput(_ output: String) -> (loops: [LoopSnapshot], warn
 
         return LoopSnapshot(
             target: target,
-            loopDaemonRunning: item["loop_daemon_running"] as? String ?? "unknown",
+            loopDaemonRunning: parsedLoopSnapshotBool(item["loop_daemon_running"]),
             intervalSeconds: item["interval_seconds"] as? String ?? "unknown",
-            forceSend: item["force_send"] as? String ?? "no",
+            forceSend: parsedLoopSnapshotBool(item["force_send"]),
             message: item["message"] as? String ?? "unknown",
             nextRunEpoch: item["next_run_epoch"] as? String ?? "unknown",
-            stopped: item["stopped"] as? String ?? "no",
+            stopped: parsedLoopSnapshotBool(item["stopped"]),
             stoppedReason: item["stopped_reason"] as? String ?? "",
-            paused: item["paused"] as? String ?? "no",
+            paused: parsedLoopSnapshotBool(item["paused"]),
             failureCount: item["failure_count"] as? String ?? "0",
             failureReason: item["failure_reason"] as? String ?? "",
             pauseReason: item["pause_reason"] as? String ?? "",
@@ -757,6 +757,20 @@ func parseLoopStatusJSONOutput(_ output: String) -> (loops: [LoopSnapshot], warn
     }
 
     return (loops, warnings)
+}
+
+func parsedLoopSnapshotBool(_ rawValue: Any?) -> Bool {
+    switch rawValue {
+    case let value as Bool:
+        return value
+    case let value as String:
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+        return normalized == "yes" || normalized == "true" || normalized == "1"
+    case let value as NSNumber:
+        return value.boolValue
+    default:
+        return false
+    }
 }
 
 func sessionActualName(_ session: SessionSnapshot) -> String {

@@ -26,7 +26,8 @@
   6. `done` 状态 / 原因 / 文案映射收口
   7. `done` `config.toml` 读取从 UI 层移出
   8. `done` 删除流程结构化
-  9. `in_progress` 控制器拆分
+  9. `done` 控制器拆分
+  10. `in_progress` 核心模型类型化
 
 ## 执行顺序
 
