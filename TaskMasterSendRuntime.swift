@@ -475,6 +475,14 @@ final class SendRequestCoordinator {
     typealias HelperCommandResult = (status: Int32, stdout: String, stderr: String)
     typealias ProbeResult = (status: Int32, values: [String: String], stdout: String, stderr: String)
 
+    private struct QueuedSendRequestExecution {
+        let target: String
+        let message: String
+        let timeoutSeconds: NSNumber
+        let forceSend: Bool
+        let context: QueuedSendExecutionContext
+    }
+
     private struct QueuedSendExecutionContext {
         let activeProbe: ProbeResult
         let resolution: LiveTTYResolution?
@@ -975,6 +983,27 @@ final class SendRequestCoordinator {
         )
     }
 
+    private func loadQueuedSendRequestExecution(
+        request: ParsedSendRequestPayload,
+        finish: ([String: Any]) -> Void
+    ) -> QueuedSendRequestExecution? {
+        guard let initialProbe = loadInitialQueuedSendProbe(target: request.target, forceSend: request.forceSend, finish: finish) else {
+            return nil
+        }
+
+        return QueuedSendRequestExecution(
+            target: request.target,
+            message: request.message,
+            timeoutSeconds: request.timeoutSeconds,
+            forceSend: request.forceSend,
+            context: prepareQueuedSendExecutionContext(
+                target: request.target,
+                forceSend: request.forceSend,
+                initialProbe: initialProbe
+            )
+        )
+    }
+
     private func appendLiveTTYResolutionDetail(_ baseDetail: String, resolution: LiveTTYResolution?) -> String {
         guard let resolution else { return baseDetail }
 
@@ -1088,19 +1117,15 @@ final class SendRequestCoordinator {
             return
         }
 
-        let target = request.target
-        let message = request.message
-        let timeoutSeconds = request.timeoutSeconds
-        let forceSend = request.forceSend
-        guard let initialProbe = loadInitialQueuedSendProbe(target: target, forceSend: forceSend, finish: finishQueuedRequest) else {
+        guard let execution = loadQueuedSendRequestExecution(request: request, finish: finishQueuedRequest) else {
             return
         }
 
-        let context = prepareQueuedSendExecutionContext(
-            target: target,
-            forceSend: forceSend,
-            initialProbe: initialProbe
-        )
+        let target = execution.target
+        let message = execution.message
+        let timeoutSeconds = execution.timeoutSeconds
+        let forceSend = execution.forceSend
+        let context = execution.context
 
         guard context.preflightDecision.canSend else {
             finishQueuedSendPreflightFailure(
