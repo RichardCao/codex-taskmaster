@@ -1104,9 +1104,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     deinit {
-        refreshTimer?.invalidate()
-        requestTimer?.invalidate()
-        sessionStatusRefreshTimer?.invalidate()
+        stopBackgroundTimers()
         removeHistoryKeyMonitor()
         removeHistoryOutsideMonitors()
         removeTableSelectionOutsideMonitor()
@@ -5035,33 +5033,39 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func startAutoRefresh() {
-        refreshTimer?.invalidate()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: autoRefreshInterval, repeats: true) { [weak self] _ in
+        installRepeatingTimer(&refreshTimer, interval: autoRefreshInterval) { [weak self] in
             self?.requestLoopSnapshotRefresh()
-        }
-        if let refreshTimer {
-            RunLoop.main.add(refreshTimer, forMode: .common)
         }
     }
 
     private func startRequestPump() {
-        requestTimer?.invalidate()
-        requestTimer = Timer.scheduledTimer(withTimeInterval: requestPollInterval, repeats: true) { [weak self] _ in
+        installRepeatingTimer(&requestTimer, interval: requestPollInterval) { [weak self] in
             self?.sendRequestCoordinator.processPendingRequests()
-        }
-        if let requestTimer {
-            RunLoop.main.add(requestTimer, forMode: .common)
         }
     }
 
     private func startSessionStatusRefreshTimer() {
-        sessionStatusRefreshTimer?.invalidate()
-        sessionStatusRefreshTimer = Timer.scheduledTimer(withTimeInterval: sessionStatusRefreshSchedulerInterval, repeats: true) { [weak self] _ in
+        installRepeatingTimer(&sessionStatusRefreshTimer, interval: sessionStatusRefreshSchedulerInterval) { [weak self] in
             self?.scheduleDueSessionStatusRefreshes()
         }
-        if let sessionStatusRefreshTimer {
-            RunLoop.main.add(sessionStatusRefreshTimer, forMode: .common)
+    }
+
+    private func installRepeatingTimer(_ timer: inout Timer?, interval: TimeInterval, handler: @escaping () -> Void) {
+        timer?.invalidate()
+        let repeatingTimer = Timer(timeInterval: interval, repeats: true) { _ in
+            handler()
         }
+        timer = repeatingTimer
+        RunLoop.main.add(repeatingTimer, forMode: .common)
+    }
+
+    private func stopBackgroundTimers() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        requestTimer?.invalidate()
+        requestTimer = nil
+        sessionStatusRefreshTimer?.invalidate()
+        sessionStatusRefreshTimer = nil
     }
 
     private func updateActiveLoopsWarningDisplay() {

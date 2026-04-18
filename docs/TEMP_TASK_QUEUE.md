@@ -50,14 +50,14 @@
    - `done` recent send result JSON parser 下沉到 core
    - `done` UI 层只保留展示，不再携带 merge 语义
 
-5. `in_progress` 刷新调度边界收口
+5. `done` 刷新调度边界收口
    目标：统一 loop 刷新、request pump、session 状态自动刷新等调度入口，明确去重、节流和取消。
    当前子任务：
    - `done` loop 刷新触发源盘点与收口
    - `done` session 自动刷新触发源盘点与收口
-   - `pending` request pump / timer 去重与取消边界收口
+   - `done` request pump / timer 去重与取消边界收口
 
-6. `pending` 测试补强
+6. `in_progress` 测试补强
    目标：补 parser / merge / localization、send runtime 决策矩阵、helper 状态变更与受限环境预期测试。
    当前子任务：
    - `pending` parser / merge 回归测试
