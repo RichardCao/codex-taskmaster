@@ -2339,6 +2339,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setButtonsEnabled(true)
     }
 
+    private func saveStoppedLoopForStartFailure(
+        target: String,
+        interval: String,
+        reason: String
+    ) {
+        saveCurrentLoopAsStoppedAsync(target: target, interval: interval, reason: reason)
+    }
+
     private func helperDisplayArguments(base: [String], forceSend: Bool) -> [String] {
         var arguments = base
         if forceSend {
@@ -5770,7 +5778,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             logText: "Codex Taskmaster 缺少辅助功能权限，无法处理循环发送。请在 系统设置 > 隐私与安全性 > 辅助功能 中允许它。",
             actionStatusText: "开始循环失败",
             sideEffect: {
-                self.saveCurrentLoopAsStoppedAsync(target: target, interval: interval, reason: "missing_accessibility_permission")
+                self.saveStoppedLoopForStartFailure(
+                    target: target,
+                    interval: interval,
+                    reason: "missing_accessibility_permission"
+                )
             }
         ) else {
             return
@@ -5782,7 +5794,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             failureStatusText: "开始循环失败",
             failureSideEffect: {
                 let reason = self.lastTargetValidationFailureReason ?? "start_failed"
-                self.saveCurrentLoopAsStoppedAsync(target: target, interval: interval, reason: reason)
+                self.saveStoppedLoopForStartFailure(
+                    target: target,
+                    interval: interval,
+                    reason: reason
+                )
             }
         ) {
             let options = self.currentLoopMessageOptions()
