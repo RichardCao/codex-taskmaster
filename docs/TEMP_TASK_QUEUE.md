@@ -29,9 +29,8 @@
    - `done` loop `nextRunEpoch` 类型化
    - `done` session `terminalState` 过渡访问器
    - `done` session `status` 过渡访问器
-   - `in_progress` send / loop `status` 与 `reason` 过渡访问器
    - `done` send / loop `status` 过渡访问器
-   - `pending` send / loop `reason` 过渡访问器
+   - `done` send / loop `reason` 过渡访问器
    - `pending` session / loop typed accessor 覆盖剩余裸字符串判断
    - `pending` 评估是否将存储字段进一步改为 enum，而非仅保留 accessor
    - `pending` 类型化回归测试补齐

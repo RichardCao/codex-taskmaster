@@ -100,6 +100,7 @@ struct TaskMasterCoreRegressionRunner {
         expect(success.status == "success", "expected successful verification to map to success")
         expect(success.statusKind == .success, "expected successful verification accessor to map to success")
         expect(success.reason == "forced_sent", "expected forced successful verification to map to forced_sent")
+        expect(success.reasonKind == .forcedSent, "expected forced successful verification reason accessor to map to forced_sent")
 
         let queued = evaluateSendVerificationDecision(
             verificationSucceeded: false,
@@ -114,6 +115,7 @@ struct TaskMasterCoreRegressionRunner {
         expect(queued.status == "accepted", "expected queued verification to remain accepted")
         expect(queued.statusKind == .accepted, "expected queued verification accessor to remain accepted")
         expect(queued.reason == "queued_pending_feedback", "expected queued verification to map to queued_pending_feedback")
+        expect(queued.reasonKind == .queuedPendingFeedback, "expected queued verification reason accessor to map to queued_pending_feedback")
 
         let pending = evaluateSendVerificationDecision(
             verificationSucceeded: false,
@@ -128,6 +130,7 @@ struct TaskMasterCoreRegressionRunner {
         expect(pending.status == "accepted", "expected unconfirmed verification to remain accepted")
         expect(pending.statusKind == .accepted, "expected unconfirmed verification accessor to remain accepted")
         expect(pending.reason == "verification_pending", "expected unconfirmed verification to map to verification_pending")
+        expect(pending.reasonKind == .verificationPending, "expected unconfirmed verification reason accessor to map to verification_pending")
         expect(pending.probeStatus == "busy_turn_open", "expected pending verification to preserve latest probe status")
     }
 

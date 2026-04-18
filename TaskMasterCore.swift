@@ -735,6 +735,10 @@ struct SendResultSnapshot {
     var statusKind: SendOutcomeStatus {
         SendOutcomeStatus(rawValue: status)
     }
+
+    var reasonKind: SendOutcomeReason {
+        SendOutcomeReason(rawValue: reason)
+    }
 }
 
 enum SendOutcomeStatus: Equatable {
@@ -751,6 +755,83 @@ enum SendOutcomeStatus: Equatable {
             self = .accepted
         case "failed":
             self = .failed
+        default:
+            self = .other(rawValue)
+        }
+    }
+}
+
+enum SendOutcomeReason: Equatable {
+    case sent
+    case forcedSent
+    case queuedPendingFeedback
+    case verificationPending
+    case requestStillProcessing
+    case requestAlreadyInflight
+    case ambiguousTarget
+    case ttyUnavailable
+    case ttyFocusFailed
+    case terminalFocusScriptLaunchFailed
+    case keyboardEventSourceFailed
+    case keyboardEventCreationFailed
+    case probeFailed
+    case notSendable
+    case sendInterrupted
+    case sendUnverified
+    case sendUnverifiedAfterTTYFallback
+    case invalidRequest
+    case missingAccessibilityPermission
+    case stoppedByUser
+    case startFailed
+    case loopConflictActiveSession
+    case other(String)
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "sent":
+            self = .sent
+        case "forced_sent":
+            self = .forcedSent
+        case "queued_pending_feedback":
+            self = .queuedPendingFeedback
+        case "verification_pending":
+            self = .verificationPending
+        case "request_still_processing":
+            self = .requestStillProcessing
+        case "request_already_inflight":
+            self = .requestAlreadyInflight
+        case "ambiguous_target":
+            self = .ambiguousTarget
+        case "tty_unavailable":
+            self = .ttyUnavailable
+        case "tty_focus_failed":
+            self = .ttyFocusFailed
+        case "terminal_focus_script_launch_failed":
+            self = .terminalFocusScriptLaunchFailed
+        case "keyboard_event_source_failed":
+            self = .keyboardEventSourceFailed
+        case "keyboard_event_creation_failed":
+            self = .keyboardEventCreationFailed
+        case "probe_failed":
+            self = .probeFailed
+        case "not_sendable":
+            self = .notSendable
+        case "send_interrupted":
+            self = .sendInterrupted
+        case "send_unverified":
+            self = .sendUnverified
+        case "send_unverified_after_tty_fallback":
+            self = .sendUnverifiedAfterTTYFallback
+        case "invalid_request":
+            self = .invalidRequest
+        case "missing_accessibility_permission":
+            self = .missingAccessibilityPermission
+        case "stopped_by_user":
+            self = .stoppedByUser
+        case "start_failed":
+            self = .startFailed
+        case "loop_conflict_active_session":
+            self = .loopConflictActiveSession
         default:
             self = .other(rawValue)
         }
@@ -1319,32 +1400,54 @@ func localizedSendReason(_ reason: String) -> String {
     let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return "" }
 
-    let mappings: [String: String] = [
-        "sent": "已发送",
-        "forced_sent": "强制发送成功",
-        "queued_pending_feedback": "消息已排队",
-        "verification_pending": "等待确认",
-        "request_still_processing": "请求仍在处理",
-        "request_already_inflight": "相同请求已在队列中",
-        "ambiguous_target": "目标对应多个同名 Session",
-        "tty_unavailable": "TTY 不可用",
-        "tty_focus_failed": "TTY 聚焦失败",
-        "terminal_focus_script_launch_failed": "Terminal 聚焦脚本启动失败",
-        "keyboard_event_source_failed": "键盘事件源创建失败",
-        "keyboard_event_creation_failed": "键盘事件创建失败",
-        "probe_failed": "状态探测失败",
-        "not_sendable": "当前状态不可发送",
-        "send_interrupted": "发送过程被中断",
-        "send_unverified": "发送后未看到确认",
-        "send_unverified_after_tty_fallback": "TTY 回退后仍未确认",
-        "invalid_request": "请求内容无效",
-        "missing_accessibility_permission": "缺少辅助功能权限",
-        "stopped_by_user": "已手动停止",
-        "start_failed": "启动失败",
-        "loop_conflict_active_session": "同一 Session 已有其他运行中的 Loop"
-    ]
-
-    return mappings[trimmed] ?? trimmed
+    switch SendOutcomeReason(rawValue: trimmed) {
+    case .sent:
+        return "已发送"
+    case .forcedSent:
+        return "强制发送成功"
+    case .queuedPendingFeedback:
+        return "消息已排队"
+    case .verificationPending:
+        return "等待确认"
+    case .requestStillProcessing:
+        return "请求仍在处理"
+    case .requestAlreadyInflight:
+        return "相同请求已在队列中"
+    case .ambiguousTarget:
+        return "目标对应多个同名 Session"
+    case .ttyUnavailable:
+        return "TTY 不可用"
+    case .ttyFocusFailed:
+        return "TTY 聚焦失败"
+    case .terminalFocusScriptLaunchFailed:
+        return "Terminal 聚焦脚本启动失败"
+    case .keyboardEventSourceFailed:
+        return "键盘事件源创建失败"
+    case .keyboardEventCreationFailed:
+        return "键盘事件创建失败"
+    case .probeFailed:
+        return "状态探测失败"
+    case .notSendable:
+        return "当前状态不可发送"
+    case .sendInterrupted:
+        return "发送过程被中断"
+    case .sendUnverified:
+        return "发送后未看到确认"
+    case .sendUnverifiedAfterTTYFallback:
+        return "TTY 回退后仍未确认"
+    case .invalidRequest:
+        return "请求内容无效"
+    case .missingAccessibilityPermission:
+        return "缺少辅助功能权限"
+    case .stoppedByUser:
+        return "已手动停止"
+    case .startFailed:
+        return "启动失败"
+    case .loopConflictActiveSession:
+        return "同一 Session 已有其他运行中的 Loop"
+    case let .other(rawValue):
+        return rawValue
+    }
 }
 
 func localizedProbeStatus(_ status: String) -> String {
@@ -1551,6 +1654,10 @@ struct SendVerificationDecision {
     var statusKind: SendOutcomeStatus {
         SendOutcomeStatus(rawValue: status)
     }
+
+    var reasonKind: SendOutcomeReason {
+        SendOutcomeReason(rawValue: reason)
+    }
 }
 
 func evaluateSendVerificationDecision(
@@ -1602,6 +1709,10 @@ struct ParsedLoopOutcome {
 
     var statusKind: SendOutcomeStatus {
         SendOutcomeStatus(rawValue: status)
+    }
+
+    var reasonKind: SendOutcomeReason {
+        SendOutcomeReason(rawValue: reason)
     }
 }
 
@@ -1694,19 +1805,19 @@ func loopResultLabel(_ loop: LoopSnapshot) -> String {
         }
         return "已受理"
     }
-    if outcome.reason == "not_sendable" {
+    if outcome.reasonKind == .notSendable {
         return detailedNotSendableLabel(probeStatus: outcome.probeStatus, terminalState: outcome.terminalState)
     }
-    if outcome.reason == "tty_unavailable" {
+    if outcome.reasonKind == .ttyUnavailable {
         return "TTY 不可用"
     }
-    if outcome.reason == "tty_focus_failed" {
+    if outcome.reasonKind == .ttyFocusFailed {
         return "TTY 聚焦失败"
     }
-    if outcome.reason == "ambiguous_target" {
+    if outcome.reasonKind == .ambiguousTarget {
         return "目标不唯一"
     }
-    if normalizedLine.contains("辅助功能权限") || outcome.reason == "missing_accessibility_permission" {
+    if normalizedLine.contains("辅助功能权限") || outcome.reasonKind == .missingAccessibilityPermission {
         return "权限缺失"
     }
     if normalizedLine.hasPrefix("deferred:") {
