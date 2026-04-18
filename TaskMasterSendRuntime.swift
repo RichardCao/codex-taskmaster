@@ -670,6 +670,26 @@ final class SendRequestCoordinator {
         return initialProbe
     }
 
+    private func finishQueuedSendPreflightFailure(
+        target: String,
+        forceSend: Bool,
+        probeStatus: String,
+        terminalState: String,
+        detail: String,
+        failureReason: String,
+        finish: ([String: Any]) -> Void
+    ) {
+        finishFailedSendRequest(
+            target: target,
+            forceSend: forceSend,
+            reason: failureReason,
+            detail: detail,
+            probeStatus: probeStatus,
+            terminalState: terminalState,
+            finish: finish
+        )
+    }
+
     private func finishFailedSendRequest(
         target: String,
         forceSend: Bool,
@@ -968,15 +988,13 @@ final class SendRequestCoordinator {
         let clearResidualInputBeforeSend = preflightDecision.shouldClearResidualInput
 
         guard preflightDecision.canSend else {
-            let failureReason = preflightDecision.failureReason
-            let detail = preflightDetail
-            finishFailedSendRequest(
+            finishQueuedSendPreflightFailure(
                 target: target,
                 forceSend: forceSend,
-                reason: failureReason,
-                detail: detail,
                 probeStatus: probeStatus,
                 terminalState: terminalState,
+                detail: preflightDetail,
+                failureReason: preflightDecision.failureReason,
                 finish: finishQueuedRequest
             )
             return
