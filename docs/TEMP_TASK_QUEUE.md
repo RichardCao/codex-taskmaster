@@ -62,7 +62,7 @@
    当前子任务：
    - `done` parser / merge 回归测试
    - `done` localization 回归测试
-   - `pending` send runtime 决策矩阵测试
+   - `done` send runtime 决策矩阵测试
    - `pending` helper 状态变更与受限环境测试
 
 7. `pending` 单 loop + 多策略模型

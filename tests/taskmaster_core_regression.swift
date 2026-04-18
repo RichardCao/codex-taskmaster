@@ -25,6 +25,7 @@ struct TaskMasterCoreRegressionRunner {
         runQueuedAcceptanceRuleChecks()
         runAmbiguousTargetRuleChecks()
         runSendPreflightDecisionChecks()
+        runSendRuntimeDecisionMatrixChecks()
         print("taskmaster_core_regression_ok")
     }
 
@@ -563,6 +564,31 @@ struct TaskMasterCoreRegressionRunner {
         )
         expect(forcedSend.canSend, "expected force-send to bypass sendability gate")
         expect(!forcedSend.shouldClearResidualInput, "expected force-send to skip residual-input clearing")
+    }
+
+    private static func runSendRuntimeDecisionMatrixChecks() {
+        expect(localizedSendReason("request_still_processing") == "请求仍在处理", "expected request_still_processing to localize consistently")
+        expect(localizedSendReason("request_already_inflight") == "相同请求已在队列中", "expected request_already_inflight to localize consistently")
+
+        let inflightReason = formattedLoopOutcomeReason(
+            reason: "request_already_inflight",
+            probeStatus: "busy_turn_open",
+            terminalState: "prompt_with_input"
+        )
+        expect(
+            inflightReason == "相同请求已在队列中 | 回合进行中 | 提示符上有输入",
+            "expected formattedLoopOutcomeReason to preserve localized runtime context ordering"
+        )
+
+        let processingReason = formattedLoopOutcomeReason(
+            reason: "request_still_processing",
+            probeStatus: "post_finalizing",
+            terminalState: "no_visible_prompt"
+        )
+        expect(
+            processingReason == "请求仍在处理 | 正在收尾 | 未看到可用提示符",
+            "expected formattedLoopOutcomeReason to preserve localized processing context"
+        )
     }
 
     private static func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
