@@ -132,4 +132,23 @@ final class TaskMasterCoreLibTests: XCTestCase {
         XCTAssertEqual(loopStateLabel(snapshot), "停止")
         XCTAssertEqual(loopResultLabel(snapshot), "已停止")
     }
+
+    func testProbeStateHelpersMatchRuntimeRules() {
+        XCTAssertTrue(shouldAutoClearResidualInput(probeStatus: "idle_with_residual_input", terminalState: "prompt_with_input"))
+        XCTAssertTrue(isSendableProbeState(probeStatus: "idle_stable", terminalState: "prompt_ready"))
+        XCTAssertTrue(isSendableProbeState(probeStatus: "idle_with_residual_input", terminalState: "prompt_with_input"))
+        XCTAssertFalse(isSendableProbeState(probeStatus: "busy_turn_open", terminalState: "prompt_with_input"))
+    }
+
+    func testQueuedAcceptanceHelperMatchesRuntimeRules() {
+        XCTAssertTrue(shouldTreatAsQueuedAcceptance(probeStatus: 0, terminalState: "queued_messages_pending", reason: ""))
+        XCTAssertTrue(shouldTreatAsQueuedAcceptance(probeStatus: 0, terminalState: "unknown", reason: "turn is complete, but queued messages are still visible in Terminal"))
+        XCTAssertFalse(shouldTreatAsQueuedAcceptance(probeStatus: 1, terminalState: "queued_messages_pending", reason: ""))
+    }
+
+    func testAmbiguousTargetDetailHelperMatchesRuntimeRules() {
+        XCTAssertTrue(isAmbiguousTargetDetail("found multiple matching sessions for target demo"))
+        XCTAssertTrue(isAmbiguousTargetDetail("found multiple matching Terminal ttys for target demo"))
+        XCTAssertFalse(isAmbiguousTargetDetail("tty unavailable"))
+    }
 }

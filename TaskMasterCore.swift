@@ -1273,6 +1273,34 @@ func formattedLoopOutcomeReason(reason: String, probeStatus: String, terminalSta
     return [baseReason, probeLabel, terminalLabel].filter { !$0.isEmpty }.joined(separator: " | ")
 }
 
+func shouldAutoClearResidualInput(probeStatus: String, terminalState: String) -> Bool {
+    probeStatus == "idle_with_residual_input" && terminalState == "prompt_with_input"
+}
+
+func isSendableProbeState(probeStatus: String, terminalState: String) -> Bool {
+    if terminalState == "prompt_ready" && (probeStatus == "idle_stable" || probeStatus == "interrupted_idle") {
+        return true
+    }
+    if shouldAutoClearResidualInput(probeStatus: probeStatus, terminalState: terminalState) {
+        return true
+    }
+    return false
+}
+
+func shouldTreatAsQueuedAcceptance(probeStatus: Int32, terminalState: String, reason: String) -> Bool {
+    guard probeStatus == 0 else { return false }
+    if terminalState == "queued_messages_pending" {
+        return true
+    }
+    return reason == "turn is complete, but queued messages are still visible in Terminal"
+}
+
+func isAmbiguousTargetDetail(_ detail: String) -> Bool {
+    detail.contains("found multiple matching sessions for target") ||
+    detail.contains("found multiple matching thread titles for target") ||
+    detail.contains("found multiple matching Terminal ttys for target")
+}
+
 struct ParsedLoopOutcome {
     let status: String
     let reason: String

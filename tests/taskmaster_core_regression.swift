@@ -9,6 +9,9 @@ struct TaskMasterCoreRegressionRunner {
         runMergeSessionSnapshotChecks()
         runLocalizationChecks()
         runLoopStateLabelChecks()
+        runProbeStateRuleChecks()
+        runQueuedAcceptanceRuleChecks()
+        runAmbiguousTargetRuleChecks()
         print("taskmaster_core_regression_ok")
     }
 
@@ -139,6 +142,25 @@ struct TaskMasterCoreRegressionRunner {
 
         expect(loopStateLabel(snapshot) == "停止", "expected stopped loop to map to 停止 state")
         expect(loopResultLabel(snapshot) == "已停止", "expected stopped loop to map to 已停止 result")
+    }
+
+    private static func runProbeStateRuleChecks() {
+        expect(shouldAutoClearResidualInput(probeStatus: "idle_with_residual_input", terminalState: "prompt_with_input"), "expected residual input rule to match runtime")
+        expect(isSendableProbeState(probeStatus: "idle_stable", terminalState: "prompt_ready"), "expected idle stable prompt-ready to be sendable")
+        expect(isSendableProbeState(probeStatus: "idle_with_residual_input", terminalState: "prompt_with_input"), "expected residual input case to remain sendable")
+        expect(!isSendableProbeState(probeStatus: "busy_turn_open", terminalState: "prompt_with_input"), "expected busy prompt-with-input to remain blocked")
+    }
+
+    private static func runQueuedAcceptanceRuleChecks() {
+        expect(shouldTreatAsQueuedAcceptance(probeStatus: 0, terminalState: "queued_messages_pending", reason: ""), "expected queued terminal state to map to accepted")
+        expect(shouldTreatAsQueuedAcceptance(probeStatus: 0, terminalState: "unknown", reason: "turn is complete, but queued messages are still visible in Terminal"), "expected queued reason text to map to accepted")
+        expect(!shouldTreatAsQueuedAcceptance(probeStatus: 1, terminalState: "queued_messages_pending", reason: ""), "expected failed probe status to block queued acceptance")
+    }
+
+    private static func runAmbiguousTargetRuleChecks() {
+        expect(isAmbiguousTargetDetail("found multiple matching sessions for target demo"), "expected session ambiguity text to be recognized")
+        expect(isAmbiguousTargetDetail("found multiple matching Terminal ttys for target demo"), "expected tty ambiguity text to be recognized")
+        expect(!isAmbiguousTargetDetail("tty unavailable"), "expected unrelated detail to stay non-ambiguous")
     }
 
     private static func expect(_ condition: @autoclosure () -> Bool, _ message: String) {

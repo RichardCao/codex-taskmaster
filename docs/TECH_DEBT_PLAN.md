@@ -354,6 +354,7 @@
 - provider migration 的取消状态回写收口到控制器 helper
 - `LoopSnapshot` / `SessionSnapshot` 的布尔与 epoch 访问收口到 typed accessor
 - session detail 预览/完整文档组装收口到控制器 helper
+- send runtime 的 probe/sendability/queued-acceptance/ambiguous-target 纯判定下沉到 core
 
 下一步建议：
 
@@ -431,6 +432,7 @@
 - 引入最小 SwiftPM / XCTest 骨架，先覆盖 snapshot typed accessor 与 session merge 排序
 - 补一条不依赖 `swift-package` 的 `swiftc` core 回归脚本，兼容当前 CLT 环境
 - parser / localization / loop 状态标签的基础回归样例已落进测试骨架
+- send runtime 的基础判定矩阵样例已进入 core 回归
 
 建议覆盖：
 

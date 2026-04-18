@@ -668,16 +668,6 @@ final class SendRequestCoordinator {
         return (false, latestProbe)
     }
 
-    private func shouldTreatAsQueuedAcceptance(_ probe: ProbeResult) -> Bool {
-        guard probe.status == 0 else { return false }
-        let terminalState = probe.values["terminal_state"] ?? ""
-        if terminalState == "queued_messages_pending" {
-            return true
-        }
-        let reason = probe.values["reason"] ?? ""
-        return reason == "turn is complete, but queued messages are still visible in Terminal"
-    }
-
     private func normalizedTTY(_ tty: String) -> String {
         let trimmed = tty.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty || trimmed == "-" {
@@ -769,12 +759,6 @@ final class SendRequestCoordinator {
             parts.append("live_tty_detail=\(resolution.detail)")
         }
         return parts.filter { !$0.isEmpty }.joined(separator: " | ")
-    }
-
-    private func isAmbiguousTargetError(_ detail: String) -> Bool {
-        detail.contains("found multiple matching sessions for target") ||
-        detail.contains("found multiple matching thread titles for target") ||
-        detail.contains("found multiple matching Terminal ttys for target")
     }
 
     private func makeTTYFocusFailureError(target: String, initialTTY: String, resolvedTTY: String?, resolveDetail: String) -> NSError {
@@ -902,7 +886,7 @@ final class SendRequestCoordinator {
         let initialProbe = probeResult(for: target)
         guard initialProbe.status == 0 else {
             let detail = compactProbeSummary(initialProbe)
-            let failureReason = isAmbiguousTargetError(detail) ? "ambiguous_target" : "probe_failed"
+            let failureReason = isAmbiguousTargetDetail(detail) ? "ambiguous_target" : "probe_failed"
             callbacks.logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") detail=\(detail)")
             callbacks.updateSendStatus("failed", target, failureReason, nil, nil, .systemRed)
             finish(with: [
@@ -926,7 +910,7 @@ final class SendRequestCoordinator {
 
         guard !tty.isEmpty else {
             let detail = appendLiveTTYResolutionDetail(compactProbeSummary(activeProbe), resolution: preparedProbe.resolution)
-            let failureReason = isAmbiguousTargetError(detail) ? "ambiguous_target" : "tty_unavailable"
+            let failureReason = isAmbiguousTargetDetail(detail) ? "ambiguous_target" : "tty_unavailable"
             callbacks.logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
             callbacks.updateSendStatus("failed", target, failureReason, probeStatus, terminalState, .systemRed)
             finish(with: [
@@ -1006,7 +990,11 @@ final class SendRequestCoordinator {
             return
         }
 
-        if shouldTreatAsQueuedAcceptance(verification.probe) {
+        if shouldTreatAsQueuedAcceptance(
+            probeStatus: verification.probe.status,
+            terminalState: verification.probe.values["terminal_state"] ?? "",
+            reason: verification.probe.values["reason"] ?? ""
+        ) {
             let queuedProbeStatus = verification.probe.values["status"] ?? "unknown"
             let queuedTerminalState = verification.probe.values["terminal_state"] ?? "unknown"
             let detail = appendLiveTTYResolutionDetail(compactProbeSummary(verification.probe), resolution: preparedProbe.resolution)
