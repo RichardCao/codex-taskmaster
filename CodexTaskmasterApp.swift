@@ -1065,7 +1065,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             },
             requestDidFinish: { [weak self] in
                 DispatchQueue.main.async {
-                    self?.refreshLoopsSnapshot()
+                    self?.scheduleLoopSnapshotRefresh()
                 }
             }
         )
@@ -1091,7 +1091,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         appendOutput("Codex Taskmaster 已就绪。")
         appendOutput("循环列表会每 \(Int(autoRefreshInterval)) 秒自动刷新一次。")
         refreshConfiguredModelProviderCache()
-        refreshLoopsSnapshot()
+        scheduleLoopSnapshotRefresh()
         startAutoRefresh()
         startRequestPump()
         startSessionStatusRefreshTimer()
@@ -2639,7 +2639,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         removeSessionSnapshots(threadIDs: threadIDs)
         setStatus(completionStatusText, key: "action")
         appendOutput(completionLogText)
-        refreshLoopsSnapshot()
+        scheduleLoopSnapshotRefresh()
     }
 
     private func performSelectedSessionRemovalAction(
@@ -5296,7 +5296,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             forceSend: options.forceSend,
             reason: reason
         ) { _ in
-            self.requestLoopSnapshotRefresh()
+            self.scheduleLoopSnapshotRefresh()
         }
     }
 
@@ -5419,11 +5419,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         updateLoopActionButtons()
     }
 
+    private func scheduleLoopSnapshotRefresh(after delay: TimeInterval = 0) {
+        guard delay > 0 else {
+            requestLoopSnapshotRefresh()
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.requestLoopSnapshotRefresh()
+        }
+    }
+
     private func scheduleLoopSnapshotRefreshes(after delays: [TimeInterval]) {
         for delay in delays {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.requestLoopSnapshotRefresh()
-            }
+            scheduleLoopSnapshotRefresh(after: delay)
         }
     }
 
@@ -5499,7 +5508,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.setStatus("\(actionName)失败", key: "action", color: .systemRed)
             }
             self.setButtonsEnabled(true)
-            self.requestLoopSnapshotRefresh()
+            self.scheduleLoopSnapshotRefresh()
         }
     }
 
@@ -5611,7 +5620,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 if startResult.status != 0, failureText != nil {
                     self.saveStoppedLoopEntryAsync(target: target, interval: interval, message: message, forceSend: forceSend, reason: "start_failed") { _ in
                         self.appendOutput("已将开始失败的循环保留为停止状态。")
-                        self.requestLoopSnapshotRefresh()
+                        self.scheduleLoopSnapshotRefresh()
                     }
                 }
                 if startResult.status == 0 {
@@ -5621,7 +5630,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.setStatus("开始循环失败", key: "action", color: .systemRed)
                 }
                 self.setButtonsEnabled(true)
-                self.refreshLoopsSnapshot()
+                self.scheduleLoopSnapshotRefresh()
             }
         }
     }
@@ -5664,7 +5673,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let shouldRefreshAgain = pendingLoopSnapshotRefresh
         pendingLoopSnapshotRefresh = false
         if shouldRefreshAgain {
-            refreshLoopsSnapshot()
+            scheduleLoopSnapshotRefresh()
         }
     }
 
@@ -5985,7 +5994,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func refreshLoopsAction() {
         appendOutput("刷新循环列表。")
-        requestLoopSnapshotRefresh()
+        scheduleLoopSnapshotRefresh()
     }
 
     @objc
@@ -6077,7 +6086,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             validationStatusText: "恢复当前校验中…",
             failureStatusText: "恢复当前失败",
             failureSideEffect: {
-                self.requestLoopSnapshotRefresh()
+                self.scheduleLoopSnapshotRefresh()
             }
         ) {
             self.runLoopTargetAction(actionName: "恢复当前", commandName: "loop-resume", loop: loop) { target, completion in
