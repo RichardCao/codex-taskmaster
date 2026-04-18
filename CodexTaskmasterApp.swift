@@ -3016,6 +3016,44 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
+    private func loadAndExecuteAllSessionProviderMigration(targetProvider: String) {
+        allSessionProviderPlanAsync(targetProvider: targetProvider) { plan in
+            guard let plan = self.resolvedProviderMigrationPlan(
+                plan,
+                failureLogText: allSessionProviderMigrationPlanFailureLogText()
+            ) else { return }
+
+            let migrateNeeded = Int(plan["migrate_needed_count"] ?? "0") ?? 0
+            let totalThreads = Int(plan["total_threads"] ?? "0") ?? 0
+
+            if migrateNeeded == 0 {
+                self.handleProviderMigrationNoop(
+                    informativeText: allSessionProviderMigrationNoopAlertText(
+                        targetProvider: targetProvider,
+                        totalThreads: totalThreads
+                    ),
+                    logText: allSessionProviderMigrationNoopLogText(targetProvider: targetProvider)
+                )
+                return
+            }
+
+            guard self.confirmAllSessionProviderMigration(
+                targetProvider: targetProvider,
+                totalThreads: totalThreads,
+                migrateNeeded: migrateNeeded
+            ) else { return }
+
+            self.performProviderMigrationExecution(
+                runningStatusText: allSessionProviderMigrationRunningStatusText(),
+                startLogText: allSessionProviderMigrationStartLogText(targetProvider: targetProvider),
+                completionStatusText: allSessionProviderMigrationCompletionStatusText(),
+                failureStatusText: allSessionProviderMigrationFailureStatusText()
+            ) {
+                self.migrateAllSessionsProvider(targetProvider: targetProvider)
+            }
+        }
+    }
+
     private func applySessionStatusRefreshResult(_ resultKind: SessionStatusRefreshResultKind) {
         switch resultKind {
         case .success:
@@ -6324,41 +6362,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     @objc
     private func migrateAllSessionsToCurrentProvider() {
         withProviderMigrationTargetProvider { targetProvider in
-            self.allSessionProviderPlanAsync(targetProvider: targetProvider) { plan in
-                guard let plan = self.resolvedProviderMigrationPlan(
-                    plan,
-                    failureLogText: allSessionProviderMigrationPlanFailureLogText()
-                ) else { return }
-
-                let migrateNeeded = Int(plan["migrate_needed_count"] ?? "0") ?? 0
-                let totalThreads = Int(plan["total_threads"] ?? "0") ?? 0
-
-                if migrateNeeded == 0 {
-                    self.handleProviderMigrationNoop(
-                        informativeText: allSessionProviderMigrationNoopAlertText(
-                            targetProvider: targetProvider,
-                            totalThreads: totalThreads
-                        ),
-                        logText: allSessionProviderMigrationNoopLogText(targetProvider: targetProvider)
-                    )
-                    return
-                }
-
-                guard self.confirmAllSessionProviderMigration(
-                    targetProvider: targetProvider,
-                    totalThreads: totalThreads,
-                    migrateNeeded: migrateNeeded
-                ) else { return }
-
-                self.performProviderMigrationExecution(
-                    runningStatusText: allSessionProviderMigrationRunningStatusText(),
-                    startLogText: allSessionProviderMigrationStartLogText(targetProvider: targetProvider),
-                    completionStatusText: allSessionProviderMigrationCompletionStatusText(),
-                    failureStatusText: allSessionProviderMigrationFailureStatusText()
-                ) {
-                    self.migrateAllSessionsProvider(targetProvider: targetProvider)
-                }
-            }
+            self.loadAndExecuteAllSessionProviderMigration(targetProvider: targetProvider)
         }
     }
 
