@@ -712,6 +712,65 @@ final class SendRequestCoordinator {
         )
     }
 
+    private func finishQueuedSendVerification(
+        target: String,
+        forceSend: Bool,
+        usedTTY: String,
+        clearExistingInput: Bool,
+        verification: (success: Bool, probe: ProbeResult),
+        verificationDecision: SendVerificationDecision,
+        resolution: LiveTTYResolution?,
+        finish: ([String: Any]) -> Void
+    ) {
+        if verificationDecision.status == "success" {
+            let baseDetail = "sent message via app sender to target=\(target) tty=\(usedTTY) clear_existing_input=\(clearExistingInput ? "yes" : "no")"
+            let detail = appendLiveTTYResolutionDetail(baseDetail, resolution: resolution)
+            finishCompletedSendRequest(
+                logPrefix: "发送请求完成:",
+                status: "success",
+                target: target,
+                forceSend: forceSend,
+                reason: verificationDecision.reason,
+                detail: detail,
+                probeStatus: verificationDecision.probeStatus,
+                terminalState: verificationDecision.terminalState,
+                color: .systemGreen,
+                finish: finish
+            )
+            return
+        }
+
+        let detail = probeDetail(verification.probe, resolution: resolution)
+        if verificationDecision.reason == "queued_pending_feedback" {
+            finishCompletedSendRequest(
+                logPrefix: "发送请求已排队:",
+                status: "accepted",
+                target: target,
+                forceSend: forceSend,
+                reason: verificationDecision.reason,
+                detail: detail,
+                probeStatus: verificationDecision.probeStatus,
+                terminalState: verificationDecision.terminalState,
+                color: .systemOrange,
+                finish: finish
+            )
+            return
+        }
+
+        finishCompletedSendRequest(
+            logPrefix: "发送请求待确认:",
+            status: "accepted",
+            target: target,
+            forceSend: forceSend,
+            reason: verificationDecision.reason,
+            detail: detail,
+            probeStatus: verificationDecision.probeStatus,
+            terminalState: verificationDecision.terminalState,
+            color: .systemOrange,
+            finish: finish
+        )
+    }
+
     private func finishFailedSendRequest(
         target: String,
         forceSend: Bool,
@@ -1058,53 +1117,14 @@ final class SendRequestCoordinator {
             verificationReason: verification.probe.values["reason"] ?? "",
             verificationTerminalState: verification.probe.values["terminal_state"] ?? "unknown"
         )
-
-        if verificationDecision.status == "success" {
-            let baseDetail = "sent message via app sender to target=\(target) tty=\(usedTTY) clear_existing_input=\(clearResidualInputBeforeSend ? "yes" : "no")"
-            let detail = appendLiveTTYResolutionDetail(baseDetail, resolution: preparedProbe.resolution)
-            finishCompletedSendRequest(
-                logPrefix: "发送请求完成:",
-                status: "success",
-                target: target,
-                forceSend: forceSend,
-                reason: verificationDecision.reason,
-                detail: detail,
-                probeStatus: verificationDecision.probeStatus,
-                terminalState: verificationDecision.terminalState,
-                color: .systemGreen,
-                finish: finishQueuedRequest
-            )
-            return
-        }
-
-        if verificationDecision.reason == "queued_pending_feedback" {
-            let detail = probeDetail(verification.probe, resolution: preparedProbe.resolution)
-            finishCompletedSendRequest(
-                logPrefix: "发送请求已排队:",
-                status: "accepted",
-                target: target,
-                forceSend: forceSend,
-                reason: verificationDecision.reason,
-                detail: detail,
-                probeStatus: verificationDecision.probeStatus,
-                terminalState: verificationDecision.terminalState,
-                color: .systemOrange,
-                finish: finishQueuedRequest
-            )
-            return
-        }
-
-        let verificationDetail = probeDetail(verification.probe, resolution: preparedProbe.resolution)
-        finishCompletedSendRequest(
-            logPrefix: "发送请求待确认:",
-            status: "accepted",
+        finishQueuedSendVerification(
             target: target,
             forceSend: forceSend,
-            reason: verificationDecision.reason,
-            detail: verificationDetail,
-            probeStatus: verificationDecision.probeStatus,
-            terminalState: verificationDecision.terminalState,
-            color: .systemOrange,
+            usedTTY: usedTTY,
+            clearExistingInput: clearResidualInputBeforeSend,
+            verification: verification,
+            verificationDecision: verificationDecision,
+            resolution: preparedProbe.resolution,
             finish: finishQueuedRequest
         )
     }
