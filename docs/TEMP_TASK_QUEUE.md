@@ -60,8 +60,8 @@
 6. `in_progress` 测试补强
    目标：补 parser / merge / localization、send runtime 决策矩阵、helper 状态变更与受限环境预期测试。
    当前子任务：
-   - `pending` parser / merge 回归测试
-   - `pending` localization 回归测试
+   - `done` parser / merge 回归测试
+   - `done` localization 回归测试
    - `pending` send runtime 决策矩阵测试
    - `pending` helper 状态变更与受限环境测试
 
