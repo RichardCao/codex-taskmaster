@@ -26,6 +26,7 @@ struct TaskMasterCoreRegressionRunner {
         runAmbiguousTargetRuleChecks()
         runSendPreflightDecisionChecks()
         runSendRuntimeDecisionMatrixChecks()
+        runRestrictedEnvironmentChecks()
         print("taskmaster_core_regression_ok")
     }
 
@@ -589,6 +590,87 @@ struct TaskMasterCoreRegressionRunner {
             processingReason == "请求仍在处理 | 正在收尾 | 未看到可用提示符",
             "expected formattedLoopOutcomeReason to preserve localized processing context"
         )
+    }
+
+    private static func runRestrictedEnvironmentChecks() {
+        let disconnected = SessionSnapshot(
+            name: "disconnected",
+            target: "disconnected",
+            threadID: "thread-disconnected",
+            provider: "openai",
+            source: "cli",
+            parentThreadID: "",
+            agentNickname: "",
+            agentRole: "",
+            status: "idle_stable",
+            reason: "",
+            terminalState: "unavailable",
+            tty: "",
+            updatedAtEpoch: 1,
+            rolloutPath: "",
+            preview: "",
+            isArchived: false
+        )
+        let activeUnavailable = SessionSnapshot(
+            name: "active",
+            target: "active",
+            threadID: "thread-active",
+            provider: "openai",
+            source: "cli",
+            parentThreadID: "",
+            agentNickname: "",
+            agentRole: "",
+            status: "busy_turn_open",
+            reason: "",
+            terminalState: "unavailable",
+            tty: "",
+            updatedAtEpoch: 1,
+            rolloutPath: "",
+            preview: "",
+            isArchived: false
+        )
+
+        expect(localizedSessionStatusLabel(disconnected) == "断联", "expected unavailable idle session to collapse into disconnected status")
+        expect(localizedSessionStatusLabel(activeUnavailable) == "运行中", "expected unavailable active session to keep active status")
+
+        let coordinator = SessionStatusRefreshCoordinator(connectedRefreshInterval: 15, disconnectedRefreshInterval: 60)
+        let initialClaim = coordinator.claim([disconnected, activeUnavailable], requireDue: false, referenceDate: Date())
+        expect(initialClaim.map(\.threadID) == ["thread-disconnected", "thread-active"], "expected coordinator to claim both snapshots initially")
+
+        let now = Date()
+        for snapshot in initialClaim {
+            coordinator.scheduleNext(for: snapshot, from: now)
+        }
+
+        let dueSoon = coordinator.claim([disconnected, activeUnavailable], requireDue: true, referenceDate: now.addingTimeInterval(20))
+        expect(dueSoon.map(\.threadID) == ["thread-active"], "expected connected session to become due before disconnected session")
+
+        for snapshot in dueSoon {
+            coordinator.scheduleNext(for: snapshot, from: now.addingTimeInterval(20))
+        }
+
+        let dueLater = coordinator.claim([disconnected, activeUnavailable], requireDue: true, referenceDate: now.addingTimeInterval(90))
+        expect(dueLater.count == 2, "expected both connected and disconnected sessions to become due eventually")
+
+        let permissionLoop = LoopSnapshot(
+            target: "demo",
+            loopDaemonRunning: true,
+            intervalSeconds: "30",
+            forceSend: false,
+            message: "hello",
+            nextRunEpoch: 0,
+            stopped: false,
+            stoppedReason: "",
+            paused: false,
+            failureCount: "1",
+            failureReason: "missing_accessibility_permission",
+            pauseReason: "",
+            logPath: "-",
+            lastLogLine: ""
+        )
+        expect(loopResultLabel(permissionLoop) == "权限缺失", "expected permission-restricted loop to surface 权限缺失 result")
+        expect(loopStateLabel(permissionLoop) == "失败", "expected permission-restricted loop to map to failure state")
+        expect(loopResultReasonLabel(permissionLoop) == "缺少辅助功能权限", "expected permission-restricted loop to expose localized reason")
     }
 
     private static func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
