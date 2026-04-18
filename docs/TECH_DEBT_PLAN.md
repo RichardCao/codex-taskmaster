@@ -426,6 +426,11 @@
 
 - 为 [TaskMasterCore.swift](/Users/create/codex-terminal-app/TaskMasterCore.swift) 补基础单测
 
+当前已完成：
+
+- 引入最小 SwiftPM / XCTest 骨架，先覆盖 snapshot typed accessor 与 session merge 排序
+- 补一条不依赖 `swift-package` 的 `swiftc` core 回归脚本，兼容当前 CLT 环境
+
 建议覆盖：
 
 - parser
