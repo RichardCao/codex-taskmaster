@@ -356,6 +356,7 @@
 - session detail 预览/完整文档组装收口到控制器 helper
 - send runtime 的 probe/sendability/queued-acceptance/ambiguous-target 纯判定下沉到 core
 - send runtime 的发送前 preflight 分支收口到 core `evaluateSendPreflight`
+- send runtime 的 probe 文本解析与摘要拼装继续复用 core parser/helper
 
 下一步建议：
 
@@ -435,6 +436,7 @@
 - parser / localization / loop 状态标签的基础回归样例已落进测试骨架
 - send runtime 的基础判定矩阵样例已进入 core 回归
 - send runtime 的 preflight 决策矩阵样例已进入 core 回归
+- probe parser / detail / compact summary 的基础回归样例已进入 core 回归
 
 建议覆盖：
 

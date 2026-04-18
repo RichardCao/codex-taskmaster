@@ -16,6 +16,29 @@ final class TaskMasterCoreLibTests: XCTestCase {
         XCTAssertEqual(fields?["detail"], "target busy")
     }
 
+    func testPreferredCommandDetailPrefersStderrThenStdout() {
+        XCTAssertEqual(preferredCommandDetail(stdout: "stdout detail", stderr: ""), "stdout detail")
+        XCTAssertEqual(preferredCommandDetail(stdout: "stdout detail", stderr: "stderr detail"), "stderr detail")
+    }
+
+    func testCompactProbeSummaryFormatsExpectedKeys() {
+        let summary = compactProbeSummary(
+            status: 0,
+            values: [
+                "target": "demo",
+                "thread_id": "thread-1",
+                "tty": "ttys001",
+                "status": "idle_stable",
+                "reason": "ready",
+                "terminal_state": "prompt_ready"
+            ],
+            stdout: "",
+            stderr: ""
+        )
+
+        XCTAssertEqual(summary, "target: demo | thread_id: thread-1 | tty: ttys001 | status: idle_stable | reason: ready | terminal_state: prompt_ready")
+    }
+
     func testLoopSnapshotTypedAccessors() {
         let snapshot = LoopSnapshot(
             target: "demo",

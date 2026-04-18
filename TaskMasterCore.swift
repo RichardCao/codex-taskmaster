@@ -610,8 +610,37 @@ func parseStructuredKeyValueFields(_ text: String, requireStatusAndReason: Bool 
     return fields.isEmpty ? nil : fields
 }
 
+func preferredCommandDetail(stdout: String, stderr: String) -> String? {
+    let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? stdout : stderr
+    let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+}
+
 func parseSessionCountOutput(_ output: String) -> Int? {
     Int(output.trimmingCharacters(in: .whitespacesAndNewlines))
+}
+
+func compactProbeSummary(status: Int32, values: [String: String], stdout: String, stderr: String) -> String {
+    if status != 0 {
+        return preferredCommandDetail(stdout: stdout, stderr: stderr) ?? ""
+    }
+
+    let keys = [
+        "target",
+        "thread_id",
+        "tty",
+        "status",
+        "reason",
+        "terminal_state",
+        "terminal_reason",
+        "last_user_message_at",
+        "last_user_message"
+    ]
+
+    return keys.compactMap { key in
+        guard let value = values[key], !value.isEmpty else { return nil }
+        return "\(key): \(value)"
+    }.joined(separator: " | ")
 }
 
 struct LoopSnapshot {

@@ -4,6 +4,8 @@ import Foundation
 struct TaskMasterCoreRegressionRunner {
     static func main() {
         runStructuredFieldParsingChecks()
+        runCommandDetailChecks()
+        runCompactProbeSummaryChecks()
         runLoopSnapshotAccessorChecks()
         runSessionSnapshotAccessorChecks()
         runMergeSessionSnapshotChecks()
@@ -27,6 +29,29 @@ struct TaskMasterCoreRegressionRunner {
         expect(fields?["status"] == "failed", "expected parser to read status field")
         expect(fields?["reason"] == "not_sendable", "expected parser to read reason field")
         expect(fields?["detail"] == "target busy", "expected parser to preserve detail field")
+    }
+
+    private static func runCommandDetailChecks() {
+        expect(preferredCommandDetail(stdout: "stdout detail", stderr: "") == "stdout detail", "expected stdout fallback when stderr is empty")
+        expect(preferredCommandDetail(stdout: "stdout detail", stderr: "stderr detail") == "stderr detail", "expected stderr to override stdout detail")
+    }
+
+    private static func runCompactProbeSummaryChecks() {
+        let summary = compactProbeSummary(
+            status: 0,
+            values: [
+                "target": "demo",
+                "thread_id": "thread-1",
+                "tty": "ttys001",
+                "status": "idle_stable",
+                "reason": "ready",
+                "terminal_state": "prompt_ready"
+            ],
+            stdout: "",
+            stderr: ""
+        )
+
+        expect(summary == "target: demo | thread_id: thread-1 | tty: ttys001 | status: idle_stable | reason: ready | terminal_state: prompt_ready", "expected compact probe summary to preserve known keys in order")
     }
 
     private static func runLoopSnapshotAccessorChecks() {

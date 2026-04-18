@@ -573,27 +573,14 @@ final class SendRequestCoordinator {
         callbacks.requestDidFinish()
     }
 
-    private func parseProbeOutput(_ output: String) -> [String: String] {
-        var result: [String: String] = [:]
-        for rawLine in output.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = String(rawLine)
-            guard let range = line.range(of: ": ") else { continue }
-            let key = String(line[..<range.lowerBound])
-            let value = String(line[range.upperBound...])
-            result[key] = value
-        }
-        return result
-    }
-
-    private func primaryDetail(stdout: String, stderr: String) -> String? {
-        let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? stdout : stderr
-        let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
     private func probeResult(for target: String) -> ProbeResult {
         let result = runHelper(["probe", "-t", target])
-        return (result.status, parseProbeOutput(result.stdout), result.stdout, result.stderr)
+        return (
+            result.status,
+            parseStructuredKeyValueFields(result.stdout, requireStatusAndReason: false) ?? [:],
+            result.stdout,
+            result.stderr
+        )
     }
 
     private func readJSONFile(at url: URL) throws -> [String: Any] {
@@ -612,29 +599,6 @@ final class SendRequestCoordinator {
             try FileManager.default.removeItem(at: url)
         }
         try FileManager.default.moveItem(at: tempURL, to: url)
-    }
-
-    private func compactProbeSummary(_ probe: ProbeResult) -> String {
-        if probe.status != 0 {
-            return primaryDetail(stdout: probe.stdout, stderr: probe.stderr) ?? ""
-        }
-
-        let keys = [
-            "target",
-            "thread_id",
-            "tty",
-            "status",
-            "reason",
-            "terminal_state",
-            "terminal_reason",
-            "last_user_message_at",
-            "last_user_message"
-        ]
-
-        return keys.compactMap { key in
-            guard let value = probe.values[key], !value.isEmpty else { return nil }
-            return "\(key): \(value)"
-        }.joined(separator: " | ")
     }
 
     private func shouldAutoClearResidualInput(probeStatus: String, terminalState: String) -> Bool {
@@ -698,7 +662,7 @@ final class SendRequestCoordinator {
 
     private func resolveLiveTTY(target: String) -> (tty: String?, detail: String) {
         let result = runHelper(["resolve-live-tty", "-t", target])
-        let detail = primaryDetail(stdout: result.stdout, stderr: result.stderr) ?? "failed to resolve live tty"
+        let detail = preferredCommandDetail(stdout: result.stdout, stderr: result.stderr) ?? "failed to resolve live tty"
         guard result.status == 0 else {
             return (nil, detail)
         }
@@ -885,7 +849,7 @@ final class SendRequestCoordinator {
         let forceSend = payload["force_send"] as? Bool ?? false
         let initialProbe = probeResult(for: target)
         guard initialProbe.status == 0 else {
-            let detail = compactProbeSummary(initialProbe)
+            let detail = compactProbeSummary(status: initialProbe.status, values: initialProbe.values, stdout: initialProbe.stdout, stderr: initialProbe.stderr)
             let failureReason = isAmbiguousTargetDetail(detail) ? "ambiguous_target" : "probe_failed"
             callbacks.logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") detail=\(detail)")
             callbacks.updateSendStatus("failed", target, failureReason, nil, nil, .systemRed)
@@ -905,7 +869,10 @@ final class SendRequestCoordinator {
         let terminalState = activeProbe.values["terminal_state"] ?? "unknown"
         let tty = preparedProbe.tty
         let previousUserTimestamp = activeProbe.values["last_user_message_at"] ?? ""
-        let preflightDetail = appendLiveTTYResolutionDetail(compactProbeSummary(activeProbe), resolution: preparedProbe.resolution)
+        let preflightDetail = appendLiveTTYResolutionDetail(
+            compactProbeSummary(status: activeProbe.status, values: activeProbe.values, stdout: activeProbe.stdout, stderr: activeProbe.stderr),
+            resolution: preparedProbe.resolution
+        )
         let preflightDecision = evaluateSendPreflight(
             forceSend: forceSend,
             tty: tty,
@@ -988,7 +955,10 @@ final class SendRequestCoordinator {
         ) {
             let queuedProbeStatus = verification.probe.values["status"] ?? "unknown"
             let queuedTerminalState = verification.probe.values["terminal_state"] ?? "unknown"
-            let detail = appendLiveTTYResolutionDetail(compactProbeSummary(verification.probe), resolution: preparedProbe.resolution)
+            let detail = appendLiveTTYResolutionDetail(
+                compactProbeSummary(status: verification.probe.status, values: verification.probe.values, stdout: verification.probe.stdout, stderr: verification.probe.stderr),
+                resolution: preparedProbe.resolution
+            )
             callbacks.logActivity("发送请求已排队: status=accepted reason=queued_pending_feedback target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(queuedProbeStatus) terminal_state=\(queuedTerminalState) detail=\(detail)")
             callbacks.updateSendStatus("accepted", target, "queued_pending_feedback", queuedProbeStatus, queuedTerminalState, .systemOrange)
             finish(with: [
@@ -1003,7 +973,10 @@ final class SendRequestCoordinator {
             return
         }
 
-        let verificationDetail = appendLiveTTYResolutionDetail(compactProbeSummary(verification.probe), resolution: preparedProbe.resolution)
+        let verificationDetail = appendLiveTTYResolutionDetail(
+            compactProbeSummary(status: verification.probe.status, values: verification.probe.values, stdout: verification.probe.stdout, stderr: verification.probe.stderr),
+            resolution: preparedProbe.resolution
+        )
         callbacks.logActivity("发送请求待确认: status=accepted reason=verification_pending target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(verification.probe.values["status"] ?? "unknown") terminal_state=\(verification.probe.values["terminal_state"] ?? "unknown") detail=\(verificationDetail)")
         callbacks.updateSendStatus(
             "accepted",
