@@ -60,10 +60,10 @@ usage() {
 Usage:
   codex_terminal_sender.sh send        -t TARGET [-m MESSAGE] [-f]
   codex_terminal_sender.sh start       -t TARGET [-m MESSAGE] [-i SECONDS] [-f]
-  codex_terminal_sender.sh stop        [-t TARGET | --all]
-  codex_terminal_sender.sh loop-delete -t TARGET
-  codex_terminal_sender.sh loop-save-stopped -t TARGET [-m MESSAGE] [-i SECONDS] [-f] [-r REASON]
-  codex_terminal_sender.sh status      [-t TARGET]
+  codex_terminal_sender.sh stop        [-t TARGET | -k LOOP_ID | --all]
+  codex_terminal_sender.sh loop-delete [-t TARGET | -k LOOP_ID]
+  codex_terminal_sender.sh loop-save-stopped -t TARGET [-k LOOP_ID] [-m MESSAGE] [-i SECONDS] [-f] [-r REASON]
+  codex_terminal_sender.sh status      [-t TARGET | -k LOOP_ID]
   codex_terminal_sender.sh probe       -t TARGET
   codex_terminal_sender.sh resolve-thread-id -t TARGET
   codex_terminal_sender.sh resolve-live-tty -t TARGET
@@ -83,17 +83,17 @@ Usage:
   codex_terminal_sender.sh config-model-provider
   codex_terminal_sender.sh wait-idle   -t TARGET [-s SECONDS] [-w SECONDS]
   codex_terminal_sender.sh loop-once
-  codex_terminal_sender.sh loop-resume -t TARGET
+  codex_terminal_sender.sh loop-resume [-t TARGET | -k LOOP_ID]
   codex_terminal_sender.sh loop-daemon
 
 Commands:
   send        Send one message to the matching Terminal tab via GUI paste + Return
   start       Create or update a repeating loop
-  stop        Mark one loop as stopped by target, or all loops with --all
+  stop        Mark one loop as stopped by target or loop id, or all loops with --all
   loop-delete Remove one loop entry from local Active Loops state
   loop-save-stopped
               Save one loop entry directly in stopped state
-  status      Show one loop status by target, or all loop statuses
+  status      Show one loop status by target or loop id, or all loop statuses
   probe       Inspect the local Codex rollout/log state for one target
   resolve-thread-id
               Resolve one target to a unique Codex thread id

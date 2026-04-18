@@ -903,7 +903,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private var activityLogEntries: [ActivityLogEntry] = []
     private var loopWarnings: [String] = []
     private var configuredModelProvider: String?
-    private var preferredLoopSelectionTarget: String?
+    private var preferredLoopSelectionIdentifier: String?
     private var targetHistory: [String] = []
     private var messageHistory: [String] = []
     private var isSessionScanRunning = false
@@ -1701,7 +1701,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         case "reason":
             return loopResultReasonLabel(loop)
         case "target":
-            return loop.target
+            return loopTargetDisplayValue(loop)
         case "interval":
             return "\(loop.intervalSeconds)s"
         case "forceSend":
@@ -1718,6 +1718,36 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         default:
             return ""
         }
+    }
+
+    private func loopSelectionIdentifier(_ loop: LoopSnapshot) -> String {
+        let trimmedLoopID = loop.loopID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedLoopID.isEmpty {
+            return "id:\(trimmedLoopID)"
+        }
+        return "target:\(loop.target)"
+    }
+
+    private func loopTargetDisplayValue(_ loop: LoopSnapshot) -> String {
+        guard loopSnapshots.filter({ $0.target == loop.target }).count > 1 else {
+            return loop.target
+        }
+        let trimmedLoopID = loop.loopID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedLoopID.isEmpty else {
+            return loop.target
+        }
+        return "\(loop.target) #\(trimmedLoopID.prefix(8))"
+    }
+
+    private func loopTargetToolTip(_ loop: LoopSnapshot) -> String {
+        let trimmedLoopID = loop.loopID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedLoopID.isEmpty else {
+            return loop.target
+        }
+        guard loopSnapshots.filter({ $0.target == loop.target }).count > 1 else {
+            return loop.target
+        }
+        return "\(loop.target)\nloop_id: \(trimmedLoopID)"
     }
 
     private func stringValueForSessionColumn(_ identifier: String, session: SessionSnapshot) -> String {
@@ -3126,16 +3156,18 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         startSessionPromptSearch(query: normalizedQuery, revision: sessionSearchRevision, snapshots: allSessionSnapshots)
     }
 
-    private func selectedLoopTarget() -> String? {
-        let selectedRow = activeLoopsTableView.selectedRow
-        guard selectedRow >= 0, selectedRow < loopSnapshots.count else { return nil }
-        return loopSnapshots[selectedRow].target
-    }
-
     private func selectedLoopSnapshot() -> LoopSnapshot? {
         let selectedRow = activeLoopsTableView.selectedRow
         guard selectedRow >= 0, selectedRow < loopSnapshots.count else { return nil }
         return loopSnapshots[selectedRow]
+    }
+
+    private func selectedLoopTarget() -> String? {
+        selectedLoopSnapshot()?.target
+    }
+
+    private func selectedLoopSelectionIdentifier() -> String? {
+        selectedLoopSnapshot().map(loopSelectionIdentifier(_:))
     }
 
     private func selectedLoopSnapshotForAction() -> LoopSnapshot? {
@@ -3168,9 +3200,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         deleteLoopButton.isEnabled = true
     }
 
-    private func restoreLoopSelection(preferredTarget: String?) {
-        let selectionTarget = preferredTarget ?? preferredLoopSelectionTarget
-        guard let selectionTarget else {
+    private func restoreLoopSelection(preferredIdentifier: String?) {
+        let selectionIdentifier = preferredIdentifier ?? preferredLoopSelectionIdentifier
+        guard let selectionIdentifier else {
             isProgrammaticLoopSelectionChange = true
             activeLoopsTableView.deselectAll(nil)
             isProgrammaticLoopSelectionChange = false
@@ -3178,11 +3210,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return
         }
 
-        guard let row = loopSnapshots.firstIndex(where: { $0.target == selectionTarget }) else {
+        guard let row = loopSnapshots.firstIndex(where: { loopSelectionIdentifier($0) == selectionIdentifier }) else {
             isProgrammaticLoopSelectionChange = true
             activeLoopsTableView.deselectAll(nil)
             isProgrammaticLoopSelectionChange = false
-            preferredLoopSelectionTarget = nil
+            preferredLoopSelectionIdentifier = nil
             updateLoopActionButtons()
             return
         }
@@ -3191,7 +3223,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         activeLoopsTableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         isProgrammaticLoopSelectionChange = false
         activeLoopsTableView.scrollRowToVisible(row)
-        preferredLoopSelectionTarget = selectionTarget
+        preferredLoopSelectionIdentifier = selectionIdentifier
         updateLoopActionButtons()
     }
 
@@ -4196,7 +4228,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         let windowPoint = event.locationInWindow
         let activeScrollView = activeLoopsTableView.enclosingScrollView
         let sessionScrollView = sessionStatusTableView.enclosingScrollView
-        let selectedLoopTargetBeforeClick = selectedLoopTarget()
+        let selectedLoopIdentifierBeforeClick = selectedLoopSelectionIdentifier()
         let selectedSessionThreadIDBeforeClick = selectedSessionThreadID()
         let isInActiveLoopActionArea = anyViewContainsWindowPoint(
             [stopButton, resumeLoopButton, deleteLoopButton],
@@ -4227,7 +4259,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         if isInSessionActionArea {
             if activeLoopsTableView.selectedRow >= 0 {
-                preferredLoopSelectionTarget = nil
+                preferredLoopSelectionIdentifier = nil
                 isProgrammaticLoopSelectionChange = true
                 activeLoopsTableView.deselectAll(nil)
                 isProgrammaticLoopSelectionChange = false
@@ -4243,9 +4275,9 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 updateSessionDetailView()
             }
             if isInActiveHeader || isInActiveTableEmptyArea {
-                if let selectedLoopTargetBeforeClick {
+                if let selectedLoopIdentifierBeforeClick {
                     DispatchQueue.main.async { [weak self] in
-                        self?.restoreLoopSelection(preferredTarget: selectedLoopTargetBeforeClick)
+                        self?.restoreLoopSelection(preferredIdentifier: selectedLoopIdentifierBeforeClick)
                     }
                 }
             }
@@ -4254,7 +4286,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         if isInSessionStatusArea {
             if activeLoopsTableView.selectedRow >= 0 {
-                preferredLoopSelectionTarget = nil
+                preferredLoopSelectionIdentifier = nil
                 isProgrammaticLoopSelectionChange = true
                 activeLoopsTableView.deselectAll(nil)
                 isProgrammaticLoopSelectionChange = false
@@ -4273,7 +4305,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         var didChangeSelection = false
         if activeLoopsTableView.selectedRow >= 0 {
-            preferredLoopSelectionTarget = nil
+            preferredLoopSelectionIdentifier = nil
             isProgrammaticLoopSelectionChange = true
             activeLoopsTableView.deselectAll(nil)
             isProgrammaticLoopSelectionChange = false
@@ -5083,7 +5115,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         updateActiveLoopsWarningDisplay()
         activeLoopsTableView.reloadData()
         autoSizeActiveLoopsColumnsIfNeeded()
-        restoreLoopSelection(preferredTarget: nil)
+        restoreLoopSelection(preferredIdentifier: nil)
         refreshTableWrapping(activeLoopsTableView)
         updateLoopActionButtons()
     }
@@ -5405,7 +5437,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         activeLoopsMetaLabel.stringValue = loopSnapshots.isEmpty ? "循环: 0" : "循环: \(loopSnapshots.count)"
         activeLoopsTableView.reloadData()
         autoSizeActiveLoopsColumnsIfNeeded()
-        restoreLoopSelection(preferredTarget: target)
+        restoreLoopSelection(preferredIdentifier: updatedSnapshot.loopID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "target:\(target)" : loopSelectionIdentifier(updatedSnapshot))
         refreshTableWrapping(activeLoopsTableView)
         updateLoopActionButtons()
     }
@@ -5478,8 +5510,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 if actionName == "删除当前",
                    let deletedTarget = self.helperTargetArgument(from: displayArguments) {
                     self.loopSnapshots.removeAll { $0.target == deletedTarget }
-                    if self.preferredLoopSelectionTarget == deletedTarget {
-                        self.preferredLoopSelectionTarget = nil
+                    if self.preferredLoopSelectionIdentifier == "target:\(deletedTarget)" {
+                        self.preferredLoopSelectionIdentifier = nil
                     }
                     self.activeLoopsTableView.reloadData()
                     self.updateLoopActionButtons()
@@ -6265,7 +6297,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             } else if columnID == "result" {
                 textField.textColor = loopResultColor(loop)
             }
-            textField.toolTip = textField.stringValue
+            textField.toolTip = columnID == "target" ? loopTargetToolTip(loop) : textField.stringValue
             return cellView
         }
 
@@ -6287,13 +6319,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         if tableView == activeLoopsTableView {
             let selectedRow = tableView.selectedRow
             if selectedRow >= 0, selectedRow < loopSnapshots.count {
-                let selectedTarget = loopSnapshots[selectedRow].target
-                preferredLoopSelectionTarget = selectedTarget
+                let selectedLoop = loopSnapshots[selectedRow]
+                let selectedTarget = selectedLoop.target
+                preferredLoopSelectionIdentifier = loopSelectionIdentifier(selectedLoop)
                 if !isProgrammaticLoopSelectionChange {
                     targetField.stringValue = selectedTarget
                 }
             } else {
-                preferredLoopSelectionTarget = nil
+                preferredLoopSelectionIdentifier = nil
             }
             updateLoopActionButtons()
             refreshTableWrapping(activeLoopsTableView)
@@ -6319,12 +6352,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
         if tableView == activeLoopsTableView {
-            let preservedTarget = selectedLoopTarget()
+            let preservedIdentifier = selectedLoopSelectionIdentifier()
             applyLoopSorting()
             activeLoopsTableView.reloadData()
             adjustTableColumnWidths(activeLoopsTableView)
             didAutoSizeActiveLoopsColumns = true
-            restoreLoopSelection(preferredTarget: preservedTarget)
+            restoreLoopSelection(preferredIdentifier: preservedIdentifier)
             refreshTableWrapping(activeLoopsTableView)
             return
         }

@@ -581,8 +581,9 @@ status_without_home="$(
 assert_contains "$status_without_home" "target: alpha"
 assert_contains "$status_without_home" "stopped: yes"
 
-"$HELPER" loop-save-stopped -t alpha -i 45 -m start-failure -r tty_unavailable >/dev/null
-start_failed_loop_status="$("$HELPER" status -t alpha)"
+start_failed_save_output="$("$HELPER" loop-save-stopped -t alpha -i 45 -m start-failure -r tty_unavailable)"
+start_failed_loop_id="$(printf '%s\n' "$start_failed_save_output" | awk -F': ' '$1=="loop_id"{print $2}')"
+start_failed_loop_status="$("$HELPER" status -k "$start_failed_loop_id")"
 assert_contains "$start_failed_loop_status" "stopped: yes"
 assert_contains "$start_failed_loop_status" "stopped_reason: tty_unavailable"
 assert_contains "$start_failed_loop_status" "interval_seconds: 45"
@@ -598,6 +599,7 @@ assert_contains "$duplicate_resume_output" "found multiple matching sessions for
 
 delete_loop_output="$("$HELPER" loop-delete -t alpha)"
 assert_contains "$delete_loop_output" "deleted loop for target=alpha"
+"$HELPER" loop-delete -k "$start_failed_loop_id" >/dev/null
 "$HELPER" loop-delete -t duplicate >/dev/null
 "$HELPER" loop-delete -t "$mutex_a" >/dev/null
 "$HELPER" loop-delete -t "$mutex_b" >/dev/null
