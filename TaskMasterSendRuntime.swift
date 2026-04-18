@@ -624,6 +624,35 @@ final class SendRequestCoordinator {
         }
     }
 
+    private func loadQueuedSendRequest(at processingURL: URL, finish: ([String: Any]) -> Void) -> ParsedSendRequestPayload? {
+        let payload: [String: Any]
+        do {
+            payload = try readJSONFile(at: processingURL)
+        } catch {
+            finishFailedSendRequest(
+                target: "-",
+                forceSend: false,
+                reason: "invalid_request",
+                detail: "failed to read request: \(error.localizedDescription)",
+                finish: finish
+            )
+            return nil
+        }
+
+        guard let request = parseSendRequestPayload(payload) else {
+            finishFailedSendRequest(
+                target: "-",
+                forceSend: false,
+                reason: "invalid_request",
+                detail: "request file is missing target, message, or timeout_seconds",
+                finish: finish
+            )
+            return nil
+        }
+
+        return request
+    }
+
     private func finishFailedSendRequest(
         target: String,
         forceSend: Bool,
@@ -893,28 +922,7 @@ final class SendRequestCoordinator {
         let resultURL = resultURL(for: processingURL)
         let finishQueuedRequest = makeQueuedSendRequestFinisher(processingURL: processingURL, resultURL: resultURL)
 
-        let payload: [String: Any]
-        do {
-            payload = try readJSONFile(at: processingURL)
-        } catch {
-            finishFailedSendRequest(
-                target: "-",
-                forceSend: false,
-                reason: "invalid_request",
-                detail: "failed to read request: \(error.localizedDescription)",
-                finish: finishQueuedRequest
-            )
-            return
-        }
-
-        guard let request = parseSendRequestPayload(payload) else {
-            finishFailedSendRequest(
-                target: "-",
-                forceSend: false,
-                reason: "invalid_request",
-                detail: "request file is missing target, message, or timeout_seconds",
-                finish: finishQueuedRequest
-            )
+        guard let request = loadQueuedSendRequest(at: processingURL, finish: finishQueuedRequest) else {
             return
         }
 
