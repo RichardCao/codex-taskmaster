@@ -653,6 +653,23 @@ final class SendRequestCoordinator {
         return request
     }
 
+    private func loadInitialQueuedSendProbe(target: String, forceSend: Bool, finish: ([String: Any]) -> Void) -> ProbeResult? {
+        let initialProbe = probeResult(for: target)
+        guard initialProbe.status == 0 else {
+            let detail = compactProbeSummary(status: initialProbe.status, values: initialProbe.values, stdout: initialProbe.stdout, stderr: initialProbe.stderr)
+            let failureReason = sendProbeFailureReason(detail: detail)
+            finishFailedSendRequest(
+                target: target,
+                forceSend: forceSend,
+                reason: failureReason,
+                detail: detail,
+                finish: finish
+            )
+            return nil
+        }
+        return initialProbe
+    }
+
     private func finishFailedSendRequest(
         target: String,
         forceSend: Bool,
@@ -930,17 +947,7 @@ final class SendRequestCoordinator {
         let message = request.message
         let timeoutSeconds = request.timeoutSeconds
         let forceSend = request.forceSend
-        let initialProbe = probeResult(for: target)
-        guard initialProbe.status == 0 else {
-            let detail = compactProbeSummary(status: initialProbe.status, values: initialProbe.values, stdout: initialProbe.stdout, stderr: initialProbe.stderr)
-            let failureReason = sendProbeFailureReason(detail: detail)
-            finishFailedSendRequest(
-                target: target,
-                forceSend: forceSend,
-                reason: failureReason,
-                detail: detail,
-                finish: finishQueuedRequest
-            )
+        guard let initialProbe = loadInitialQueuedSendProbe(target: target, forceSend: forceSend, finish: finishQueuedRequest) else {
             return
         }
 
