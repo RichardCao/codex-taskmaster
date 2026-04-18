@@ -5939,8 +5939,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 self.requestLoopSnapshotRefresh()
             }
         ) {
-            self.runHelper(actionName: "恢复当前", displayArguments: ["loop-resume", "-t", loop.target]) { completion in
-                self.loopCommandService.resumeLoopAsync(target: loop.target, completion: completion)
+            self.runLoopTargetAction(actionName: "恢复当前", commandName: "loop-resume", loop: loop) { target, completion in
+                self.loopCommandService.resumeLoopAsync(target: target, completion: completion)
             }
         }
     }

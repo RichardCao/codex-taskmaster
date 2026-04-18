@@ -332,6 +332,7 @@
 - 发送一次/开始循环/冲突替换启动的 force-send 展示参数拼装收口到控制器 helper
 - 开始循环失败分支里“按当前输入保存停止态 loop”收口到控制器 helper
 - stop/delete loop 的 target 填充与 helper 调用收口到控制器 helper
+- resume loop 的 target 填充与 helper 调用收口到控制器 helper
 - `HelperCommandResult` 的首选错误详情访问收口到 core accessor
 - 控制器内目标校验与循环替换停止失败详情改为复用 `HelperCommandResult.primaryDetail`
 - 控制器内 helper 失败详情拼接改为复用 `HelperCommandResult.combinedText`
