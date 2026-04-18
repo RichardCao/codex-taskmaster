@@ -701,20 +701,6 @@ final class SendRequestCoordinator {
         ))
     }
 
-    private func shouldAutoClearResidualInput(probeStatus: String, terminalState: String) -> Bool {
-        probeStatus == "idle_with_residual_input" && terminalState == "prompt_with_input"
-    }
-
-    private func isSendableProbeState(probeStatus: String, terminalState: String) -> Bool {
-        if terminalState == "prompt_ready" && (probeStatus == "idle_stable" || probeStatus == "interrupted_idle") {
-            return true
-        }
-        if shouldAutoClearResidualInput(probeStatus: probeStatus, terminalState: terminalState) {
-            return true
-        }
-        return false
-    }
-
     private func verifyUserMessageAdvanced(target: String, previousTimestamp: String, timeoutSeconds: TimeInterval) -> (success: Bool, probe: ProbeResult) {
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         var latestProbe = probeResult(for: target)
