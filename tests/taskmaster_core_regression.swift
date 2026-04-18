@@ -24,6 +24,7 @@ struct TaskMasterCoreRegressionRunner {
         runLoopConflictResolutionChecks()
         runLocalizationChecks()
         runStatusPresentationChecks()
+        runAlertTemplateChecks()
         runLoopStateLabelChecks()
         runProbeStateRuleChecks()
         runQueuedAcceptanceRuleChecks()
@@ -672,6 +673,71 @@ struct TaskMasterCoreRegressionRunner {
             "expected fallback segment resolution to stay stable by key order"
         )
         expect(defaultVisibleStatusText() == "Ready", "expected default visible status text to remain Ready")
+    }
+
+    private static func runAlertTemplateChecks() {
+        let session = SessionSnapshot(
+            name: "Friendly",
+            target: "demo",
+            threadID: "thread-1",
+            provider: "openai",
+            source: "cli",
+            parentThreadID: "",
+            agentNickname: "",
+            agentRole: "",
+            status: "active",
+            reason: "",
+            terminalState: "prompt_ready",
+            tty: "ttys001",
+            updatedAtEpoch: 1,
+            rolloutPath: "",
+            preview: "",
+            isArchived: false
+        )
+        let conflictLoop = LoopSnapshot(
+            target: "demo",
+            loopDaemonRunning: true,
+            intervalSeconds: "30",
+            forceSend: false,
+            message: "hello",
+            nextRunEpoch: 0,
+            stopped: false,
+            stoppedReason: "",
+            paused: false,
+            failureCount: "0",
+            failureReason: "",
+            pauseReason: "",
+            logPath: "-",
+            lastLogLine: ""
+        )
+
+        expect(ambiguousTargetAlertTitle() == "目标不唯一", "expected ambiguous target alert title to stay stable")
+        expect(
+            ambiguousTargetAlertText(actionName: "开始循环", detail: "found multiple matching sessions").contains("无法直接开始循环"),
+            "expected ambiguous target alert text to embed action name"
+        )
+        expect(
+            runtimePermissionAlertText(
+                actionName: "发送一次",
+                runtimeDirectoryPath: "/tmp/runtime",
+                userLoopStateDirectoryPath: "/tmp/user-loop",
+                legacyLoopStateDirectoryPath: "/tmp/legacy-loop",
+                detail: "permission denied"
+            ).contains("permission denied"),
+            "expected runtime permission alert text to preserve detail"
+        )
+        expect(
+            sessionActionBlockedAlertText(actionLabel: "归档", session: session, detail: "", ambiguous: false).contains("Session ID: thread-1"),
+            "expected session blocked alert text to include thread id"
+        )
+        expect(
+            sessionActionBlockedAlertText(actionLabel: "归档", session: session, detail: "", ambiguous: true).contains("多个活跃 Terminal/Codex 目标"),
+            "expected ambiguous session blocked alert text to preserve ambiguity guidance"
+        )
+        expect(
+            loopConflictAlertText(target: "demo", conflicts: [conflictLoop]).contains("目标 demo 已存在运行中的循环"),
+            "expected loop conflict alert text to include conflict target"
+        )
     }
 
     private static func runLoopConflictResolutionChecks() {

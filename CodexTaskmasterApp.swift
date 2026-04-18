@@ -5006,33 +5006,25 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func showAmbiguousTargetAlert(target: String, detail: String, actionName: String, throttled: Bool) {
-        let normalizedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "目标不唯一"
-        alert.informativeText = "存在多个同名 Session，无法直接\(actionName)。请改用 Session ID，或先为它们设置不同名称。\n\n\(normalizedDetail)"
+        alert.messageText = ambiguousTargetAlertTitle()
+        alert.informativeText = ambiguousTargetAlertText(actionName: actionName, detail: detail)
         alert.addButton(withTitle: "确定")
         alert.runModal()
     }
 
     private func showRuntimePermissionAlert(actionName: String, detail: String) {
-        let normalizedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "\(actionName)前发现本地权限问题"
-        alert.informativeText = """
-        Codex Taskmaster 无法正常读写本地运行目录，因此这次\(actionName)不会继续执行。
-
-        建议检查这些目录是否属于当前用户并且可写：
-        - `\(runtimeDirectoryPath)`
-        - `\(userLoopStateDirectoryPath)`
-        - `\(legacyLoopStateDirectoryPath)`
-
-        如果之前曾用 `sudo` 或其他用户启动过相关脚本，最常见的修复方式是把 `~/.codex-terminal-sender` 重新改回当前用户属主。
-
-        详细信息：
-        \(normalizedDetail)
-        """
+        alert.messageText = runtimePermissionAlertTitle(actionName: actionName)
+        alert.informativeText = runtimePermissionAlertText(
+            actionName: actionName,
+            runtimeDirectoryPath: runtimeDirectoryPath,
+            userLoopStateDirectoryPath: userLoopStateDirectoryPath,
+            legacyLoopStateDirectoryPath: legacyLoopStateDirectoryPath,
+            detail: detail
+        )
         alert.addButton(withTitle: "确定")
         alert.runModal()
     }
@@ -5208,19 +5200,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func showSessionActionBlockedAlert(actionLabel: String, session: SessionSnapshot, detail: String, ambiguous: Bool) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = ambiguous ? "无法\(actionLabel)目标不唯一的活跃 Session" : "无法\(actionLabel)仍在运行的 Session"
-        let sessionName = sessionActualName(session)
-        let nameLine = sessionName.isEmpty ? "-" : sessionName
-        let cleanedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
-        let defaultDetail = ambiguous
-            ? "这个 session 仍然对应多个活跃 Terminal/Codex 目标，当前无法安全\(actionLabel)。请先关闭重复打开的 session，再重试。"
-            : "这个 session 仍然有活跃的 Terminal/Codex 进程，当前不允许\(actionLabel)。请先关闭对应 Terminal 标签页或结束该 session，再重试。"
-        alert.informativeText = """
-        Session ID: \(session.threadID)
-        Name: \(nameLine)
-
-        \(cleanedDetail.isEmpty ? defaultDetail : cleanedDetail)
-        """
+        alert.messageText = sessionActionBlockedAlertTitle(actionLabel: actionLabel, ambiguous: ambiguous)
+        alert.informativeText = sessionActionBlockedAlertText(
+            actionLabel: actionLabel,
+            session: session,
+            detail: detail,
+            ambiguous: ambiguous
+        )
         alert.addButton(withTitle: "知道了")
         alert.runModal()
     }
@@ -5408,9 +5394,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func promptToReplaceExistingLoops(conflicts: [LoopSnapshot], target: String) -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "检测到已有循环"
-        let conflictList = conflicts.map(\.target).joined(separator: "、")
-        alert.informativeText = "目标 \(target) 已存在运行中的循环：\(conflictList)。为避免重复发送，只能保留一个循环。是否先停止旧循环，再启动新的循环？"
+        alert.messageText = loopConflictAlertTitle()
+        alert.informativeText = loopConflictAlertText(target: target, conflicts: conflicts)
         alert.addButton(withTitle: "替换旧循环")
         alert.addButton(withTitle: "取消")
         return alert.runModal() == .alertFirstButtonReturn

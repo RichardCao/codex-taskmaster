@@ -21,8 +21,8 @@
 2. `done` 顶部状态条规则收口
    目标：把状态条的颜色判定、优先级、自动清理时机与默认文案从控制器下沉到 core 纯规则。
 
-3. `in_progress` loop / send 交互提示模板收口
+3. `done` loop / send 交互提示模板收口
    目标：把剩余的 loop conflict、ambiguous target、runtime permission 等提示框文案与交互模板从控制器中抽离。
 
-4. `pending` 主控制器残余展示编排清理
+4. `in_progress` 主控制器残余展示编排清理
    目标：继续压缩 `CodexTaskmasterApp.swift` 中的展示性 helper、重复 UI 收尾逻辑和零散状态判断，为 Linux 迁移前做最后一轮收口。
