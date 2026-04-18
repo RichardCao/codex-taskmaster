@@ -3,10 +3,26 @@ import Foundation
 @main
 struct TaskMasterCoreRegressionRunner {
     static func main() {
+        runStructuredFieldParsingChecks()
         runLoopSnapshotAccessorChecks()
         runSessionSnapshotAccessorChecks()
         runMergeSessionSnapshotChecks()
+        runLocalizationChecks()
+        runLoopStateLabelChecks()
         print("taskmaster_core_regression_ok")
+    }
+
+    private static func runStructuredFieldParsingChecks() {
+        let text = """
+        status: failed
+        reason: not_sendable
+        detail: target busy
+        """
+
+        let fields = parseStructuredKeyValueFields(text)
+        expect(fields?["status"] == "failed", "expected parser to read status field")
+        expect(fields?["reason"] == "not_sendable", "expected parser to read reason field")
+        expect(fields?["detail"] == "target busy", "expected parser to preserve detail field")
     }
 
     private static func runLoopSnapshotAccessorChecks() {
@@ -97,6 +113,32 @@ struct TaskMasterCoreRegressionRunner {
 
         let merged = mergeSessionSnapshots(existing: [older], newSnapshots: [newer])
         expect(merged.map(\.threadID) == ["thread-2", "thread-1"], "expected mergeSessionSnapshots to sort by newest updatedAt")
+    }
+
+    private static func runLocalizationChecks() {
+        expect(localizedSendReason("missing_accessibility_permission") == "缺少辅助功能权限", "expected permission failure to localize consistently")
+    }
+
+    private static func runLoopStateLabelChecks() {
+        let snapshot = LoopSnapshot(
+            target: "demo",
+            loopDaemonRunning: "yes",
+            intervalSeconds: "30",
+            forceSend: "no",
+            message: "hello",
+            nextRunEpoch: "1234",
+            stopped: "yes",
+            stoppedReason: "manual_stop",
+            paused: "no",
+            failureCount: "0",
+            failureReason: "",
+            pauseReason: "",
+            logPath: "-",
+            lastLogLine: ""
+        )
+
+        expect(loopStateLabel(snapshot) == "停止", "expected stopped loop to map to 停止 state")
+        expect(loopResultLabel(snapshot) == "已停止", "expected stopped loop to map to 已停止 result")
     }
 
     private static func expect(_ condition: @autoclosure () -> Bool, _ message: String) {

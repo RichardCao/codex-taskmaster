@@ -2,6 +2,20 @@ import XCTest
 @testable import TaskMasterCoreLib
 
 final class TaskMasterCoreLibTests: XCTestCase {
+    func testParseStructuredKeyValueFieldsReadsStructuredOutput() {
+        let text = """
+        status: failed
+        reason: not_sendable
+        detail: target busy
+        """
+
+        let fields = parseStructuredKeyValueFields(text)
+
+        XCTAssertEqual(fields?["status"], "failed")
+        XCTAssertEqual(fields?["reason"], "not_sendable")
+        XCTAssertEqual(fields?["detail"], "target busy")
+    }
+
     func testLoopSnapshotTypedAccessors() {
         let snapshot = LoopSnapshot(
             target: "demo",
@@ -91,5 +105,31 @@ final class TaskMasterCoreLibTests: XCTestCase {
         let merged = mergeSessionSnapshots(existing: [older], newSnapshots: [newer])
 
         XCTAssertEqual(merged.map(\.threadID), ["thread-2", "thread-1"])
+    }
+
+    func testLocalizedSendReasonMapsPermissionFailure() {
+        XCTAssertEqual(localizedSendReason("missing_accessibility_permission"), "缺少辅助功能权限")
+    }
+
+    func testLoopStateAndResultLabelsForStoppedLoop() {
+        let snapshot = LoopSnapshot(
+            target: "demo",
+            loopDaemonRunning: "yes",
+            intervalSeconds: "30",
+            forceSend: "no",
+            message: "hello",
+            nextRunEpoch: "1234",
+            stopped: "yes",
+            stoppedReason: "manual_stop",
+            paused: "no",
+            failureCount: "0",
+            failureReason: "",
+            pauseReason: "",
+            logPath: "-",
+            lastLogLine: ""
+        )
+
+        XCTAssertEqual(loopStateLabel(snapshot), "停止")
+        XCTAssertEqual(loopResultLabel(snapshot), "已停止")
     }
 }
