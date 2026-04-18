@@ -495,6 +495,11 @@ final class SendRequestCoordinator {
         let clearResidualInputBeforeSend: Bool
     }
 
+    private struct QueuedSendVerificationContext {
+        let verification: (success: Bool, probe: ProbeResult)
+        let decision: SendVerificationDecision
+    }
+
     private let pendingRequestDirectoryPath: String
     private let processingRequestDirectoryPath: String
     private let resultRequestDirectoryPath: String
@@ -1004,6 +1009,34 @@ final class SendRequestCoordinator {
         )
     }
 
+    private func performQueuedSendVerification(
+        target: String,
+        forceSend: Bool,
+        timeoutSeconds: NSNumber,
+        context: QueuedSendExecutionContext
+    ) -> QueuedSendVerificationContext {
+        let verification = verifyUserMessageAdvanced(
+            target: target,
+            previousTimestamp: context.previousUserTimestamp,
+            timeoutSeconds: max(8, min(timeoutSeconds.doubleValue, 14))
+        )
+        let decision = evaluateSendVerificationDecision(
+            verificationSucceeded: verification.success,
+            forceSend: forceSend,
+            initialProbeStatus: context.probeStatus,
+            initialTerminalState: context.terminalState,
+            verificationProbeStatusCode: verification.probe.status,
+            verificationProbeStatus: verification.probe.values["status"] ?? "unknown",
+            verificationReason: verification.probe.values["reason"] ?? "",
+            verificationTerminalState: verification.probe.values["terminal_state"] ?? "unknown"
+        )
+
+        return QueuedSendVerificationContext(
+            verification: verification,
+            decision: decision
+        )
+    }
+
     private func appendLiveTTYResolutionDetail(_ baseDetail: String, resolution: LiveTTYResolution?) -> String {
         guard let resolution else { return baseDetail }
 
@@ -1161,28 +1194,19 @@ final class SendRequestCoordinator {
             return
         }
 
-        let verification = verifyUserMessageAdvanced(
+        let verificationContext = performQueuedSendVerification(
             target: target,
-            previousTimestamp: context.previousUserTimestamp,
-            timeoutSeconds: max(8, min(timeoutSeconds.doubleValue, 14))
-        )
-        let verificationDecision = evaluateSendVerificationDecision(
-            verificationSucceeded: verification.success,
             forceSend: forceSend,
-            initialProbeStatus: context.probeStatus,
-            initialTerminalState: context.terminalState,
-            verificationProbeStatusCode: verification.probe.status,
-            verificationProbeStatus: verification.probe.values["status"] ?? "unknown",
-            verificationReason: verification.probe.values["reason"] ?? "",
-            verificationTerminalState: verification.probe.values["terminal_state"] ?? "unknown"
+            timeoutSeconds: timeoutSeconds,
+            context: context
         )
         finishQueuedSendVerification(
             target: target,
             forceSend: forceSend,
             usedTTY: usedTTY,
             clearExistingInput: context.clearResidualInputBeforeSend,
-            verification: verification,
-            verificationDecision: verificationDecision,
+            verification: verificationContext.verification,
+            verificationDecision: verificationContext.decision,
             resolution: context.resolution,
             finish: finishQueuedRequest
         )
