@@ -1362,6 +1362,10 @@ func evaluateSendPreflight(forceSend: Bool, tty: String, probeStatus: String, te
     )
 }
 
+func sendProbeFailureReason(detail: String) -> String {
+    isAmbiguousTargetDetail(detail) ? "ambiguous_target" : "probe_failed"
+}
+
 func makeSendRequestResultPayload(
     status: String,
     reason: String,

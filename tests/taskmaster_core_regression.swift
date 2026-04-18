@@ -8,6 +8,7 @@ struct TaskMasterCoreRegressionRunner {
         runCompactProbeSummaryChecks()
         runSendRequestPayloadChecks()
         runSendVerificationDecisionChecks()
+        runSendProbeFailureReasonChecks()
         runLoopSnapshotAccessorChecks()
         runSessionSnapshotAccessorChecks()
         runMergeSessionSnapshotChecks()
@@ -116,6 +117,11 @@ struct TaskMasterCoreRegressionRunner {
         expect(pending.status == "accepted", "expected unconfirmed verification to remain accepted")
         expect(pending.reason == "verification_pending", "expected unconfirmed verification to map to verification_pending")
         expect(pending.probeStatus == "busy_turn_open", "expected pending verification to preserve latest probe status")
+    }
+
+    private static func runSendProbeFailureReasonChecks() {
+        expect(sendProbeFailureReason(detail: "found multiple matching sessions for target demo") == "ambiguous_target", "expected ambiguity detail to map to ambiguous_target")
+        expect(sendProbeFailureReason(detail: "tty unavailable") == "probe_failed", "expected generic probe failure detail to map to probe_failed")
     }
 
     private static func runLoopSnapshotAccessorChecks() {

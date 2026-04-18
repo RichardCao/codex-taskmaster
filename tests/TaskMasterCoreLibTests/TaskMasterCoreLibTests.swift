@@ -103,6 +103,11 @@ final class TaskMasterCoreLibTests: XCTestCase {
         XCTAssertEqual(pending.probeStatus, "busy_turn_open")
     }
 
+    func testSendProbeFailureReasonMatchesRuntimeRules() {
+        XCTAssertEqual(sendProbeFailureReason(detail: "found multiple matching sessions for target demo"), "ambiguous_target")
+        XCTAssertEqual(sendProbeFailureReason(detail: "tty unavailable"), "probe_failed")
+    }
+
     func testLoopSnapshotTypedAccessors() {
         let snapshot = LoopSnapshot(
             target: "demo",

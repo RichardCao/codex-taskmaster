@@ -359,6 +359,7 @@
 - send runtime 的 probe 文本解析与摘要拼装继续复用 core parser/helper
 - send runtime 的结果 payload 拼装收口到 core helper
 - send runtime 的发送后验证分流收口到 core `evaluateSendVerificationDecision`
+- send runtime 的 initial probe 失败原因判定收口到 core `sendProbeFailureReason`
 
 下一步建议：
 
@@ -441,6 +442,7 @@
 - probe parser / detail / compact summary 的基础回归样例已进入 core 回归
 - send runtime 的结果 payload 样例已进入 core 回归
 - send runtime 的发送后验证决策样例已进入 core 回归
+- send runtime 的 initial probe 失败原因样例已进入 core 回归
 
 建议覆盖：
 

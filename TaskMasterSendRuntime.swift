@@ -927,7 +927,7 @@ final class SendRequestCoordinator {
         let initialProbe = probeResult(for: target)
         guard initialProbe.status == 0 else {
             let detail = compactProbeSummary(status: initialProbe.status, values: initialProbe.values, stdout: initialProbe.stdout, stderr: initialProbe.stderr)
-            let failureReason = isAmbiguousTargetDetail(detail) ? "ambiguous_target" : "probe_failed"
+            let failureReason = sendProbeFailureReason(detail: detail)
             finishFailedSendRequest(
                 target: target,
                 forceSend: forceSend,
