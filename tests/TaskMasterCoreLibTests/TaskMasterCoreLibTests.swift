@@ -16,6 +16,13 @@ final class TaskMasterCoreLibTests: XCTestCase {
         XCTAssertEqual(fields?["detail"], "target busy")
     }
 
+    func testNormalizeTTYIdentifierHandlesPrefixesAndPlaceholders() {
+        XCTAssertEqual(normalizeTTYIdentifier("/dev/ttys001"), "ttys001")
+        XCTAssertEqual(normalizeTTYIdentifier("ttys002"), "ttys002")
+        XCTAssertEqual(normalizeTTYIdentifier("-"), "")
+        XCTAssertEqual(normalizeTTYIdentifier("  "), "")
+    }
+
     func testPreferredCommandDetailPrefersStderrThenStdout() {
         XCTAssertEqual(preferredCommandDetail(stdout: "stdout detail", stderr: ""), "stdout detail")
         XCTAssertEqual(preferredCommandDetail(stdout: "stdout detail", stderr: "stderr detail"), "stderr detail")

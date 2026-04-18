@@ -4,6 +4,7 @@ import Foundation
 struct TaskMasterCoreRegressionRunner {
     static func main() {
         runStructuredFieldParsingChecks()
+        runTTYNormalizationChecks()
         runCommandDetailChecks()
         runCompactProbeSummaryChecks()
         runSendRequestPayloadChecks()
@@ -33,6 +34,13 @@ struct TaskMasterCoreRegressionRunner {
         expect(fields?["status"] == "failed", "expected parser to read status field")
         expect(fields?["reason"] == "not_sendable", "expected parser to read reason field")
         expect(fields?["detail"] == "target busy", "expected parser to preserve detail field")
+    }
+
+    private static func runTTYNormalizationChecks() {
+        expect(normalizeTTYIdentifier("/dev/ttys001") == "ttys001", "expected /dev prefix to be stripped")
+        expect(normalizeTTYIdentifier("ttys002") == "ttys002", "expected plain tty to remain unchanged")
+        expect(normalizeTTYIdentifier("-").isEmpty, "expected placeholder tty to normalize to empty")
+        expect(normalizeTTYIdentifier("  ").isEmpty, "expected blank tty to normalize to empty")
     }
 
     private static func runCommandDetailChecks() {

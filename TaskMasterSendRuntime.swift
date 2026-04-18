@@ -56,7 +56,7 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
             contextAgeSeconds = "-"
         }
         logger?(
-            "focus-debug: send-begin target_tty=\(normalizedTTY(ttyPath)) previous_bundle=\(previousContext.bundleID.isEmpty ? "-" : previousContext.bundleID) previous_terminal_tty=\(normalizedTTY(previousContext.terminalTTY ?? "").isEmpty ? "-" : normalizedTTY(previousContext.terminalTTY ?? "")) previous_context_age_seconds=\(contextAgeSeconds)"
+            "focus-debug: send-begin target_tty=\(normalizeTTYIdentifier(ttyPath)) previous_bundle=\(previousContext.bundleID.isEmpty ? "-" : previousContext.bundleID) previous_terminal_tty=\(normalizeTTYIdentifier(previousContext.terminalTTY ?? "").isEmpty ? "-" : normalizeTTYIdentifier(previousContext.terminalTTY ?? "")) previous_context_age_seconds=\(contextAgeSeconds)"
         )
         try focusTerminalWindow(for: ttyPath)
         defer {
@@ -258,7 +258,7 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
 
     private func currentFrontTerminalTTY() -> String? {
         let tty = AppFocusTracker.shared.preferredTerminalTTY() ?? ""
-        let trimmed = normalizedTTY(tty)
+        let trimmed = normalizeTTYIdentifier(tty)
         if !trimmed.isEmpty {
             return trimmed
         }
@@ -276,7 +276,7 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
                 end tell
                 """]
             )
-            let normalized = normalizedTTY(result.trimmedStdout)
+            let normalized = normalizeTTYIdentifier(result.trimmedStdout)
             return normalized.isEmpty ? nil : normalized
         } catch {
             return nil
@@ -363,8 +363,8 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
     }
 
     private func restorePreviousTerminalTTY(_ preferredTTY: String, targetTTY: String) -> String? {
-        let normalizedPreferredTTY = normalizedTTY(preferredTTY)
-        let normalizedTargetTTY = normalizedTTY(targetTTY)
+        let normalizedPreferredTTY = normalizeTTYIdentifier(preferredTTY)
+        let normalizedTargetTTY = normalizeTTYIdentifier(targetTTY)
         guard !normalizedPreferredTTY.isEmpty, normalizedPreferredTTY != normalizedTargetTTY else {
             return nil
         }
@@ -405,7 +405,7 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
             guard result.terminationStatus == 0, currentFrontmostBundleID() == "com.apple.Terminal" else {
                 return nil
             }
-            let restoredTTY = normalizedTTY(result.trimmedStdout)
+            let restoredTTY = normalizeTTYIdentifier(result.trimmedStdout)
             return restoredTTY.isEmpty ? nil : restoredTTY
         } catch {
             return nil
@@ -415,8 +415,8 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
     private func restoreFocusAfterTerminalSend(previousContext: FrontmostAppContext, targetTTY: String, logger: ((String) -> Void)?) {
         let currentAppBundleID = Bundle.main.bundleIdentifier ?? ""
         let preferredBundleID = previousContext.bundleID.isEmpty ? currentAppBundleID : previousContext.bundleID
-        let preferredTerminalTTY = normalizedTTY(previousContext.terminalTTY ?? "")
-        let normalizedTargetTTY = normalizedTTY(targetTTY)
+        let preferredTerminalTTY = normalizeTTYIdentifier(previousContext.terminalTTY ?? "")
+        let normalizedTargetTTY = normalizeTTYIdentifier(targetTTY)
 
         focusDebugLog(
             logger,
@@ -469,16 +469,6 @@ final class MacOSTerminalSendAdapter: PlatformSendAdapter {
         focusDebugLog(logger, "restore-result mode=taskmaster_force_activate frontmost=\(currentFrontmostBundleID() ?? "-")")
     }
 
-    private func normalizedTTY(_ tty: String) -> String {
-        let trimmed = tty.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == "-" {
-            return ""
-        }
-        if trimmed.hasPrefix("/dev/") {
-            return String(trimmed.dropFirst("/dev/".count))
-        }
-        return trimmed
-    }
 }
 
 final class SendRequestCoordinator {
@@ -722,19 +712,8 @@ final class SendRequestCoordinator {
         return (false, latestProbe)
     }
 
-    private func normalizedTTY(_ tty: String) -> String {
-        let trimmed = tty.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == "-" {
-            return ""
-        }
-        if trimmed.hasPrefix("/dev/") {
-            return String(trimmed.dropFirst("/dev/".count))
-        }
-        return trimmed
-    }
-
     private func ttyPath(from tty: String) -> String {
-        let normalized = normalizedTTY(tty)
+        let normalized = normalizeTTYIdentifier(tty)
         return normalized.hasPrefix("/dev/") ? normalized : "/dev/\(normalized)"
     }
 
@@ -756,12 +735,12 @@ final class SendRequestCoordinator {
         guard result.status == 0 else {
             return (nil, detail)
         }
-        let tty = normalizedTTY(result.stdout)
+        let tty = normalizeTTYIdentifier(result.stdout)
         return (tty.isEmpty ? nil : tty, detail)
     }
 
     private func recoverLiveTTY(target: String, previousTTY: String?) -> LiveTTYResolution {
-        let previous = normalizedTTY(previousTTY ?? "")
+        let previous = normalizeTTYIdentifier(previousTTY ?? "")
         let resolved = resolveLiveTTY(target: target)
         guard let tty = resolved.tty, !tty.isEmpty else {
             return LiveTTYResolution(tty: nil, detail: resolved.detail, changed: false)
@@ -770,12 +749,12 @@ final class SendRequestCoordinator {
     }
 
     private func shouldAttemptPreflightTTYRecovery(initialTTY: String, terminalState: String) -> Bool {
-        normalizedTTY(initialTTY).isEmpty || terminalState == "unavailable"
+        normalizeTTYIdentifier(initialTTY).isEmpty || terminalState == "unavailable"
     }
 
     private func prepareProbeForSend(target: String, initialProbe: ProbeResult) -> (probe: ProbeResult, tty: String, resolution: LiveTTYResolution?) {
         let rawInitialTTY = initialProbe.values["tty"] ?? ""
-        let initialTTY = rawInitialTTY == "-" ? "" : normalizedTTY(rawInitialTTY)
+        let initialTTY = rawInitialTTY == "-" ? "" : normalizeTTYIdentifier(rawInitialTTY)
         let initialTerminalState = initialProbe.values["terminal_state"] ?? "unknown"
 
         guard shouldAttemptPreflightTTYRecovery(initialTTY: initialTTY, terminalState: initialTerminalState) else {
@@ -790,7 +769,7 @@ final class SendRequestCoordinator {
         let refreshedProbe = probeResult(for: target)
         if refreshedProbe.status == 0 {
             let refreshedRawTTY = refreshedProbe.values["tty"] ?? ""
-            let refreshedTTY = refreshedRawTTY == "-" ? "" : normalizedTTY(refreshedRawTTY)
+            let refreshedTTY = refreshedRawTTY == "-" ? "" : normalizeTTYIdentifier(refreshedRawTTY)
             if !refreshedTTY.isEmpty {
                 return (refreshedProbe, refreshedTTY, resolution)
             }
@@ -846,7 +825,7 @@ final class SendRequestCoordinator {
     }
 
     private func sendViaResolvedTTY(target: String, initialTTY: String, message: String, clearExistingInput: Bool) throws -> String {
-        let startingTTY = normalizedTTY(initialTTY)
+        let startingTTY = normalizeTTYIdentifier(initialTTY)
         try terminalAutomationQueue.sync {
             try sendAdapter.sendMessage(
                 toTTYPath: ttyPath(from: startingTTY),
@@ -859,7 +838,7 @@ final class SendRequestCoordinator {
     }
 
     private func sendWithLiveTTYRecovery(target: String, initialTTY: String, message: String, clearExistingInput: Bool) throws -> String {
-        let startingTTY = normalizedTTY(initialTTY)
+        let startingTTY = normalizeTTYIdentifier(initialTTY)
 
         do {
             return try sendViaResolvedTTY(

@@ -643,6 +643,17 @@ func compactProbeSummary(status: Int32, values: [String: String], stdout: String
     }.joined(separator: " | ")
 }
 
+func normalizeTTYIdentifier(_ tty: String) -> String {
+    let trimmed = tty.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty || trimmed == "-" {
+        return ""
+    }
+    if trimmed.hasPrefix("/dev/") {
+        return String(trimmed.dropFirst("/dev/".count))
+    }
+    return trimmed
+}
+
 struct LoopSnapshot {
     let target: String
     let loopDaemonRunning: String
