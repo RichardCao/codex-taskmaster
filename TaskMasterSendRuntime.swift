@@ -618,6 +618,12 @@ final class SendRequestCoordinator {
         finishProcessingRequest()
     }
 
+    private func makeQueuedSendRequestFinisher(processingURL: URL, resultURL: URL) -> ([String: Any]) -> Void {
+        { [self] result in
+            finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: result)
+        }
+    }
+
     private func finishFailedSendRequest(
         target: String,
         forceSend: Bool,
@@ -899,6 +905,7 @@ final class SendRequestCoordinator {
 
     private func handleQueuedSendRequest(at processingURL: URL) {
         let resultURL = resultURL(for: processingURL)
+        let finishQueuedRequest = makeQueuedSendRequestFinisher(processingURL: processingURL, resultURL: resultURL)
 
         let payload: [String: Any]
         do {
@@ -909,7 +916,7 @@ final class SendRequestCoordinator {
                 forceSend: false,
                 reason: "invalid_request",
                 detail: "failed to read request: \(error.localizedDescription)",
-                finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
+                finish: finishQueuedRequest
             )
             return
         }
@@ -920,7 +927,7 @@ final class SendRequestCoordinator {
                 forceSend: false,
                 reason: "invalid_request",
                 detail: "request file is missing target, message, or timeout_seconds",
-                finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
+                finish: finishQueuedRequest
             )
             return
         }
@@ -938,7 +945,7 @@ final class SendRequestCoordinator {
                 forceSend: forceSend,
                 reason: failureReason,
                 detail: detail,
-                finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
+                finish: finishQueuedRequest
             )
             return
         }
@@ -969,7 +976,7 @@ final class SendRequestCoordinator {
                 detail: detail,
                 probeStatus: probeStatus,
                 terminalState: terminalState,
-                finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
+                finish: finishQueuedRequest
             )
             return
         }
@@ -992,7 +999,7 @@ final class SendRequestCoordinator {
                 detail: detail,
                 probeStatus: probeStatus,
                 terminalState: terminalState,
-                finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
+                finish: finishQueuedRequest
             )
             return
         }
@@ -1026,7 +1033,7 @@ final class SendRequestCoordinator {
                 probeStatus: verificationDecision.probeStatus,
                 terminalState: verificationDecision.terminalState,
                 color: .systemGreen,
-                finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
+                finish: finishQueuedRequest
             )
             return
         }
@@ -1043,7 +1050,7 @@ final class SendRequestCoordinator {
                 probeStatus: verificationDecision.probeStatus,
                 terminalState: verificationDecision.terminalState,
                 color: .systemOrange,
-                finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
+                finish: finishQueuedRequest
             )
             return
         }
@@ -1059,7 +1066,7 @@ final class SendRequestCoordinator {
             probeStatus: verificationDecision.probeStatus,
             terminalState: verificationDecision.terminalState,
             color: .systemOrange,
-            finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
+            finish: finishQueuedRequest
         )
     }
 }
