@@ -151,4 +151,56 @@ final class TaskMasterCoreLibTests: XCTestCase {
         XCTAssertTrue(isAmbiguousTargetDetail("found multiple matching Terminal ttys for target demo"))
         XCTAssertFalse(isAmbiguousTargetDetail("tty unavailable"))
     }
+
+    func testEvaluateSendPreflightMatchesRuntimeRules() {
+        let ttyUnavailable = evaluateSendPreflight(
+            forceSend: false,
+            tty: "",
+            probeStatus: "idle_stable",
+            terminalState: "prompt_ready",
+            detail: "tty unavailable"
+        )
+        XCTAssertFalse(ttyUnavailable.canSend)
+        XCTAssertEqual(ttyUnavailable.failureReason, "tty_unavailable")
+
+        let ambiguous = evaluateSendPreflight(
+            forceSend: false,
+            tty: "",
+            probeStatus: "idle_stable",
+            terminalState: "prompt_ready",
+            detail: "found multiple matching sessions for target demo"
+        )
+        XCTAssertFalse(ambiguous.canSend)
+        XCTAssertEqual(ambiguous.failureReason, "ambiguous_target")
+
+        let notSendable = evaluateSendPreflight(
+            forceSend: false,
+            tty: "ttys001",
+            probeStatus: "busy_turn_open",
+            terminalState: "prompt_with_input",
+            detail: "busy"
+        )
+        XCTAssertFalse(notSendable.canSend)
+        XCTAssertEqual(notSendable.failureReason, "not_sendable")
+
+        let residualInput = evaluateSendPreflight(
+            forceSend: false,
+            tty: "ttys001",
+            probeStatus: "idle_with_residual_input",
+            terminalState: "prompt_with_input",
+            detail: "residual"
+        )
+        XCTAssertTrue(residualInput.canSend)
+        XCTAssertTrue(residualInput.shouldClearResidualInput)
+
+        let forcedSend = evaluateSendPreflight(
+            forceSend: true,
+            tty: "ttys001",
+            probeStatus: "busy_turn_open",
+            terminalState: "prompt_with_input",
+            detail: "forced"
+        )
+        XCTAssertTrue(forcedSend.canSend)
+        XCTAssertFalse(forcedSend.shouldClearResidualInput)
+    }
 }

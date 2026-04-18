@@ -12,6 +12,7 @@ struct TaskMasterCoreRegressionRunner {
         runProbeStateRuleChecks()
         runQueuedAcceptanceRuleChecks()
         runAmbiguousTargetRuleChecks()
+        runSendPreflightDecisionChecks()
         print("taskmaster_core_regression_ok")
     }
 
@@ -161,6 +162,58 @@ struct TaskMasterCoreRegressionRunner {
         expect(isAmbiguousTargetDetail("found multiple matching sessions for target demo"), "expected session ambiguity text to be recognized")
         expect(isAmbiguousTargetDetail("found multiple matching Terminal ttys for target demo"), "expected tty ambiguity text to be recognized")
         expect(!isAmbiguousTargetDetail("tty unavailable"), "expected unrelated detail to stay non-ambiguous")
+    }
+
+    private static func runSendPreflightDecisionChecks() {
+        let ttyUnavailable = evaluateSendPreflight(
+            forceSend: false,
+            tty: "",
+            probeStatus: "idle_stable",
+            terminalState: "prompt_ready",
+            detail: "tty unavailable"
+        )
+        expect(!ttyUnavailable.canSend, "expected empty tty to block send")
+        expect(ttyUnavailable.failureReason == "tty_unavailable", "expected empty tty to map to tty_unavailable")
+
+        let ambiguous = evaluateSendPreflight(
+            forceSend: false,
+            tty: "",
+            probeStatus: "idle_stable",
+            terminalState: "prompt_ready",
+            detail: "found multiple matching sessions for target demo"
+        )
+        expect(!ambiguous.canSend, "expected ambiguous empty tty to block send")
+        expect(ambiguous.failureReason == "ambiguous_target", "expected ambiguity detail to win over tty_unavailable")
+
+        let notSendable = evaluateSendPreflight(
+            forceSend: false,
+            tty: "ttys001",
+            probeStatus: "busy_turn_open",
+            terminalState: "prompt_with_input",
+            detail: "busy"
+        )
+        expect(!notSendable.canSend, "expected busy prompt-with-input to remain blocked")
+        expect(notSendable.failureReason == "not_sendable", "expected blocked sendable state to map to not_sendable")
+
+        let residualInput = evaluateSendPreflight(
+            forceSend: false,
+            tty: "ttys001",
+            probeStatus: "idle_with_residual_input",
+            terminalState: "prompt_with_input",
+            detail: "residual"
+        )
+        expect(residualInput.canSend, "expected residual input case to stay sendable")
+        expect(residualInput.shouldClearResidualInput, "expected residual input case to request clear-existing-input")
+
+        let forcedSend = evaluateSendPreflight(
+            forceSend: true,
+            tty: "ttys001",
+            probeStatus: "busy_turn_open",
+            terminalState: "prompt_with_input",
+            detail: "forced"
+        )
+        expect(forcedSend.canSend, "expected force-send to bypass sendability gate")
+        expect(!forcedSend.shouldClearResidualInput, "expected force-send to skip residual-input clearing")
     }
 
     private static func expect(_ condition: @autoclosure () -> Bool, _ message: String) {

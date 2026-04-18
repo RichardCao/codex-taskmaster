@@ -1301,6 +1301,38 @@ func isAmbiguousTargetDetail(_ detail: String) -> Bool {
     detail.contains("found multiple matching Terminal ttys for target")
 }
 
+struct SendPreflightDecision {
+    let canSend: Bool
+    let failureReason: String
+    let shouldClearResidualInput: Bool
+}
+
+func evaluateSendPreflight(forceSend: Bool, tty: String, probeStatus: String, terminalState: String, detail: String) -> SendPreflightDecision {
+    let normalizedTTY = tty.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalizedTTY.isEmpty else {
+        return SendPreflightDecision(
+            canSend: false,
+            failureReason: isAmbiguousTargetDetail(detail) ? "ambiguous_target" : "tty_unavailable",
+            shouldClearResidualInput: false
+        )
+    }
+
+    let shouldClearResidualInput = !forceSend && shouldAutoClearResidualInput(probeStatus: probeStatus, terminalState: terminalState)
+    if forceSend || isSendableProbeState(probeStatus: probeStatus, terminalState: terminalState) {
+        return SendPreflightDecision(
+            canSend: true,
+            failureReason: "",
+            shouldClearResidualInput: shouldClearResidualInput
+        )
+    }
+
+    return SendPreflightDecision(
+        canSend: false,
+        failureReason: "not_sendable",
+        shouldClearResidualInput: false
+    )
+}
+
 struct ParsedLoopOutcome {
     let status: String
     let reason: String

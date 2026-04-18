@@ -905,33 +905,24 @@ final class SendRequestCoordinator {
         let terminalState = activeProbe.values["terminal_state"] ?? "unknown"
         let tty = preparedProbe.tty
         let previousUserTimestamp = activeProbe.values["last_user_message_at"] ?? ""
-        let clearResidualInputBeforeSend = !forceSend && shouldAutoClearResidualInput(probeStatus: probeStatus, terminalState: terminalState)
-        let sendableByState = isSendableProbeState(probeStatus: probeStatus, terminalState: terminalState)
+        let preflightDetail = appendLiveTTYResolutionDetail(compactProbeSummary(activeProbe), resolution: preparedProbe.resolution)
+        let preflightDecision = evaluateSendPreflight(
+            forceSend: forceSend,
+            tty: tty,
+            probeStatus: probeStatus,
+            terminalState: terminalState,
+            detail: preflightDetail
+        )
+        let clearResidualInputBeforeSend = preflightDecision.shouldClearResidualInput
 
-        guard !tty.isEmpty else {
-            let detail = appendLiveTTYResolutionDetail(compactProbeSummary(activeProbe), resolution: preparedProbe.resolution)
-            let failureReason = isAmbiguousTargetDetail(detail) ? "ambiguous_target" : "tty_unavailable"
+        guard preflightDecision.canSend else {
+            let failureReason = preflightDecision.failureReason
+            let detail = preflightDetail
             callbacks.logActivity("发送请求失败: status=failed reason=\(failureReason) target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
             callbacks.updateSendStatus("failed", target, failureReason, probeStatus, terminalState, .systemRed)
             finish(with: [
                 "status": "failed",
                 "reason": failureReason,
-                "target": target,
-                "force_send": forceSend,
-                "detail": detail,
-                "probe_status": probeStatus,
-                "terminal_state": terminalState
-            ])
-            return
-        }
-
-        guard forceSend || sendableByState else {
-            let detail = appendLiveTTYResolutionDetail(compactProbeSummary(activeProbe), resolution: preparedProbe.resolution)
-            callbacks.logActivity("发送请求失败: status=failed reason=not_sendable target=\(target) force_send=\(forceSend ? "yes" : "no") probe_status=\(probeStatus) terminal_state=\(terminalState) detail=\(detail)")
-            callbacks.updateSendStatus("failed", target, "not_sendable", probeStatus, terminalState, .systemRed)
-            finish(with: [
-                "status": "failed",
-                "reason": "not_sendable",
                 "target": target,
                 "force_send": forceSend,
                 "detail": detail,
