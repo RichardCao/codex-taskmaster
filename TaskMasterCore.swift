@@ -731,6 +731,30 @@ struct SendResultSnapshot {
     let probeStatus: String
     let terminalState: String
     let updatedAtEpoch: TimeInterval
+
+    var statusKind: SendOutcomeStatus {
+        SendOutcomeStatus(rawValue: status)
+    }
+}
+
+enum SendOutcomeStatus: Equatable {
+    case success
+    case accepted
+    case failed
+    case other(String)
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "success":
+            self = .success
+        case "accepted":
+            self = .accepted
+        case "failed":
+            self = .failed
+        default:
+            self = .other(rawValue)
+        }
+    }
 }
 
 func parseLoopStatusJSONOutput(_ output: String) -> (loops: [LoopSnapshot], warnings: [String])? {
@@ -1278,14 +1302,15 @@ func sessionTTYDisplayValue(_ session: SessionSnapshot) -> String {
 }
 
 func localizedSendStatusLabel(_ status: String) -> String {
-    switch status {
-    case "success":
+    switch SendOutcomeStatus(rawValue: status) {
+    case .success:
         return "成功"
-    case "accepted":
+    case .accepted:
         return "已受理"
-    case "failed":
+    case .failed:
         return "失败"
-    default:
+    case let .other(rawValue):
+        let status = rawValue
         return status.isEmpty ? "-" : status
     }
 }
@@ -1522,6 +1547,10 @@ struct SendVerificationDecision {
     let reason: String
     let probeStatus: String
     let terminalState: String
+
+    var statusKind: SendOutcomeStatus {
+        SendOutcomeStatus(rawValue: status)
+    }
 }
 
 func evaluateSendVerificationDecision(
@@ -1570,6 +1599,10 @@ struct ParsedLoopOutcome {
     let probeStatus: String
     let terminalState: String
     let line: String
+
+    var statusKind: SendOutcomeStatus {
+        SendOutcomeStatus(rawValue: status)
+    }
 }
 
 func loopLastOutcome(_ loop: LoopSnapshot) -> ParsedLoopOutcome {
@@ -1649,10 +1682,10 @@ func loopResultLabel(_ loop: LoopSnapshot) -> String {
     let normalizedLine = outcome.line.localizedLowercase
     let fallbackFailureReason = loopFailureReasonFallback(loop)
 
-    if outcome.status == "success" {
+    if outcome.statusKind == .success {
         return "成功"
     }
-    if outcome.status == "accepted" {
+    if outcome.statusKind == .accepted {
         if outcome.reason == "verification_pending" {
             return "等待确认"
         }
@@ -1685,7 +1718,7 @@ func loopResultLabel(_ loop: LoopSnapshot) -> String {
             return localized
         }
     }
-    if outcome.status == "failed" || normalizedLine.contains("status=failed") {
+    if outcome.statusKind == .failed || normalizedLine.contains("status=failed") {
         return "失败"
     }
     if !fallbackFailureReason.isEmpty {
@@ -1832,9 +1865,9 @@ func formattedRecentSendStatsText(results: [SendResultSnapshot], formatEpoch: (S
         return "最近发送统计\n暂无匹配该 session 的发送结果。"
     }
 
-    let successCount = results.filter { $0.status == "success" }.count
-    let acceptedCount = results.filter { $0.status == "accepted" }.count
-    let failedResults = results.filter { $0.status == "failed" }
+    let successCount = results.filter { $0.statusKind == .success }.count
+    let acceptedCount = results.filter { $0.statusKind == .accepted }.count
+    let failedResults = results.filter { $0.statusKind == .failed }
     let failedCount = failedResults.count
 
     var reasonCounts: [String: Int] = [:]

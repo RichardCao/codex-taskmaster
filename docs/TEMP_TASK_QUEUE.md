@@ -23,15 +23,46 @@
 
 3. `in_progress` 核心模型类型化
    目标：继续把布尔、时间和状态字段从字符串协议升级为更明确的类型。
+   当前子任务：
+   - `done` loop 布尔字段类型化
+   - `done` session `updatedAtEpoch` 类型化
+   - `done` loop `nextRunEpoch` 类型化
+   - `done` session `terminalState` 过渡访问器
+   - `done` session `status` 过渡访问器
+   - `in_progress` send / loop `status` 与 `reason` 过渡访问器
+   - `done` send / loop `status` 过渡访问器
+   - `pending` send / loop `reason` 过渡访问器
+   - `pending` session / loop typed accessor 覆盖剩余裸字符串判断
+   - `pending` 评估是否将存储字段进一步改为 enum，而非仅保留 accessor
+   - `pending` 类型化回归测试补齐
 
 4. `pending` merge / parser / fallback 规则收口
    目标：继续把快照合并、字段保留和 fallback 规则从 UI 下沉到 core / service。
+   当前子任务：
+   - `pending` loop snapshot merge fallback 下沉到 core
+   - `pending` session refresh merge fallback 下沉到 core
+   - `pending` parser 入口统一使用共享 helper
+   - `pending` UI 层只保留展示，不再携带 merge 语义
 
 5. `pending` 刷新调度边界收口
    目标：统一 loop 刷新、request pump、session 状态自动刷新等调度入口，明确去重、节流和取消。
+   当前子任务：
+   - `pending` loop 刷新触发源盘点与收口
+   - `pending` session 自动刷新触发源盘点与收口
+   - `pending` request pump / timer 去重与取消边界收口
 
 6. `pending` 测试补强
    目标：补 parser / merge / localization、send runtime 决策矩阵、helper 状态变更与受限环境预期测试。
+   当前子任务：
+   - `pending` parser / merge 回归测试
+   - `pending` localization 回归测试
+   - `pending` send runtime 决策矩阵测试
+   - `pending` helper 状态变更与受限环境测试
 
 7. `pending` 单 loop + 多策略模型
    目标：同一 session 保留多个停止态历史 loop 配置，但同一时刻只允许一个运行态 loop。
+   当前子任务：
+   - `pending` 运行态唯一约束下沉到 core/helper
+   - `pending` 停止态历史 loop 存储模型梳理
+   - `pending` UI 展示与操作路径适配
+   - `pending` 互斥与迁移测试
