@@ -475,6 +475,18 @@ final class SendRequestCoordinator {
     typealias HelperCommandResult = (status: Int32, stdout: String, stderr: String)
     typealias ProbeResult = (status: Int32, values: [String: String], stdout: String, stderr: String)
 
+    private struct QueuedSendExecutionContext {
+        let activeProbe: ProbeResult
+        let resolution: LiveTTYResolution?
+        let probeStatus: String
+        let terminalState: String
+        let tty: String
+        let previousUserTimestamp: String
+        let preflightDetail: String
+        let preflightDecision: SendPreflightDecision
+        let clearResidualInputBeforeSend: Bool
+    }
+
     private let pendingRequestDirectoryPath: String
     private let processingRequestDirectoryPath: String
     private let resultRequestDirectoryPath: String
@@ -931,6 +943,38 @@ final class SendRequestCoordinator {
         return (initialProbe, resolvedTTY, resolution)
     }
 
+    private func prepareQueuedSendExecutionContext(
+        target: String,
+        forceSend: Bool,
+        initialProbe: ProbeResult
+    ) -> QueuedSendExecutionContext {
+        let preparedProbe = prepareProbeForSend(target: target, initialProbe: initialProbe)
+        let activeProbe = preparedProbe.probe
+        let probeStatus = activeProbe.values["status"] ?? "unknown"
+        let terminalState = activeProbe.values["terminal_state"] ?? "unknown"
+        let previousUserTimestamp = activeProbe.values["last_user_message_at"] ?? ""
+        let preflightDetail = probeDetail(activeProbe, resolution: preparedProbe.resolution)
+        let preflightDecision = evaluateSendPreflight(
+            forceSend: forceSend,
+            tty: preparedProbe.tty,
+            probeStatus: probeStatus,
+            terminalState: terminalState,
+            detail: preflightDetail
+        )
+
+        return QueuedSendExecutionContext(
+            activeProbe: activeProbe,
+            resolution: preparedProbe.resolution,
+            probeStatus: probeStatus,
+            terminalState: terminalState,
+            tty: preparedProbe.tty,
+            previousUserTimestamp: previousUserTimestamp,
+            preflightDetail: preflightDetail,
+            preflightDecision: preflightDecision,
+            clearResidualInputBeforeSend: preflightDecision.shouldClearResidualInput
+        )
+    }
+
     private func appendLiveTTYResolutionDetail(_ baseDetail: String, resolution: LiveTTYResolution?) -> String {
         guard let resolution else { return baseDetail }
 
@@ -1052,30 +1096,20 @@ final class SendRequestCoordinator {
             return
         }
 
-        let preparedProbe = prepareProbeForSend(target: target, initialProbe: initialProbe)
-        let activeProbe = preparedProbe.probe
-        let probeStatus = activeProbe.values["status"] ?? "unknown"
-        let terminalState = activeProbe.values["terminal_state"] ?? "unknown"
-        let tty = preparedProbe.tty
-        let previousUserTimestamp = activeProbe.values["last_user_message_at"] ?? ""
-        let preflightDetail = probeDetail(activeProbe, resolution: preparedProbe.resolution)
-        let preflightDecision = evaluateSendPreflight(
+        let context = prepareQueuedSendExecutionContext(
+            target: target,
             forceSend: forceSend,
-            tty: tty,
-            probeStatus: probeStatus,
-            terminalState: terminalState,
-            detail: preflightDetail
+            initialProbe: initialProbe
         )
-        let clearResidualInputBeforeSend = preflightDecision.shouldClearResidualInput
 
-        guard preflightDecision.canSend else {
+        guard context.preflightDecision.canSend else {
             finishQueuedSendPreflightFailure(
                 target: target,
                 forceSend: forceSend,
-                probeStatus: probeStatus,
-                terminalState: terminalState,
-                detail: preflightDetail,
-                failureReason: preflightDecision.failureReason,
+                probeStatus: context.probeStatus,
+                terminalState: context.terminalState,
+                detail: context.preflightDetail,
+                failureReason: context.preflightDecision.failureReason,
                 finish: finishQueuedRequest
             )
             return
@@ -1085,18 +1119,18 @@ final class SendRequestCoordinator {
         do {
             usedTTY = try sendWithLiveTTYRecovery(
                 target: target,
-                initialTTY: tty,
+                initialTTY: context.tty,
                 message: message,
-                clearExistingInput: clearResidualInputBeforeSend
+                clearExistingInput: context.clearResidualInputBeforeSend
             )
         } catch {
             finishQueuedSendDeliveryFailure(
                 target: target,
                 forceSend: forceSend,
-                probeStatus: probeStatus,
-                terminalState: terminalState,
+                probeStatus: context.probeStatus,
+                terminalState: context.terminalState,
                 error: error,
-                resolution: preparedProbe.resolution,
+                resolution: context.resolution,
                 finish: finishQueuedRequest
             )
             return
@@ -1104,14 +1138,14 @@ final class SendRequestCoordinator {
 
         let verification = verifyUserMessageAdvanced(
             target: target,
-            previousTimestamp: previousUserTimestamp,
+            previousTimestamp: context.previousUserTimestamp,
             timeoutSeconds: max(8, min(timeoutSeconds.doubleValue, 14))
         )
         let verificationDecision = evaluateSendVerificationDecision(
             verificationSucceeded: verification.success,
             forceSend: forceSend,
-            initialProbeStatus: probeStatus,
-            initialTerminalState: terminalState,
+            initialProbeStatus: context.probeStatus,
+            initialTerminalState: context.terminalState,
             verificationProbeStatusCode: verification.probe.status,
             verificationProbeStatus: verification.probe.values["status"] ?? "unknown",
             verificationReason: verification.probe.values["reason"] ?? "",
@@ -1121,10 +1155,10 @@ final class SendRequestCoordinator {
             target: target,
             forceSend: forceSend,
             usedTTY: usedTTY,
-            clearExistingInput: clearResidualInputBeforeSend,
+            clearExistingInput: context.clearResidualInputBeforeSend,
             verification: verification,
             verificationDecision: verificationDecision,
-            resolution: preparedProbe.resolution,
+            resolution: context.resolution,
             finish: finishQueuedRequest
         )
     }
