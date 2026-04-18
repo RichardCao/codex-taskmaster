@@ -353,6 +353,7 @@
 - provider migration 退出 loading / 执行态时的按钮恢复收口到控制器 helper
 - provider migration 的取消状态回写收口到控制器 helper
 - `LoopSnapshot` / `SessionSnapshot` 的布尔与 epoch 访问收口到 typed accessor
+- session detail 预览/完整文档组装收口到控制器 helper
 
 下一步建议：
 

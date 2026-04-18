@@ -3344,6 +3344,28 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }.joined(separator: "\n\n")
     }
 
+    private func formattedSessionDetailSection(for session: SessionSnapshot) -> String {
+        formattedSessionDetailText(session: session, updatedText: formatEpoch(session.updatedAtEpoch))
+    }
+
+    private func formattedSessionDetailPreview(for session: SessionSnapshot, sendResults: [SendResultSnapshot]) -> String {
+        formattedSessionDetailPreviewDocument(
+            sessionDetailText: formattedSessionDetailSection(for: session),
+            sendStatsText: formattedRecentSendStatsText(results: sendResults, formatEpoch: formatEpoch(_:)),
+            loopOccupancyText: formattedLoopOccupancyText(loops: matchingLoopSnapshots(for: session), formatEpoch: formatEpoch(_:))
+        )
+    }
+
+    private func composedSessionDetailDocument(for session: SessionSnapshot, sendResults: [SendResultSnapshot], historyText: String) -> String {
+        formattedSessionDetailDocument(
+            sessionDetailText: formattedSessionDetailSection(for: session),
+            sendStatsText: formattedRecentSendStatsText(results: sendResults, formatEpoch: formatEpoch(_:)),
+            loopOccupancyText: formattedLoopOccupancyText(loops: matchingLoopSnapshots(for: session), formatEpoch: formatEpoch(_:)),
+            sendResultsText: formattedRecentSendResultsText(results: sendResults, formatEpoch: formatEpoch(_:)),
+            historyText: historyText
+        )
+    }
+
     private func updateSessionDetailView() {
         guard let session = selectedSessionSnapshot() else {
             renameField.stringValue = ""
@@ -3366,11 +3388,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         restoreSelectedSessionActionControls(selectedSessionIsArchived: session.isArchived)
         renameField.placeholderString = sessionRenamePlaceholderText(isArchived: session.isArchived)
         let sendResults = recentSendResults(for: session)
-        let initialDetailText = formattedSessionDetailPreviewDocument(
-            sessionDetailText: formattedSessionDetailText(session: session, updatedText: formatEpoch(session.updatedAtEpoch)),
-            sendStatsText: formattedRecentSendStatsText(results: sendResults, formatEpoch: formatEpoch(_:)),
-            loopOccupancyText: formattedLoopOccupancyText(loops: matchingLoopSnapshots(for: session), formatEpoch: formatEpoch(_:))
-        )
+        let initialDetailText = formattedSessionDetailPreview(for: session, sendResults: sendResults)
         let shouldResetForInitialText = lastSessionDetailThreadID != session.threadID || lastSessionDetailText != initialDetailText
         if sessionDetailView.string != initialDetailText {
             sessionDetailView.string = initialDetailText
@@ -3392,13 +3410,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         DispatchQueue.global(qos: .utility).async {
             let historyText = self.loadPromptHistoryText(for: session)
             let sendResults = self.recentSendResults(for: session)
-            let detailText = formattedSessionDetailDocument(
-                sessionDetailText: formattedSessionDetailText(session: session, updatedText: self.formatEpoch(session.updatedAtEpoch)),
-                sendStatsText: formattedRecentSendStatsText(results: sendResults, formatEpoch: self.formatEpoch(_:)),
-                loopOccupancyText: formattedLoopOccupancyText(loops: self.matchingLoopSnapshots(for: session), formatEpoch: self.formatEpoch(_:)),
-                sendResultsText: formattedRecentSendResultsText(results: sendResults, formatEpoch: self.formatEpoch(_:)),
-                historyText: historyText
-            )
+            let detailText = self.composedSessionDetailDocument(for: session, sendResults: sendResults, historyText: historyText)
 
             DispatchQueue.main.async {
                 guard self.sessionDetailLoadGeneration == generation else { return }
@@ -5110,7 +5122,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     @discardableResult
     private func saveStoppedLoopEntry(target: String, interval: String, message: String, forceSend: Bool, reason: String) -> Bool {
-        if loopSnapshots.contains(where: { $0.target == target && $0.stopped != "yes" }) {
+        if loopSnapshots.contains(where: { $0.target == target && !$0.isStopped }) {
             return false
         }
         let success = loopCommandService.saveStoppedLoopEntry(
