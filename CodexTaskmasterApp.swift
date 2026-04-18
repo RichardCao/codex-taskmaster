@@ -2958,6 +2958,64 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
+    private func loadAndExecuteSelectedSessionProviderMigration(
+        session: SessionSnapshot,
+        targetProvider: String
+    ) {
+        sessionProviderPlanAsync(threadID: session.threadID, targetProvider: targetProvider) { plan in
+            guard let plan = self.resolvedProviderMigrationPlan(
+                plan,
+                failureLogText: sessionProviderMigrationPlanFailureLogText()
+            ) else { return }
+
+            let isSubagent = (plan["is_subagent"] ?? "no") == "yes"
+            let familyCount = Int(plan["family_count"] ?? "1") ?? 1
+            let familyMigrateNeeded = Int(plan["family_migrate_needed_count"] ?? "0") ?? 0
+            let currentProvider = plan["current_provider"] ?? session.provider
+            let directChildCount = Int(plan["direct_child_count"] ?? "0") ?? 0
+            let currentProviderDisplay = currentProvider.isEmpty ? "-" : currentProvider
+
+            if currentProvider == targetProvider && familyMigrateNeeded == 0 {
+                self.handleProviderMigrationNoop(
+                    informativeText: sessionProviderMigrationNoopAlertText(
+                        currentProviderDisplay: currentProviderDisplay,
+                        targetProvider: targetProvider,
+                        familyCount: familyCount
+                    ),
+                    logText: sessionProviderMigrationNoopLogText(targetProvider: targetProvider)
+                )
+                return
+            }
+
+            guard let includeFamily = self.promptForSessionProviderMigration(
+                session: session,
+                targetProvider: targetProvider,
+                currentProviderDisplay: currentProviderDisplay,
+                isSubagent: isSubagent,
+                familyCount: familyCount,
+                familyMigrateNeeded: familyMigrateNeeded,
+                directChildCount: directChildCount
+            ) else { return }
+
+            self.performProviderMigrationExecution(
+                runningStatusText: sessionProviderMigrationRunningStatusText(),
+                startLogText: sessionProviderMigrationStartLogText(
+                    threadID: session.threadID,
+                    targetProvider: targetProvider,
+                    includeFamily: includeFamily
+                ),
+                completionStatusText: sessionProviderMigrationCompletionStatusText(),
+                failureStatusText: sessionProviderMigrationFailureStatusText()
+            ) {
+                self.migrateSessionProvider(
+                    threadID: session.threadID,
+                    targetProvider: targetProvider,
+                    includeFamily: includeFamily
+                )
+            }
+        }
+    }
+
     private func applySessionStatusRefreshResult(_ resultKind: SessionStatusRefreshResultKind) {
         switch resultKind {
         case .success:
@@ -6255,58 +6313,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func migrateSelectedSessionToCurrentProvider() {
         withSelectedSession(logText: sessionProviderMigrationSelectionRequiredLogText()) { session in
             withProviderMigrationTargetProvider { targetProvider in
-                self.sessionProviderPlanAsync(threadID: session.threadID, targetProvider: targetProvider) { plan in
-                    guard let plan = self.resolvedProviderMigrationPlan(
-                        plan,
-                        failureLogText: sessionProviderMigrationPlanFailureLogText()
-                    ) else { return }
-
-                    let isSubagent = (plan["is_subagent"] ?? "no") == "yes"
-                    let familyCount = Int(plan["family_count"] ?? "1") ?? 1
-                    let familyMigrateNeeded = Int(plan["family_migrate_needed_count"] ?? "0") ?? 0
-                    let currentProvider = plan["current_provider"] ?? session.provider
-                    let directChildCount = Int(plan["direct_child_count"] ?? "0") ?? 0
-                    let currentProviderDisplay = currentProvider.isEmpty ? "-" : currentProvider
-
-                    if currentProvider == targetProvider && familyMigrateNeeded == 0 {
-                        self.handleProviderMigrationNoop(
-                            informativeText: sessionProviderMigrationNoopAlertText(
-                                currentProviderDisplay: currentProviderDisplay,
-                                targetProvider: targetProvider,
-                                familyCount: familyCount
-                            ),
-                            logText: sessionProviderMigrationNoopLogText(targetProvider: targetProvider)
-                        )
-                        return
-                    }
-
-                    guard let includeFamily = self.promptForSessionProviderMigration(
-                        session: session,
-                        targetProvider: targetProvider,
-                        currentProviderDisplay: currentProviderDisplay,
-                        isSubagent: isSubagent,
-                        familyCount: familyCount,
-                        familyMigrateNeeded: familyMigrateNeeded,
-                        directChildCount: directChildCount
-                    ) else { return }
-
-                    self.performProviderMigrationExecution(
-                        runningStatusText: sessionProviderMigrationRunningStatusText(),
-                        startLogText: sessionProviderMigrationStartLogText(
-                            threadID: session.threadID,
-                            targetProvider: targetProvider,
-                            includeFamily: includeFamily
-                        ),
-                        completionStatusText: sessionProviderMigrationCompletionStatusText(),
-                        failureStatusText: sessionProviderMigrationFailureStatusText()
-                    ) {
-                        self.migrateSessionProvider(
-                            threadID: session.threadID,
-                            targetProvider: targetProvider,
-                            includeFamily: includeFamily
-                        )
-                    }
-                }
+                self.loadAndExecuteSelectedSessionProviderMigration(
+                    session: session,
+                    targetProvider: targetProvider
+                )
             }
         }
     }
