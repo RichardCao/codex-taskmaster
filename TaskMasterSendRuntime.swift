@@ -527,18 +527,36 @@ final class SendRequestCoordinator {
             return
         }
 
-        guard let nextRequestURL = (try? FileManager.default.contentsOfDirectory(
-            at: pendingDirectoryURL,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ))?
-            .filter({ $0.pathExtension == "json" })
-            .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
-            .first else {
+        guard let nextRequestURL = nextPendingRequestURL(in: pendingDirectoryURL) else {
             finishProcessingRequest()
             return
         }
 
+        guard let processingURL = movePendingRequestToProcessing(
+            nextRequestURL: nextRequestURL,
+            processingDirectoryURL: processingDirectoryURL
+        ) else {
+            finishProcessingRequest()
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            self.handleQueuedSendRequest(at: processingURL)
+        }
+    }
+
+    private func nextPendingRequestURL(in pendingDirectoryURL: URL) -> URL? {
+        (try? FileManager.default.contentsOfDirectory(
+            at: pendingDirectoryURL,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ))?
+            .filter { $0.pathExtension == "json" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .first
+    }
+
+    private func movePendingRequestToProcessing(nextRequestURL: URL, processingDirectoryURL: URL) -> URL? {
         let processingURL = processingDirectoryURL.appendingPathComponent(nextRequestURL.lastPathComponent)
 
         do {
@@ -546,13 +564,9 @@ final class SendRequestCoordinator {
                 try FileManager.default.removeItem(at: processingURL)
             }
             try FileManager.default.moveItem(at: nextRequestURL, to: processingURL)
+            return processingURL
         } catch {
-            finishProcessingRequest()
-            return
-        }
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            self.handleQueuedSendRequest(at: processingURL)
+            return nil
         }
     }
 
