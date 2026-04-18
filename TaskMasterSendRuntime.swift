@@ -601,6 +601,19 @@ final class SendRequestCoordinator {
         try FileManager.default.moveItem(at: tempURL, to: url)
     }
 
+    private func resultURL(for processingURL: URL) -> URL {
+        URL(fileURLWithPath: resultRequestDirectoryPath, isDirectory: true)
+            .appendingPathComponent(processingURL.deletingPathExtension().deletingPathExtension().lastPathComponent + ".result.json")
+    }
+
+    private func finishQueuedSendRequest(processingURL: URL, resultURL: URL, result: [String: Any]) {
+        do {
+            try writeJSONFile(at: resultURL, object: result)
+        } catch {}
+        try? FileManager.default.removeItem(at: processingURL)
+        finishProcessingRequest()
+    }
+
     private func finishFailedSendRequest(
         target: String,
         forceSend: Bool,
@@ -892,16 +905,7 @@ final class SendRequestCoordinator {
     }
 
     private func handleQueuedSendRequest(at processingURL: URL) {
-        let resultURL = URL(fileURLWithPath: resultRequestDirectoryPath, isDirectory: true)
-            .appendingPathComponent(processingURL.deletingPathExtension().deletingPathExtension().lastPathComponent + ".result.json")
-
-        func finish(with result: [String: Any]) {
-            do {
-                try writeJSONFile(at: resultURL, object: result)
-            } catch {}
-            try? FileManager.default.removeItem(at: processingURL)
-            finishProcessingRequest()
-        }
+        let resultURL = resultURL(for: processingURL)
 
         let payload: [String: Any]
         do {
@@ -912,7 +916,7 @@ final class SendRequestCoordinator {
                 forceSend: false,
                 reason: "invalid_request",
                 detail: "failed to read request: \(error.localizedDescription)",
-                finish: finish
+                finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
             )
             return
         }
@@ -923,7 +927,7 @@ final class SendRequestCoordinator {
                 forceSend: false,
                 reason: "invalid_request",
                 detail: "request file is missing target, message, or timeout_seconds",
-                finish: finish
+                finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
             )
             return
         }
@@ -941,7 +945,7 @@ final class SendRequestCoordinator {
                 forceSend: forceSend,
                 reason: failureReason,
                 detail: detail,
-                finish: finish
+                finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
             )
             return
         }
@@ -972,7 +976,7 @@ final class SendRequestCoordinator {
                 detail: detail,
                 probeStatus: probeStatus,
                 terminalState: terminalState,
-                finish: finish
+                finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
             )
             return
         }
@@ -995,7 +999,7 @@ final class SendRequestCoordinator {
                 detail: detail,
                 probeStatus: probeStatus,
                 terminalState: terminalState,
-                finish: finish
+                finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
             )
             return
         }
@@ -1029,7 +1033,7 @@ final class SendRequestCoordinator {
                 probeStatus: verificationDecision.probeStatus,
                 terminalState: verificationDecision.terminalState,
                 color: .systemGreen,
-                finish: finish
+                finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
             )
             return
         }
@@ -1046,7 +1050,7 @@ final class SendRequestCoordinator {
                 probeStatus: verificationDecision.probeStatus,
                 terminalState: verificationDecision.terminalState,
                 color: .systemOrange,
-                finish: finish
+                finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
             )
             return
         }
@@ -1062,7 +1066,7 @@ final class SendRequestCoordinator {
             probeStatus: verificationDecision.probeStatus,
             terminalState: verificationDecision.terminalState,
             color: .systemOrange,
-            finish: finish
+            finish: { self.finishQueuedSendRequest(processingURL: processingURL, resultURL: resultURL, result: $0) }
         )
     }
 }
