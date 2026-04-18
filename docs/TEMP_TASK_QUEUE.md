@@ -54,7 +54,7 @@
    目标：统一 loop 刷新、request pump、session 状态自动刷新等调度入口，明确去重、节流和取消。
    当前子任务：
    - `done` loop 刷新触发源盘点与收口
-   - `pending` session 自动刷新触发源盘点与收口
+   - `done` session 自动刷新触发源盘点与收口
    - `pending` request pump / timer 去重与取消边界收口
 
 6. `pending` 测试补强

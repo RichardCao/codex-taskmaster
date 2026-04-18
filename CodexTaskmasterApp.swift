@@ -2053,6 +2053,51 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         restoreSessionSelection(preferredThreadID: preserveSelectionThreadID)
     }
 
+    private func probeSessionStatusRefreshSnapshots(
+        _ snapshots: [SessionSnapshot],
+        collectFailures: Bool = true,
+        completion: @escaping (_ refreshedSnapshots: [SessionSnapshot], _ failedThreadIDs: [String]) -> Void
+    ) {
+        guard !snapshots.isEmpty else {
+            completion([], [])
+            return
+        }
+
+        let semaphore = DispatchSemaphore(value: sessionStatusRefreshMaxConcurrentJobs)
+        let group = DispatchGroup()
+        let resultLock = NSLock()
+        var refreshedSnapshots: [SessionSnapshot] = []
+        var failedThreadIDs: [String] = []
+
+        for snapshot in snapshots {
+            group.enter()
+            DispatchQueue.global(qos: .utility).async {
+                semaphore.wait()
+                defer {
+                    semaphore.signal()
+                    group.leave()
+                }
+
+                guard case let .success(refreshed) = self.sessionScanService.probeSession(threadID: snapshot.threadID) else {
+                    guard collectFailures else { return }
+                    resultLock.lock()
+                    failedThreadIDs.append(snapshot.threadID)
+                    resultLock.unlock()
+                    return
+                }
+
+                let merged = mergeSessionSnapshotAfterStatusRefresh(previous: snapshot, refreshed: refreshed)
+                resultLock.lock()
+                refreshedSnapshots.append(merged)
+                resultLock.unlock()
+            }
+        }
+
+        group.notify(queue: .main) {
+            completion(refreshedSnapshots, failedThreadIDs)
+        }
+    }
+
     private func refreshLoadedSessionStatusesInBackground(showProgress: Bool) {
         guard !isSessionScanRunning else {
             if showProgress {
@@ -2087,36 +2132,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
 
         let preservedSelectionThreadID = selectedSessionThreadID()
-        let semaphore = DispatchSemaphore(value: sessionStatusRefreshMaxConcurrentJobs)
-        let group = DispatchGroup()
-        let resultLock = NSLock()
-        var refreshedSnapshots: [SessionSnapshot] = []
-        var failedThreadIDs: [String] = []
-
-        for snapshot in claimedSnapshots {
-            group.enter()
-            DispatchQueue.global(qos: .utility).async {
-                semaphore.wait()
-                defer {
-                    semaphore.signal()
-                    group.leave()
-                }
-
-                guard case let .success(refreshed) = self.sessionScanService.probeSession(threadID: snapshot.threadID) else {
-                    resultLock.lock()
-                    failedThreadIDs.append(snapshot.threadID)
-                    resultLock.unlock()
-                    return
-                }
-
-                let merged = mergeSessionSnapshotAfterStatusRefresh(previous: snapshot, refreshed: refreshed)
-                resultLock.lock()
-                refreshedSnapshots.append(merged)
-                resultLock.unlock()
-            }
-        }
-
-        group.notify(queue: .main) {
+        probeSessionStatusRefreshSnapshots(claimedSnapshots, collectFailures: true) { refreshedSnapshots, failedThreadIDs in
             let completionDate = Date()
             for resolved in resolveClaimedSessionRefreshSnapshots(claimed: claimedSnapshots, refreshed: refreshedSnapshots) {
                 self.sessionStatusRefreshCoordinator.scheduleNext(for: resolved, from: completionDate)
@@ -3058,32 +3074,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         guard !dueSnapshots.isEmpty else { return }
 
         let preservedSelectionThreadID = selectedSessionThreadID()
-        let semaphore = DispatchSemaphore(value: sessionStatusRefreshMaxConcurrentJobs)
-        let group = DispatchGroup()
-        let resultLock = NSLock()
-        var refreshedSnapshots: [SessionSnapshot] = []
-
-        for snapshot in dueSnapshots {
-            group.enter()
-            DispatchQueue.global(qos: .utility).async {
-                semaphore.wait()
-                defer {
-                    semaphore.signal()
-                    group.leave()
-                }
-
-                guard case let .success(refreshed) = self.sessionScanService.probeSession(threadID: snapshot.threadID) else {
-                    return
-                }
-
-                let merged = mergeSessionSnapshotAfterStatusRefresh(previous: snapshot, refreshed: refreshed)
-                resultLock.lock()
-                refreshedSnapshots.append(merged)
-                resultLock.unlock()
-            }
-        }
-
-        group.notify(queue: .main) {
+        probeSessionStatusRefreshSnapshots(dueSnapshots, collectFailures: false) { refreshedSnapshots, _ in
             let completionDate = Date()
             for resolved in resolveClaimedSessionRefreshSnapshots(claimed: dueSnapshots, refreshed: refreshedSnapshots) {
                 self.sessionStatusRefreshCoordinator.scheduleNext(for: resolved, from: completionDate)
