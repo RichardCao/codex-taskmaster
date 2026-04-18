@@ -2543,6 +2543,40 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
+    private func loadAndExecuteSessionDelete(
+        session: SessionSnapshot,
+        matchingLoopTargets: [String]
+    ) {
+        beginSessionDeletePlanLoading()
+
+        sessionFamilyPlanAsync(threadID: session.threadID) { familyPlan in
+            self.sessionDeletePlanAsync(threadID: session.threadID) { deletePlan in
+                self.finishSessionDeletePlanLoading()
+
+                guard let deletePlan else {
+                    self.handleSessionDeletePlanLoadingFailure()
+                    return
+                }
+
+                guard let deletionPlan = self.promptForSessionDeletion(
+                    session: session,
+                    matchingLoopTargets: matchingLoopTargets,
+                    familyPlan: familyPlan,
+                    deletePlan: deletePlan
+                ) else {
+                    self.handleSessionDeleteCancelled()
+                    return
+                }
+
+                let threadIDs = self.resolvedSessionDeleteThreadIDs(
+                    threadID: session.threadID,
+                    deletionPlan: deletionPlan
+                )
+                self.performSessionDeleteAction(session: session, threadIDs: threadIDs)
+            }
+        }
+    }
+
     private func performSessionRenameExecution(
         session: SessionSnapshot,
         newName: String
@@ -6210,34 +6244,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func deleteSelectedSession() {
         withSelectedSession(logText: sessionDeleteSelectionRequiredLogText()) { session in
             let matchingLoopTargets = loopTargetsAffectingSession(session)
-            beginSessionDeletePlanLoading()
-
-            sessionFamilyPlanAsync(threadID: session.threadID) { familyPlan in
-                self.sessionDeletePlanAsync(threadID: session.threadID) { deletePlan in
-                    self.finishSessionDeletePlanLoading()
-
-                    guard let deletePlan else {
-                        self.handleSessionDeletePlanLoadingFailure()
-                        return
-                    }
-
-                    guard let deletionPlan = self.promptForSessionDeletion(
-                        session: session,
-                        matchingLoopTargets: matchingLoopTargets,
-                        familyPlan: familyPlan,
-                        deletePlan: deletePlan
-                    ) else {
-                        self.handleSessionDeleteCancelled()
-                        return
-                    }
-
-                    let threadIDs = self.resolvedSessionDeleteThreadIDs(
-                        threadID: session.threadID,
-                        deletionPlan: deletionPlan
-                    )
-                    self.performSessionDeleteAction(session: session, threadIDs: threadIDs)
-                }
-            }
+            self.loadAndExecuteSessionDelete(
+                session: session,
+                matchingLoopTargets: matchingLoopTargets
+            )
         }
     }
 
