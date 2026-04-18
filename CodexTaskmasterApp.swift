@@ -5244,8 +5244,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func maybeShowLoopAmbiguityAlerts(_ loops: [LoopSnapshot]) {
         var currentSignatures: Set<String> = []
         for loop in loops {
-            let reasons = [loop.stoppedReason, loop.pauseReason, loop.failureReason]
-            let hasAmbiguousReason = reasons.contains { $0 == "ambiguous_target" }
+            let reasons = [loop.stoppedReasonKind, loop.pauseReasonKind, loop.failureReasonKind]
+            let hasAmbiguousReason = reasons.contains { $0 == .ambiguousTarget }
             let logMentionsAmbiguous = loop.lastLogLine.contains("ambiguous_target")
             guard hasAmbiguousReason || logMentionsAmbiguous else { continue }
             let detail = loop.lastLogLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

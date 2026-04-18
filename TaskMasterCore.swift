@@ -689,6 +689,18 @@ struct LoopSnapshot {
     var nextRunTimeInterval: TimeInterval? {
         nextRunEpoch > 0 ? nextRunEpoch : nil
     }
+
+    var stoppedReasonKind: SendOutcomeReason {
+        SendOutcomeReason(rawValue: stoppedReason.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase)
+    }
+
+    var pauseReasonKind: SendOutcomeReason {
+        SendOutcomeReason(rawValue: pauseReason.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase)
+    }
+
+    var failureReasonKind: SendOutcomeReason {
+        SendOutcomeReason(rawValue: failureReason.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase)
+    }
 }
 
 struct SessionSnapshot {
@@ -1728,7 +1740,12 @@ func loopLastOutcome(_ loop: LoopSnapshot) -> ParsedLoopOutcome {
 }
 
 func loopFailureReasonFallback(_ loop: LoopSnapshot) -> String {
-    loop.failureReason.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+    switch loop.failureReasonKind {
+    case let .other(rawValue):
+        return rawValue
+    default:
+        return loop.failureReason.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+    }
 }
 
 func loopFallbackResultLabel(for failureReason: String) -> String {
@@ -1884,7 +1901,8 @@ func loopResultReasonLabel(_ loop: LoopSnapshot) -> String {
         return localizedSendReason(loop.stoppedReason)
     }
     if loop.isPaused {
-        return localizedSendReason(loop.pauseReason.isEmpty ? loop.failureReason : loop.pauseReason)
+        let reason = loop.pauseReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? loop.failureReason : loop.pauseReason
+        return localizedSendReason(reason)
     }
     let outcome = loopLastOutcome(loop)
     let outcomeReason = formattedLoopOutcomeReason(
