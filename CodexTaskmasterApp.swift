@@ -4763,33 +4763,30 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     @objc
     private func exportSelectedSessionLogs() {
-        guard let session = selectedSessionSnapshot() else {
-            handleSessionSelectionRequired(logText: "请先选择一条 Session，再导出相关日志。")
-            return
-        }
-
-        let matchingEntries = activityLogEntries.filter { activityLogEntry($0, matches: session) }
-        guard !matchingEntries.isEmpty else {
-            appendOutput("当前选中的 Session 暂无匹配日志可导出。")
-            setStatus("当前 Session 暂无日志", key: "general")
-            NSSound.beep()
-            return
-        }
-
-        let panel = NSSavePanel()
-        panel.canCreateDirectories = true
-        panel.isExtensionHidden = false
-        panel.allowedContentTypes = [.plainText]
-        panel.nameFieldStringValue = defaultSessionLogFilename(for: session)
-
-        if panel.runModal() == .OK, let url = panel.url {
-            do {
-                try renderedActivityLogText(for: matchingEntries).write(to: url, atomically: true, encoding: .utf8)
-                setStatus("已导出当前 Session 日志", key: "general")
-            } catch {
+        withSelectedSession(logText: "请先选择一条 Session，再导出相关日志。") { session in
+            let matchingEntries = activityLogEntries.filter { activityLogEntry($0, matches: session) }
+            guard !matchingEntries.isEmpty else {
+                appendOutput("当前选中的 Session 暂无匹配日志可导出。")
+                setStatus("当前 Session 暂无日志", key: "general")
                 NSSound.beep()
-                appendOutput("stderr: 导出当前 Session 日志失败: \(error.localizedDescription)")
-                setStatus("导出 Session 日志失败", key: "general")
+                return
+            }
+
+            let panel = NSSavePanel()
+            panel.canCreateDirectories = true
+            panel.isExtensionHidden = false
+            panel.allowedContentTypes = [.plainText]
+            panel.nameFieldStringValue = defaultSessionLogFilename(for: session)
+
+            if panel.runModal() == .OK, let url = panel.url {
+                do {
+                    try renderedActivityLogText(for: matchingEntries).write(to: url, atomically: true, encoding: .utf8)
+                    setStatus("已导出当前 Session 日志", key: "general")
+                } catch {
+                    NSSound.beep()
+                    appendOutput("stderr: 导出当前 Session 日志失败: \(error.localizedDescription)")
+                    setStatus("导出 Session 日志失败", key: "general")
+                }
             }
         }
     }
