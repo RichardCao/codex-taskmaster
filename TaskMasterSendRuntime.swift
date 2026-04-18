@@ -1037,6 +1037,34 @@ final class SendRequestCoordinator {
         )
     }
 
+    private func performQueuedSendDelivery(
+        target: String,
+        message: String,
+        forceSend: Bool,
+        context: QueuedSendExecutionContext,
+        finish: ([String: Any]) -> Void
+    ) -> String? {
+        do {
+            return try sendWithLiveTTYRecovery(
+                target: target,
+                initialTTY: context.tty,
+                message: message,
+                clearExistingInput: context.clearResidualInputBeforeSend
+            )
+        } catch {
+            finishQueuedSendDeliveryFailure(
+                target: target,
+                forceSend: forceSend,
+                probeStatus: context.probeStatus,
+                terminalState: context.terminalState,
+                error: error,
+                resolution: context.resolution,
+                finish: finish
+            )
+            return nil
+        }
+    }
+
     private func appendLiveTTYResolutionDetail(_ baseDetail: String, resolution: LiveTTYResolution?) -> String {
         guard let resolution else { return baseDetail }
 
@@ -1173,24 +1201,13 @@ final class SendRequestCoordinator {
             return
         }
 
-        let usedTTY: String
-        do {
-            usedTTY = try sendWithLiveTTYRecovery(
-                target: target,
-                initialTTY: context.tty,
-                message: message,
-                clearExistingInput: context.clearResidualInputBeforeSend
-            )
-        } catch {
-            finishQueuedSendDeliveryFailure(
-                target: target,
-                forceSend: forceSend,
-                probeStatus: context.probeStatus,
-                terminalState: context.terminalState,
-                error: error,
-                resolution: context.resolution,
-                finish: finishQueuedRequest
-            )
+        guard let usedTTY = performQueuedSendDelivery(
+            target: target,
+            message: message,
+            forceSend: forceSend,
+            context: context,
+            finish: finishQueuedRequest
+        ) else {
             return
         }
 
