@@ -1106,6 +1106,34 @@ func mergeSessionSnapshotAfterStatusRefresh(previous: SessionSnapshot, refreshed
     )
 }
 
+func mergeLoopSnapshot(previous: LoopSnapshot?, incoming: LoopSnapshot) -> LoopSnapshot {
+    guard let previous else { return incoming }
+
+    let incomingIsUnderspecified = !incoming.isStopped
+        && !incoming.isPaused
+        && incoming.failureReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        && incoming.lastLogLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+    guard incomingIsUnderspecified else { return incoming }
+
+    return LoopSnapshot(
+        target: incoming.target,
+        loopDaemonRunning: incoming.loopDaemonRunning,
+        intervalSeconds: incoming.intervalSeconds,
+        forceSend: incoming.forceSend,
+        message: incoming.message,
+        nextRunEpoch: incoming.nextRunEpoch,
+        stopped: incoming.stopped,
+        stoppedReason: incoming.stoppedReason,
+        paused: incoming.paused,
+        failureCount: incoming.failureCount == "0" ? previous.failureCount : incoming.failureCount,
+        failureReason: previous.failureReason,
+        pauseReason: incoming.pauseReason.isEmpty ? previous.pauseReason : incoming.pauseReason,
+        logPath: incoming.logPath == "-" ? previous.logPath : incoming.logPath,
+        lastLogLine: previous.lastLogLine
+    )
+}
+
 func parsedEpochTimeInterval(_ rawValue: Any?) -> TimeInterval {
     switch rawValue {
     case let value as TimeInterval:

@@ -14,6 +14,7 @@ struct TaskMasterCoreRegressionRunner {
         runLoopSnapshotAccessorChecks()
         runSessionSnapshotAccessorChecks()
         runMergeSessionSnapshotChecks()
+        runMergeLoopSnapshotChecks()
         runLocalizationChecks()
         runLoopStateLabelChecks()
         runProbeStateRuleChecks()
@@ -243,6 +244,48 @@ struct TaskMasterCoreRegressionRunner {
 
         let merged = mergeSessionSnapshots(existing: [older], newSnapshots: [newer])
         expect(merged.map(\.threadID) == ["thread-2", "thread-1"], "expected mergeSessionSnapshots to sort by newest updatedAt")
+    }
+
+    private static func runMergeLoopSnapshotChecks() {
+        let previous = LoopSnapshot(
+            target: "demo",
+            loopDaemonRunning: true,
+            intervalSeconds: "30",
+            forceSend: false,
+            message: "hello",
+            nextRunEpoch: 100,
+            stopped: false,
+            stoppedReason: "",
+            paused: false,
+            failureCount: "3",
+            failureReason: "tty_unavailable",
+            pauseReason: "verification_pending",
+            logPath: "/tmp/previous.log",
+            lastLogLine: "status=failed"
+        )
+        let incoming = LoopSnapshot(
+            target: "demo",
+            loopDaemonRunning: true,
+            intervalSeconds: "30",
+            forceSend: false,
+            message: "hello",
+            nextRunEpoch: 200,
+            stopped: false,
+            stoppedReason: "",
+            paused: false,
+            failureCount: "0",
+            failureReason: "",
+            pauseReason: "",
+            logPath: "-",
+            lastLogLine: ""
+        )
+
+        let merged = mergeLoopSnapshot(previous: previous, incoming: incoming)
+        expect(merged.failureCount == "3", "expected loop merge to preserve prior failure count when incoming is underspecified")
+        expect(merged.failureReason == "tty_unavailable", "expected loop merge to preserve prior failure reason when incoming is underspecified")
+        expect(merged.pauseReason == "verification_pending", "expected loop merge to preserve prior pause reason when incoming is underspecified")
+        expect(merged.logPath == "/tmp/previous.log", "expected loop merge to preserve prior log path placeholder fallback")
+        expect(merged.lastLogLine == "status=failed", "expected loop merge to preserve prior last log line when incoming is underspecified")
     }
 
     private static func runLocalizationChecks() {

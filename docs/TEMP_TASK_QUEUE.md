@@ -21,7 +21,7 @@
 2. `done` 主控制器继续拆分
    目标：继续把 `CodexTaskmasterApp.swift` 中的 session / loop / provider migration 业务编排从控制器下沉到 service / helper / formatter。
 
-3. `in_progress` 核心模型类型化
+3. `done` 核心模型类型化
    目标：继续把布尔、时间和状态字段从字符串协议升级为更明确的类型。
    当前子任务：
    - `done` loop 布尔字段类型化
@@ -32,13 +32,14 @@
    - `done` send / loop `status` 过渡访问器
    - `done` send / loop `reason` 过渡访问器
    - `done` session / loop typed accessor 覆盖剩余裸字符串判断
-   - `pending` 评估是否将存储字段进一步改为 enum，而非仅保留 accessor
-   - `pending` 类型化回归测试补齐
+   - `done` 评估是否将存储字段进一步改为 enum，而非仅保留 accessor
+     当前结论：先保留 raw storage + typed accessor，等第 4 项 parser / merge / fallback 规则进一步收口后，再决定是否把底层存储直接切成 enum，避免在协议边界仍未稳定时做双重迁移。
+   - `done` 类型化回归测试补齐
 
-4. `pending` merge / parser / fallback 规则收口
+4. `in_progress` merge / parser / fallback 规则收口
    目标：继续把快照合并、字段保留和 fallback 规则从 UI 下沉到 core / service。
    当前子任务：
-   - `pending` loop snapshot merge fallback 下沉到 core
+   - `done` loop snapshot merge fallback 下沉到 core
    - `pending` session refresh merge fallback 下沉到 core
    - `pending` parser 入口统一使用共享 helper
    - `pending` UI 层只保留展示，不再携带 merge 语义
