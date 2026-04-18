@@ -3408,14 +3408,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         if session.terminalStateKind == .unavailable && shouldCollapseUnavailableTerminalIntoDisconnectedStatus(session) {
             return .systemRed
         }
-        switch session.status {
-        case let status where status.hasPrefix("active"):
+        switch session.statusKind {
+        case .active:
             return .systemOrange
-        case "busy_turn_open", "post_finalizing", "busy_with_stream_issue", "interrupted_or_aborting":
+        case .busyTurnOpen, .postFinalizing, .busyWithStreamIssue, .interruptedOrAborting:
             return .systemOrange
-        case "idle_stable", "interrupted_idle":
+        case .idleStable, .interruptedIdle:
             return .systemGreen
-        case "idle_with_residual_input", "queued_messages_visible", "queued_messages_pending", "rollout_stale", "idle_prompt_visible_rollout_stale":
+        case .idleWithResidualInput, .queuedMessagesVisible, .queuedMessagesPending, .rolloutStale, .idlePromptVisibleRolloutStale:
             return .systemYellow
         default:
             return .secondaryLabelColor

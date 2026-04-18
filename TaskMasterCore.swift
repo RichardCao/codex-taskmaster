@@ -716,6 +716,10 @@ struct SessionSnapshot {
     var terminalStateKind: SessionTerminalState {
         SessionTerminalState(rawValueOrUnknown: terminalState)
     }
+
+    var statusKind: SessionRuntimeStatus {
+        SessionRuntimeStatus(rawValue: status)
+    }
 }
 
 struct SendResultSnapshot {
@@ -1101,6 +1105,59 @@ enum SessionTerminalState: String {
     }
 }
 
+enum SessionRuntimeStatus: Equatable {
+    case active
+    case idleStable
+    case interruptedIdle
+    case idleWithResidualInput
+    case busyTurnOpen
+    case postFinalizing
+    case busyWithStreamIssue
+    case interruptedOrAborting
+    case rolloutStale
+    case idlePromptVisibleRolloutStale
+    case queuedMessagesVisible
+    case queuedMessagesPending
+    case unknown
+    case other(String)
+
+    init(rawValue: String) {
+        if rawValue.hasPrefix("active") {
+            self = .active
+            return
+        }
+
+        switch rawValue {
+        case "idle_stable":
+            self = .idleStable
+        case "interrupted_idle":
+            self = .interruptedIdle
+        case "idle_with_residual_input":
+            self = .idleWithResidualInput
+        case "busy_turn_open":
+            self = .busyTurnOpen
+        case "post_finalizing":
+            self = .postFinalizing
+        case "busy_with_stream_issue":
+            self = .busyWithStreamIssue
+        case "interrupted_or_aborting":
+            self = .interruptedOrAborting
+        case "rollout_stale":
+            self = .rolloutStale
+        case "idle_prompt_visible_rollout_stale":
+            self = .idlePromptVisibleRolloutStale
+        case "queued_messages_visible":
+            self = .queuedMessagesVisible
+        case "queued_messages_pending":
+            self = .queuedMessagesPending
+        case "unknown":
+            self = .unknown
+        default:
+            self = .other(rawValue)
+        }
+    }
+}
+
 func localizedSessionStatusLabel(_ session: SessionSnapshot) -> String {
     if session.isArchived {
         return "已归档"
@@ -1109,40 +1166,38 @@ func localizedSessionStatusLabel(_ session: SessionSnapshot) -> String {
         return "断联"
     }
 
-    switch session.status {
-    case let status where status.hasPrefix("active"):
+    switch session.statusKind {
+    case .active:
         return "运行中"
-    case "idle_stable":
+    case .idleStable:
         return "空闲"
-    case "interrupted_idle":
+    case .interruptedIdle:
         return "中断后空闲"
-    case "idle_with_residual_input":
+    case .idleWithResidualInput:
         return "残留输入"
-    case "busy_turn_open":
+    case .busyTurnOpen:
         return "运行中"
-    case "post_finalizing":
+    case .postFinalizing:
         return "状态收尾"
-    case "busy_with_stream_issue":
+    case .busyWithStreamIssue:
         return "流异常"
-    case "interrupted_or_aborting":
+    case .interruptedOrAborting:
         return "中断中"
-    case "idle_prompt_visible_rollout_stale":
+    case .rolloutStale, .idlePromptVisibleRolloutStale:
         return "状态滞后"
-    case "queued_messages_visible", "queued_messages_pending":
+    case .queuedMessagesVisible, .queuedMessagesPending:
         return "消息排队"
-    case "unknown":
+    case .unknown:
         return "未知"
-    default:
-        return session.status
+    case let .other(rawValue):
+        return rawValue
     }
 }
 
 func shouldCollapseUnavailableTerminalIntoDisconnectedStatus(_ session: SessionSnapshot) -> Bool {
     guard session.terminalStateKind == .unavailable else { return false }
-    switch session.status {
-    case let status where status.hasPrefix("active"):
-        return false
-    case "busy_turn_open", "post_finalizing", "busy_with_stream_issue", "interrupted_or_aborting":
+    switch session.statusKind {
+    case .active, .busyTurnOpen, .postFinalizing, .busyWithStreamIssue, .interruptedOrAborting:
         return false
     default:
         return true

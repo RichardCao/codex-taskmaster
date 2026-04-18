@@ -182,7 +182,7 @@ struct TaskMasterCoreRegressionRunner {
             parentThreadID: "",
             agentNickname: "",
             agentRole: "",
-            status: "ready",
+            status: "busy_turn_open",
             reason: "",
             terminalState: "unavailable",
             tty: "ttys001",
@@ -194,6 +194,7 @@ struct TaskMasterCoreRegressionRunner {
 
         expect(snapshot.updatedAtTimeInterval == 4567, "expected updated-at accessor to decode epoch")
         expect(snapshot.terminalStateKind == .unavailable, "expected terminal state accessor to decode unavailable")
+        expect(snapshot.statusKind == .busyTurnOpen, "expected runtime status accessor to decode busy_turn_open")
     }
 
     private static func runMergeSessionSnapshotChecks() {
