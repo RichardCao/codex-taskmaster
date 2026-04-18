@@ -360,6 +360,7 @@
 - send runtime 的结果 payload 拼装收口到 core helper
 - send runtime 的发送后验证分流收口到 core `evaluateSendVerificationDecision`
 - send runtime 的 initial probe 失败原因判定收口到 core `sendProbeFailureReason`
+- send runtime 的请求 payload 读取/校验收口到 core `parseSendRequestPayload`
 
 下一步建议：
 
@@ -443,6 +444,7 @@
 - send runtime 的结果 payload 样例已进入 core 回归
 - send runtime 的发送后验证决策样例已进入 core 回归
 - send runtime 的 initial probe 失败原因样例已进入 core 回归
+- send runtime 的请求 payload 读取样例已进入 core 回归
 
 建议覆盖：
 

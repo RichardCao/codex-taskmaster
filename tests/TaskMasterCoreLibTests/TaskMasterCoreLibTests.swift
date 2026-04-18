@@ -108,6 +108,24 @@ final class TaskMasterCoreLibTests: XCTestCase {
         XCTAssertEqual(sendProbeFailureReason(detail: "tty unavailable"), "probe_failed")
     }
 
+    func testParseSendRequestPayloadReadsExpectedFields() {
+        let parsed = parseSendRequestPayload([
+            "target": "demo",
+            "message": "hello",
+            "timeout_seconds": NSNumber(value: 12),
+            "force_send": true
+        ])
+
+        XCTAssertEqual(parsed?.target, "demo")
+        XCTAssertEqual(parsed?.message, "hello")
+        XCTAssertEqual(parsed?.timeoutSeconds, 12)
+        XCTAssertEqual(parsed?.forceSend, true)
+    }
+
+    func testParseSendRequestPayloadRejectsMissingRequiredFields() {
+        XCTAssertNil(parseSendRequestPayload(["target": "demo"]))
+    }
+
     func testLoopSnapshotTypedAccessors() {
         let snapshot = LoopSnapshot(
             target: "demo",

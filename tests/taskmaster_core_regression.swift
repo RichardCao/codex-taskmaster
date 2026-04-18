@@ -9,6 +9,7 @@ struct TaskMasterCoreRegressionRunner {
         runSendRequestPayloadChecks()
         runSendVerificationDecisionChecks()
         runSendProbeFailureReasonChecks()
+        runSendRequestParsingChecks()
         runLoopSnapshotAccessorChecks()
         runSessionSnapshotAccessorChecks()
         runMergeSessionSnapshotChecks()
@@ -122,6 +123,20 @@ struct TaskMasterCoreRegressionRunner {
     private static func runSendProbeFailureReasonChecks() {
         expect(sendProbeFailureReason(detail: "found multiple matching sessions for target demo") == "ambiguous_target", "expected ambiguity detail to map to ambiguous_target")
         expect(sendProbeFailureReason(detail: "tty unavailable") == "probe_failed", "expected generic probe failure detail to map to probe_failed")
+    }
+
+    private static func runSendRequestParsingChecks() {
+        let parsed = parseSendRequestPayload([
+            "target": "demo",
+            "message": "hello",
+            "timeout_seconds": NSNumber(value: 12),
+            "force_send": true
+        ])
+        expect(parsed?.target == "demo", "expected parsed request to preserve target")
+        expect(parsed?.message == "hello", "expected parsed request to preserve message")
+        expect(parsed?.timeoutSeconds == 12, "expected parsed request to preserve timeout")
+        expect(parsed?.forceSend == true, "expected parsed request to preserve force-send")
+        expect(parseSendRequestPayload(["target": "demo"]) == nil, "expected parser to reject missing required fields")
     }
 
     private static func runLoopSnapshotAccessorChecks() {

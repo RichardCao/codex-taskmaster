@@ -917,9 +917,7 @@ final class SendRequestCoordinator {
             return
         }
 
-        guard let target = payload["target"] as? String,
-              let message = payload["message"] as? String,
-              let timeoutSeconds = payload["timeout_seconds"] as? NSNumber else {
+        guard let request = parseSendRequestPayload(payload) else {
             finishFailedSendRequest(
                 target: "-",
                 forceSend: false,
@@ -930,7 +928,10 @@ final class SendRequestCoordinator {
             return
         }
 
-        let forceSend = payload["force_send"] as? Bool ?? false
+        let target = request.target
+        let message = request.message
+        let timeoutSeconds = request.timeoutSeconds
+        let forceSend = request.forceSend
         let initialProbe = probeResult(for: target)
         guard initialProbe.status == 0 else {
             let detail = compactProbeSummary(status: initialProbe.status, values: initialProbe.values, stdout: initialProbe.stdout, stderr: initialProbe.stderr)

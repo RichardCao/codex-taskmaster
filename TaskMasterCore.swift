@@ -1366,6 +1366,28 @@ func sendProbeFailureReason(detail: String) -> String {
     isAmbiguousTargetDetail(detail) ? "ambiguous_target" : "probe_failed"
 }
 
+struct ParsedSendRequestPayload {
+    let target: String
+    let message: String
+    let timeoutSeconds: NSNumber
+    let forceSend: Bool
+}
+
+func parseSendRequestPayload(_ payload: [String: Any]) -> ParsedSendRequestPayload? {
+    guard let target = payload["target"] as? String,
+          let message = payload["message"] as? String,
+          let timeoutSeconds = payload["timeout_seconds"] as? NSNumber else {
+        return nil
+    }
+
+    return ParsedSendRequestPayload(
+        target: target,
+        message: message,
+        timeoutSeconds: timeoutSeconds,
+        forceSend: payload["force_send"] as? Bool ?? false
+    )
+}
+
 func makeSendRequestResultPayload(
     status: String,
     reason: String,
