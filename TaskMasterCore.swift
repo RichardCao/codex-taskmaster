@@ -761,6 +761,26 @@ struct SendResultSnapshot {
     }
 }
 
+func parseStoredSendResultSnapshot(data: Data, updatedAtEpoch: TimeInterval) -> SendResultSnapshot? {
+    guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return nil
+    }
+
+    let target = (object["target"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !target.isEmpty else { return nil }
+
+    return SendResultSnapshot(
+        target: target,
+        status: object["status"] as? String ?? "",
+        reason: object["reason"] as? String ?? "",
+        forceSend: object["force_send"] as? Bool ?? false,
+        detail: object["detail"] as? String ?? "",
+        probeStatus: object["probe_status"] as? String ?? "",
+        terminalState: object["terminal_state"] as? String ?? "",
+        updatedAtEpoch: updatedAtEpoch
+    )
+}
+
 enum SendOutcomeStatus: Equatable {
     case success
     case accepted

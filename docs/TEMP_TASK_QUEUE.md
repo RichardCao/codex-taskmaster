@@ -40,10 +40,11 @@
    目标：继续把快照合并、字段保留和 fallback 规则从 UI 下沉到 core / service。
    当前子任务：
    - `done` loop snapshot merge fallback 下沉到 core
-   - `pending` session refresh merge fallback 下沉到 core
+   - `done` session refresh merge fallback 下沉到 core
    - `in_progress` parser 入口统一使用共享 helper
    - `done` 移除旧 loop 状态文本 parser
    - `done` send helper 结构化结果 parser 下沉到 core
+   - `done` recent send result JSON parser 下沉到 core
    - `pending` UI 层只保留展示，不再携带 merge 语义
 
 5. `pending` 刷新调度边界收口

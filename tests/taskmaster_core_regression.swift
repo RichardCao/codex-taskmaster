@@ -11,6 +11,7 @@ struct TaskMasterCoreRegressionRunner {
         runSendVerificationDecisionChecks()
         runSendProbeFailureReasonChecks()
         runSendRequestParsingChecks()
+        runStoredSendResultParsingChecks()
         runLoopSnapshotAccessorChecks()
         runSessionSnapshotAccessorChecks()
         runMergeSessionSnapshotChecks()
@@ -152,6 +153,31 @@ struct TaskMasterCoreRegressionRunner {
         expect(parsed?.timeoutSeconds == 12, "expected parsed request to preserve timeout")
         expect(parsed?.forceSend == true, "expected parsed request to preserve force-send")
         expect(parseSendRequestPayload(["target": "demo"]) == nil, "expected parser to reject missing required fields")
+    }
+
+    private static func runStoredSendResultParsingChecks() {
+        let json = """
+        {
+          "target": "demo",
+          "status": "accepted",
+          "reason": "verification_pending",
+          "force_send": true,
+          "detail": "detail",
+          "probe_status": "busy_turn_open",
+          "terminal_state": "prompt_with_input"
+        }
+        """
+        let parsed = parseStoredSendResultSnapshot(
+            data: Data(json.utf8),
+            updatedAtEpoch: 42
+        )
+
+        expect(parsed?.target == "demo", "expected stored send result parser to preserve target")
+        expect(parsed?.statusKind == .accepted, "expected stored send result parser to preserve status")
+        expect(parsed?.reasonKind == .verificationPending, "expected stored send result parser to preserve reason")
+        expect(parsed?.forceSend == true, "expected stored send result parser to preserve force-send flag")
+        expect(parsed?.updatedAtEpoch == 42, "expected stored send result parser to preserve supplied timestamp")
+        expect(parseStoredSendResultSnapshot(data: Data("{}".utf8), updatedAtEpoch: 1) == nil, "expected stored send result parser to reject missing target")
     }
 
     private static func runLoopSnapshotAccessorChecks() {

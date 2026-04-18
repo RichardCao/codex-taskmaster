@@ -3451,28 +3451,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         var results: [SendResultSnapshot] = []
         for fileURL in sortedFiles.prefix(scanLimit) {
-            guard let data = try? Data(contentsOf: fileURL),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            guard let data = try? Data(contentsOf: fileURL) else {
                 continue
             }
 
-            let target = (object["target"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard candidates.contains(target) else { continue }
-
             let updatedAtEpoch = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)?
                 .timeIntervalSince1970 ?? 0
-            results.append(
-                SendResultSnapshot(
-                    target: target,
-                    status: object["status"] as? String ?? "",
-                    reason: object["reason"] as? String ?? "",
-                    forceSend: object["force_send"] as? Bool ?? false,
-                    detail: object["detail"] as? String ?? "",
-                    probeStatus: object["probe_status"] as? String ?? "",
-                    terminalState: object["terminal_state"] as? String ?? "",
-                    updatedAtEpoch: updatedAtEpoch
-                )
-            )
+            guard let snapshot = parseStoredSendResultSnapshot(data: data, updatedAtEpoch: updatedAtEpoch),
+                  candidates.contains(snapshot.target) else {
+                continue
+            }
+            results.append(snapshot)
 
             if results.count >= maxItems {
                 break
