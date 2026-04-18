@@ -2115,6 +2115,98 @@ func loopResultReasonLabel(_ loop: LoopSnapshot) -> String {
     return ""
 }
 
+func loopSelectionIdentifier(_ loop: LoopSnapshot) -> String {
+    let trimmedLoopID = loop.loopID.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmedLoopID.isEmpty {
+        return "id:\(trimmedLoopID)"
+    }
+    return "target:\(loop.target)"
+}
+
+func formattedLoopTargetDisplayValue(loop: LoopSnapshot, allLoops: [LoopSnapshot]) -> String {
+    guard allLoops.filter({ $0.target == loop.target }).count > 1 else {
+        return loop.target
+    }
+    let trimmedLoopID = loop.loopID.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedLoopID.isEmpty else {
+        return loop.target
+    }
+    return "\(loop.target) #\(trimmedLoopID.prefix(8))"
+}
+
+func formattedLoopTargetToolTip(loop: LoopSnapshot, allLoops: [LoopSnapshot]) -> String {
+    let trimmedLoopID = loop.loopID.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedLoopID.isEmpty else {
+        return loop.target
+    }
+    guard allLoops.filter({ $0.target == loop.target }).count > 1 else {
+        return loop.target
+    }
+    return "\(loop.target)\nloop_id: \(trimmedLoopID)"
+}
+
+func formattedLoopTableCellValue(
+    identifier: String,
+    loop: LoopSnapshot,
+    allLoops: [LoopSnapshot],
+    formatEpoch: (TimeInterval) -> String
+) -> String {
+    switch identifier {
+    case "state":
+        return "● \(loopStateLabel(loop))"
+    case "result":
+        return "● \(loopResultLabel(loop))"
+    case "reason":
+        return loopResultReasonLabel(loop)
+    case "target":
+        return formattedLoopTargetDisplayValue(loop: loop, allLoops: allLoops)
+    case "interval":
+        return "\(loop.intervalSeconds)s"
+    case "forceSend":
+        return loop.isForceSendEnabled ? "force" : "idle"
+    case "nextRun":
+        if loop.isStopped {
+            return "-"
+        }
+        return formatEpoch(loop.nextRunEpoch)
+    case "message":
+        return loop.message
+    case "lastLog":
+        return loop.lastLogLine
+    default:
+        return ""
+    }
+}
+
+func formattedSessionTableCellValue(
+    identifier: String,
+    session: SessionSnapshot,
+    formatEpoch: (TimeInterval) -> String
+) -> String {
+    switch identifier {
+    case "name":
+        return sessionActualName(session)
+    case "type":
+        return sessionTypeLabel(session)
+    case "provider":
+        return sessionProviderDisplayValue(session)
+    case "threadID":
+        return session.threadID
+    case "status":
+        return "● \(localizedSessionStatusLabel(session))"
+    case "terminalState":
+        return sessionTerminalDisplayValue(session)
+    case "tty":
+        return sessionTTYDisplayValue(session)
+    case "updatedAt":
+        return formatEpoch(session.updatedAtEpoch)
+    case "reason":
+        return localizedSessionReason(session.reason)
+    default:
+        return ""
+    }
+}
+
 func loopStateSortRank(_ loop: LoopSnapshot) -> Int {
     switch loopStateLabel(loop) {
     case "健康":

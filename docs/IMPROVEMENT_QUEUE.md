@@ -42,6 +42,6 @@
 9. `done` Session 类型显式化与本地 provider 迁移
    目标：在 `Session Status` 中显式区分 `CLI` / `Subagent` / `Exec` / `Other`，并提供“迁移当前到当前 provider”“全部迁移到当前 provider”的本地状态操作，同时明确不伪造 `source=cli`。
 
-10. `pending` 单 loop + 多策略模型
+10. `done` 单 loop + 多策略模型
    目标：同一 session 可以保留多个停止态历史 loop 配置，但同一时刻只能有一个运行态 loop。
    后续如需更复杂自动化，不开放多个并行运行 loop，而是在单个 loop 下扩展多阶段规则、失败退避策略，以及消息队列或计划表。

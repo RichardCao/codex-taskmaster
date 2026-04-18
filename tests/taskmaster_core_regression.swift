@@ -20,6 +20,7 @@ struct TaskMasterCoreRegressionRunner {
         runMergeLoopSnapshotChecks()
         runMergeLoopSnapshotListChecks()
         runLoopSnapshotIdentityChecks()
+        runTableCellFormattingChecks()
         runLoopConflictResolutionChecks()
         runLocalizationChecks()
         runLoopStateLabelChecks()
@@ -540,6 +541,107 @@ struct TaskMasterCoreRegressionRunner {
 
         let merged = mergeLoopSnapshots(previous: [previousStopped, optimisticRunning], incoming: [refreshedRunning, previousStopped])
         expect(merged.map(\.loopID) == ["active-key", "stopped-history"], "expected mergeLoopSnapshots to preserve distinct identities for active and historical loops")
+    }
+
+    private static func runTableCellFormattingChecks() {
+        let duplicateLoop = LoopSnapshot(
+            loopID: "loop-1234567890",
+            target: "demo",
+            loopDaemonRunning: true,
+            intervalSeconds: "30",
+            forceSend: true,
+            message: "hello",
+            nextRunEpoch: 123,
+            stopped: false,
+            stoppedReason: "",
+            paused: false,
+            failureCount: "0",
+            failureReason: "",
+            pauseReason: "",
+            logPath: "-",
+            lastLogLine: "last line"
+        )
+        let siblingLoop = LoopSnapshot(
+            loopID: "loop-abcdef",
+            target: "demo",
+            loopDaemonRunning: false,
+            intervalSeconds: "60",
+            forceSend: false,
+            message: "older",
+            nextRunEpoch: 0,
+            stopped: true,
+            stoppedReason: "stopped_by_user",
+            paused: false,
+            failureCount: "0",
+            failureReason: "",
+            pauseReason: "",
+            logPath: "-",
+            lastLogLine: ""
+        )
+        let session = SessionSnapshot(
+            name: "",
+            target: "demo",
+            threadID: "thread-1",
+            provider: "",
+            source: "exec",
+            parentThreadID: "",
+            agentNickname: "",
+            agentRole: "",
+            status: "busy_turn_open",
+            reason: "a started turn has no later task_complete",
+            terminalState: "unavailable",
+            tty: "",
+            updatedAtEpoch: 456,
+            rolloutPath: "",
+            preview: "",
+            isArchived: false
+        )
+
+        expect(loopSelectionIdentifier(duplicateLoop) == "id:loop-1234567890", "expected loopSelectionIdentifier to prefer loop_id")
+        expect(formattedLoopTargetDisplayValue(loop: duplicateLoop, allLoops: [duplicateLoop, siblingLoop]) == "demo #loop-123", "expected duplicate target display to include short loop id")
+        expect(formattedLoopTargetToolTip(loop: duplicateLoop, allLoops: [duplicateLoop, siblingLoop]) == "demo\nloop_id: loop-1234567890", "expected duplicate target tooltip to preserve full loop id")
+        expect(
+            formattedLoopTableCellValue(
+                identifier: "nextRun",
+                loop: duplicateLoop,
+                allLoops: [duplicateLoop, siblingLoop],
+                formatEpoch: { "epoch:\(Int($0))" }
+            ) == "epoch:123",
+            "expected loop table formatter to delegate next-run formatting"
+        )
+        expect(
+            formattedLoopTableCellValue(
+                identifier: "target",
+                loop: duplicateLoop,
+                allLoops: [duplicateLoop, siblingLoop],
+                formatEpoch: { _ in "-" }
+            ) == "demo #loop-123",
+            "expected loop table formatter to reuse duplicate target display rules"
+        )
+        expect(
+            formattedSessionTableCellValue(
+                identifier: "updatedAt",
+                session: session,
+                formatEpoch: { "epoch:\(Int($0))" }
+            ) == "epoch:456",
+            "expected session table formatter to delegate updated-at formatting"
+        )
+        expect(
+            formattedSessionTableCellValue(
+                identifier: "terminalState",
+                session: session,
+                formatEpoch: { _ in "-" }
+            ) == "不可达",
+            "expected session table formatter to localize terminal state"
+        )
+        expect(
+            formattedSessionTableCellValue(
+                identifier: "reason",
+                session: session,
+                formatEpoch: { _ in "-" }
+            ) == "检测到已开始的回合，但后面没有看到 task_complete，当前可能仍在执行",
+            "expected session table formatter to localize session reason"
+        )
     }
 
     private static func runLoopConflictResolutionChecks() {

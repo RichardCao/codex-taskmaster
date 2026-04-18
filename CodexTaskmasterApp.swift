@@ -1692,99 +1692,25 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
-    private func stringValueForLoopColumn(_ identifier: String, loop: LoopSnapshot) -> String {
-        switch identifier {
-        case "state":
-            return "● \(loopStateLabel(loop))"
-        case "result":
-            return "● \(loopResultLabel(loop))"
-        case "reason":
-            return loopResultReasonLabel(loop)
-        case "target":
-            return loopTargetDisplayValue(loop)
-        case "interval":
-            return "\(loop.intervalSeconds)s"
-        case "forceSend":
-            return loop.isForceSendEnabled ? "force" : "idle"
-        case "nextRun":
-            if loop.isStopped {
-                return "-"
-            }
-            return formatEpoch(loop.nextRunEpoch)
-        case "message":
-            return loop.message
-        case "lastLog":
-            return loop.lastLogLine
-        default:
-            return ""
-        }
-    }
-
-    private func loopSelectionIdentifier(_ loop: LoopSnapshot) -> String {
-        let trimmedLoopID = loop.loopID.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedLoopID.isEmpty {
-            return "id:\(trimmedLoopID)"
-        }
-        return "target:\(loop.target)"
-    }
-
-    private func loopTargetDisplayValue(_ loop: LoopSnapshot) -> String {
-        guard loopSnapshots.filter({ $0.target == loop.target }).count > 1 else {
-            return loop.target
-        }
-        let trimmedLoopID = loop.loopID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedLoopID.isEmpty else {
-            return loop.target
-        }
-        return "\(loop.target) #\(trimmedLoopID.prefix(8))"
-    }
-
-    private func loopTargetToolTip(_ loop: LoopSnapshot) -> String {
-        let trimmedLoopID = loop.loopID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedLoopID.isEmpty else {
-            return loop.target
-        }
-        guard loopSnapshots.filter({ $0.target == loop.target }).count > 1 else {
-            return loop.target
-        }
-        return "\(loop.target)\nloop_id: \(trimmedLoopID)"
-    }
-
-    private func stringValueForSessionColumn(_ identifier: String, session: SessionSnapshot) -> String {
-        switch identifier {
-        case "name":
-            return sessionActualName(session)
-        case "type":
-            return sessionTypeLabel(session)
-        case "provider":
-            return sessionProviderDisplayValue(session)
-        case "threadID":
-            return session.threadID
-        case "status":
-            return "● \(localizedSessionStatusLabel(session))"
-        case "terminalState":
-            return sessionTerminalDisplayValue(session)
-        case "tty":
-            return sessionTTYDisplayValue(session)
-        case "updatedAt":
-            return formatEpoch(session.updatedAtEpoch)
-        case "reason":
-            return localizedSessionReason(session.reason)
-        default:
-            return ""
-        }
-    }
-
     private func stringValueForTableCell(tableView: NSTableView, identifier: String, row: Int) -> String {
         if tableView == activeLoopsTableView {
             guard row < loopSnapshots.count else { return "" }
-            return stringValueForLoopColumn(identifier, loop: loopSnapshots[row])
+            return formattedLoopTableCellValue(
+                identifier: identifier,
+                loop: loopSnapshots[row],
+                allLoops: loopSnapshots,
+                formatEpoch: formatEpoch(_:)
+            )
         }
 
         guard row < sessionSnapshots.count else {
             return ""
         }
-        return stringValueForSessionColumn(identifier, session: sessionSnapshots[row])
+        return formattedSessionTableCellValue(
+            identifier: identifier,
+            session: sessionSnapshots[row],
+            formatEpoch: formatEpoch(_:)
+        )
     }
 
     private func shouldWrapRow(_ row: Int, in tableView: NSTableView) -> Bool {
@@ -6291,19 +6217,30 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             guard row < loopSnapshots.count else { return cellView }
             let loop = loopSnapshots[row]
             let columnID = tableColumn.identifier.rawValue
-            textField.stringValue = stringValueForLoopColumn(columnID, loop: loop)
+            textField.stringValue = formattedLoopTableCellValue(
+                identifier: columnID,
+                loop: loop,
+                allLoops: loopSnapshots,
+                formatEpoch: formatEpoch(_:)
+            )
             if columnID == "state" {
                 textField.textColor = loopStateColor(loop)
             } else if columnID == "result" {
                 textField.textColor = loopResultColor(loop)
             }
-            textField.toolTip = columnID == "target" ? loopTargetToolTip(loop) : textField.stringValue
+            textField.toolTip = columnID == "target"
+                ? formattedLoopTargetToolTip(loop: loop, allLoops: loopSnapshots)
+                : textField.stringValue
             return cellView
         }
 
         let session = sessionSnapshots[row]
         let columnID = tableColumn.identifier.rawValue
-        textField.stringValue = stringValueForSessionColumn(columnID, session: session)
+        textField.stringValue = formattedSessionTableCellValue(
+            identifier: columnID,
+            session: session,
+            formatEpoch: formatEpoch(_:)
+        )
         switch columnID {
         case "status":
             textField.textColor = sessionStatusColor(session)

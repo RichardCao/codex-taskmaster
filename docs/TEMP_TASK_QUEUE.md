@@ -15,60 +15,14 @@
 
 ## 当前队列
 
-1. `done` 发送运行时剩余收口
-   目标：继续压缩 `TaskMasterSendRuntime.swift` 中的 orchestration、重试和失败分支，减少重复逻辑，收紧 helper 边界。
+1. `done` 表格展示 formatter 收口
+   目标：把 loop / session 表格列值、重复 target 展示、tooltip 与相关展示判断从 `CodexTaskmasterApp.swift` 下沉到 core formatter/helper。
 
-2. `done` 主控制器继续拆分
-   目标：继续把 `CodexTaskmasterApp.swift` 中的 session / loop / provider migration 业务编排从控制器下沉到 service / helper / formatter。
+2. `in_progress` 顶部状态条规则收口
+   目标：把状态条的颜色判定、优先级、自动清理时机与默认文案从控制器下沉到 core 纯规则。
 
-3. `done` 核心模型类型化
-   目标：继续把布尔、时间和状态字段从字符串协议升级为更明确的类型。
-   当前子任务：
-   - `done` loop 布尔字段类型化
-   - `done` session `updatedAtEpoch` 类型化
-   - `done` loop `nextRunEpoch` 类型化
-   - `done` session `terminalState` 过渡访问器
-   - `done` session `status` 过渡访问器
-   - `done` send / loop `status` 过渡访问器
-   - `done` send / loop `reason` 过渡访问器
-   - `done` session / loop typed accessor 覆盖剩余裸字符串判断
-   - `done` 评估是否将存储字段进一步改为 enum，而非仅保留 accessor
-     当前结论：先保留 raw storage + typed accessor，等第 4 项 parser / merge / fallback 规则进一步收口后，再决定是否把底层存储直接切成 enum，避免在协议边界仍未稳定时做双重迁移。
-   - `done` 类型化回归测试补齐
+3. `pending` loop / send 交互提示模板收口
+   目标：把剩余的 loop conflict、ambiguous target、runtime permission 等提示框文案与交互模板从控制器中抽离。
 
-4. `done` merge / parser / fallback 规则收口
-   目标：继续把快照合并、字段保留和 fallback 规则从 UI 下沉到 core / service。
-   当前子任务：
-   - `done` loop snapshot merge fallback 下沉到 core
-   - `done` session refresh merge fallback 下沉到 core
-   - `done` parser 入口统一使用共享 helper
-   - `done` rollout recent user message parser 下沉到 core
-   - `done` session refresh 覆盖式快照合并 helper 下沉到 core
-   - `done` 批量 loop 快照合并 helper 下沉到 core
-   - `done` 移除旧 loop 状态文本 parser
-   - `done` send helper 结构化结果 parser 下沉到 core
-   - `done` recent send result JSON parser 下沉到 core
-   - `done` UI 层只保留展示，不再携带 merge 语义
-
-5. `done` 刷新调度边界收口
-   目标：统一 loop 刷新、request pump、session 状态自动刷新等调度入口，明确去重、节流和取消。
-   当前子任务：
-   - `done` loop 刷新触发源盘点与收口
-   - `done` session 自动刷新触发源盘点与收口
-   - `done` request pump / timer 去重与取消边界收口
-
-6. `done` 测试补强
-   目标：补 parser / merge / localization、send runtime 决策矩阵、helper 状态变更与受限环境预期测试。
-   当前子任务：
-   - `done` parser / merge 回归测试
-   - `done` localization 回归测试
-   - `done` send runtime 决策矩阵测试
-   - `done` helper 状态变更与受限环境测试
-
-7. `done` 单 loop + 多策略模型
-   目标：同一 session 保留多个停止态历史 loop 配置，但同一时刻只允许一个运行态 loop。
-   当前子任务：
-   - `done` 运行态唯一约束下沉到 core/helper
-   - `done` 停止态历史 loop 存储模型梳理
-   - `done` UI 展示与操作路径适配
-   - `done` 互斥与迁移测试
+4. `pending` 主控制器残余展示编排清理
+   目标：继续压缩 `CodexTaskmasterApp.swift` 中的展示性 helper、重复 UI 收尾逻辑和零散状态判断，为 Linux 迁移前做最后一轮收口。
