@@ -1387,6 +1387,53 @@ func makeSendRequestResultPayload(
     return payload
 }
 
+struct SendVerificationDecision {
+    let status: String
+    let reason: String
+    let probeStatus: String
+    let terminalState: String
+}
+
+func evaluateSendVerificationDecision(
+    verificationSucceeded: Bool,
+    forceSend: Bool,
+    initialProbeStatus: String,
+    initialTerminalState: String,
+    verificationProbeStatusCode: Int32,
+    verificationProbeStatus: String,
+    verificationReason: String,
+    verificationTerminalState: String
+) -> SendVerificationDecision {
+    if verificationSucceeded {
+        return SendVerificationDecision(
+            status: "success",
+            reason: forceSend ? "forced_sent" : "sent",
+            probeStatus: initialProbeStatus,
+            terminalState: initialTerminalState
+        )
+    }
+
+    if shouldTreatAsQueuedAcceptance(
+        probeStatus: verificationProbeStatusCode,
+        terminalState: verificationTerminalState,
+        reason: verificationReason
+    ) {
+        return SendVerificationDecision(
+            status: "accepted",
+            reason: "queued_pending_feedback",
+            probeStatus: verificationProbeStatus,
+            terminalState: verificationTerminalState
+        )
+    }
+
+    return SendVerificationDecision(
+        status: "accepted",
+        reason: "verification_pending",
+        probeStatus: verificationProbeStatus,
+        terminalState: verificationTerminalState
+    )
+}
+
 struct ParsedLoopOutcome {
     let status: String
     let reason: String

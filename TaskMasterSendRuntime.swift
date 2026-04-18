@@ -1000,9 +1000,18 @@ final class SendRequestCoordinator {
             previousTimestamp: previousUserTimestamp,
             timeoutSeconds: max(8, min(timeoutSeconds.doubleValue, 14))
         )
+        let verificationDecision = evaluateSendVerificationDecision(
+            verificationSucceeded: verification.success,
+            forceSend: forceSend,
+            initialProbeStatus: probeStatus,
+            initialTerminalState: terminalState,
+            verificationProbeStatusCode: verification.probe.status,
+            verificationProbeStatus: verification.probe.values["status"] ?? "unknown",
+            verificationReason: verification.probe.values["reason"] ?? "",
+            verificationTerminalState: verification.probe.values["terminal_state"] ?? "unknown"
+        )
 
-        if verification.success {
-            let reason = forceSend ? "forced_sent" : "sent"
+        if verificationDecision.status == "success" {
             let baseDetail = "sent message via app sender to target=\(target) tty=\(usedTTY) clear_existing_input=\(clearResidualInputBeforeSend ? "yes" : "no")"
             let detail = appendLiveTTYResolutionDetail(baseDetail, resolution: preparedProbe.resolution)
             finishCompletedSendRequest(
@@ -1010,23 +1019,17 @@ final class SendRequestCoordinator {
                 status: "success",
                 target: target,
                 forceSend: forceSend,
-                reason: reason,
+                reason: verificationDecision.reason,
                 detail: detail,
-                probeStatus: probeStatus,
-                terminalState: terminalState,
+                probeStatus: verificationDecision.probeStatus,
+                terminalState: verificationDecision.terminalState,
                 color: .systemGreen,
                 finish: finish
             )
             return
         }
 
-        if shouldTreatAsQueuedAcceptance(
-            probeStatus: verification.probe.status,
-            terminalState: verification.probe.values["terminal_state"] ?? "",
-            reason: verification.probe.values["reason"] ?? ""
-        ) {
-            let queuedProbeStatus = verification.probe.values["status"] ?? "unknown"
-            let queuedTerminalState = verification.probe.values["terminal_state"] ?? "unknown"
+        if verificationDecision.reason == "queued_pending_feedback" {
             let detail = appendLiveTTYResolutionDetail(
                 compactProbeSummary(status: verification.probe.status, values: verification.probe.values, stdout: verification.probe.stdout, stderr: verification.probe.stderr),
                 resolution: preparedProbe.resolution
@@ -1036,10 +1039,10 @@ final class SendRequestCoordinator {
                 status: "accepted",
                 target: target,
                 forceSend: forceSend,
-                reason: "queued_pending_feedback",
+                reason: verificationDecision.reason,
                 detail: detail,
-                probeStatus: queuedProbeStatus,
-                terminalState: queuedTerminalState,
+                probeStatus: verificationDecision.probeStatus,
+                terminalState: verificationDecision.terminalState,
                 color: .systemOrange,
                 finish: finish
             )
@@ -1055,10 +1058,10 @@ final class SendRequestCoordinator {
             status: "accepted",
             target: target,
             forceSend: forceSend,
-            reason: "verification_pending",
+            reason: verificationDecision.reason,
             detail: verificationDetail,
-            probeStatus: verification.probe.values["status"] ?? "unknown",
-            terminalState: verification.probe.values["terminal_state"] ?? "unknown",
+            probeStatus: verificationDecision.probeStatus,
+            terminalState: verificationDecision.terminalState,
             color: .systemOrange,
             finish: finish
         )

@@ -59,6 +59,50 @@ final class TaskMasterCoreLibTests: XCTestCase {
         XCTAssertEqual(payload["terminal_state"] as? String, "prompt_ready")
     }
 
+    func testEvaluateSendVerificationDecisionMatchesRuntimeRules() {
+        let success = evaluateSendVerificationDecision(
+            verificationSucceeded: true,
+            forceSend: true,
+            initialProbeStatus: "idle_stable",
+            initialTerminalState: "prompt_ready",
+            verificationProbeStatusCode: 0,
+            verificationProbeStatus: "idle_stable",
+            verificationReason: "",
+            verificationTerminalState: "prompt_ready"
+        )
+        XCTAssertEqual(success.status, "success")
+        XCTAssertEqual(success.reason, "forced_sent")
+        XCTAssertEqual(success.probeStatus, "idle_stable")
+
+        let queued = evaluateSendVerificationDecision(
+            verificationSucceeded: false,
+            forceSend: false,
+            initialProbeStatus: "idle_stable",
+            initialTerminalState: "prompt_ready",
+            verificationProbeStatusCode: 0,
+            verificationProbeStatus: "unknown",
+            verificationReason: "turn is complete, but queued messages are still visible in Terminal",
+            verificationTerminalState: "queued_messages_pending"
+        )
+        XCTAssertEqual(queued.status, "accepted")
+        XCTAssertEqual(queued.reason, "queued_pending_feedback")
+        XCTAssertEqual(queued.terminalState, "queued_messages_pending")
+
+        let pending = evaluateSendVerificationDecision(
+            verificationSucceeded: false,
+            forceSend: false,
+            initialProbeStatus: "idle_stable",
+            initialTerminalState: "prompt_ready",
+            verificationProbeStatusCode: 0,
+            verificationProbeStatus: "busy_turn_open",
+            verificationReason: "",
+            verificationTerminalState: "prompt_with_input"
+        )
+        XCTAssertEqual(pending.status, "accepted")
+        XCTAssertEqual(pending.reason, "verification_pending")
+        XCTAssertEqual(pending.probeStatus, "busy_turn_open")
+    }
+
     func testLoopSnapshotTypedAccessors() {
         let snapshot = LoopSnapshot(
             target: "demo",

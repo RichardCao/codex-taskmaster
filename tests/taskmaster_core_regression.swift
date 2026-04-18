@@ -7,6 +7,7 @@ struct TaskMasterCoreRegressionRunner {
         runCommandDetailChecks()
         runCompactProbeSummaryChecks()
         runSendRequestPayloadChecks()
+        runSendVerificationDecisionChecks()
         runLoopSnapshotAccessorChecks()
         runSessionSnapshotAccessorChecks()
         runMergeSessionSnapshotChecks()
@@ -73,6 +74,48 @@ struct TaskMasterCoreRegressionRunner {
         expect(payload["detail"] as? String == "detail", "expected payload to preserve detail")
         expect(payload["probe_status"] as? String == "idle_stable", "expected payload to preserve probe status")
         expect(payload["terminal_state"] as? String == "prompt_ready", "expected payload to preserve terminal state")
+    }
+
+    private static func runSendVerificationDecisionChecks() {
+        let success = evaluateSendVerificationDecision(
+            verificationSucceeded: true,
+            forceSend: true,
+            initialProbeStatus: "idle_stable",
+            initialTerminalState: "prompt_ready",
+            verificationProbeStatusCode: 0,
+            verificationProbeStatus: "idle_stable",
+            verificationReason: "",
+            verificationTerminalState: "prompt_ready"
+        )
+        expect(success.status == "success", "expected successful verification to map to success")
+        expect(success.reason == "forced_sent", "expected forced successful verification to map to forced_sent")
+
+        let queued = evaluateSendVerificationDecision(
+            verificationSucceeded: false,
+            forceSend: false,
+            initialProbeStatus: "idle_stable",
+            initialTerminalState: "prompt_ready",
+            verificationProbeStatusCode: 0,
+            verificationProbeStatus: "unknown",
+            verificationReason: "turn is complete, but queued messages are still visible in Terminal",
+            verificationTerminalState: "queued_messages_pending"
+        )
+        expect(queued.status == "accepted", "expected queued verification to remain accepted")
+        expect(queued.reason == "queued_pending_feedback", "expected queued verification to map to queued_pending_feedback")
+
+        let pending = evaluateSendVerificationDecision(
+            verificationSucceeded: false,
+            forceSend: false,
+            initialProbeStatus: "idle_stable",
+            initialTerminalState: "prompt_ready",
+            verificationProbeStatusCode: 0,
+            verificationProbeStatus: "busy_turn_open",
+            verificationReason: "",
+            verificationTerminalState: "prompt_with_input"
+        )
+        expect(pending.status == "accepted", "expected unconfirmed verification to remain accepted")
+        expect(pending.reason == "verification_pending", "expected unconfirmed verification to map to verification_pending")
+        expect(pending.probeStatus == "busy_turn_open", "expected pending verification to preserve latest probe status")
     }
 
     private static func runLoopSnapshotAccessorChecks() {
