@@ -2729,6 +2729,60 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setStatus(noMigrationNeededStatusText(), key: "action")
     }
 
+    private func promptForSessionProviderMigration(
+        session: SessionSnapshot,
+        targetProvider: String,
+        currentProviderDisplay: String,
+        isSubagent: Bool,
+        familyCount: Int,
+        familyMigrateNeeded: Int,
+        directChildCount: Int
+    ) -> Bool? {
+        if isSubagent || directChildCount > 0 {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = sessionProviderMigrationRelatedAlertTitle()
+            alert.informativeText = sessionProviderMigrationRelatedAlertText(
+                targetProvider: targetProvider,
+                currentProviderDisplay: currentProviderDisplay,
+                threadID: session.threadID,
+                typeLabel: sessionTypeLabel(session),
+                isSubagent: isSubagent,
+                familyCount: familyCount,
+                familyMigrateNeeded: familyMigrateNeeded
+            )
+            alert.addButton(withTitle: "迁移相关")
+            alert.addButton(withTitle: "仅迁移当前")
+            alert.addButton(withTitle: "取消")
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                return true
+            }
+            if response == .alertSecondButtonReturn {
+                return false
+            }
+            handleProviderMigrationCancelled(statusText: sessionProviderMigrationCancelledStatusText())
+            return nil
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = sessionProviderMigrationCurrentAlertTitle()
+        alert.informativeText = sessionProviderMigrationCurrentAlertText(
+            targetProvider: targetProvider,
+            currentProviderDisplay: currentProviderDisplay,
+            threadID: session.threadID,
+            typeLabel: sessionTypeLabel(session)
+        )
+        alert.addButton(withTitle: "迁移")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            handleProviderMigrationCancelled(statusText: sessionProviderMigrationCancelledStatusText())
+            return nil
+        }
+        return false
+    }
+
     private func beginProviderMigrationExecution(runningStatusText: String, startLogText: String) {
         setButtonsEnabled(false)
         setStatus(runningStatusText, key: "action")
@@ -6183,50 +6237,15 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     return
                 }
 
-                let includeFamily: Bool
-                if isSubagent || directChildCount > 0 {
-                    let alert = NSAlert()
-                    alert.alertStyle = .warning
-                    alert.messageText = sessionProviderMigrationRelatedAlertTitle()
-                    alert.informativeText = sessionProviderMigrationRelatedAlertText(
-                        targetProvider: targetProvider,
-                        currentProviderDisplay: currentProviderDisplay,
-                        threadID: session.threadID,
-                        typeLabel: sessionTypeLabel(session),
-                        isSubagent: isSubagent,
-                        familyCount: familyCount,
-                        familyMigrateNeeded: familyMigrateNeeded
-                    )
-                    alert.addButton(withTitle: "迁移相关")
-                    alert.addButton(withTitle: "仅迁移当前")
-                    alert.addButton(withTitle: "取消")
-                    let response = alert.runModal()
-                    if response == .alertFirstButtonReturn {
-                        includeFamily = true
-                    } else if response == .alertSecondButtonReturn {
-                        includeFamily = false
-                    } else {
-                        self.handleProviderMigrationCancelled(statusText: sessionProviderMigrationCancelledStatusText())
-                        return
-                    }
-                } else {
-                    let alert = NSAlert()
-                    alert.alertStyle = .informational
-                    alert.messageText = sessionProviderMigrationCurrentAlertTitle()
-                    alert.informativeText = sessionProviderMigrationCurrentAlertText(
-                        targetProvider: targetProvider,
-                        currentProviderDisplay: currentProviderDisplay,
-                        threadID: session.threadID,
-                        typeLabel: sessionTypeLabel(session)
-                    )
-                    alert.addButton(withTitle: "迁移")
-                    alert.addButton(withTitle: "取消")
-                    guard alert.runModal() == .alertFirstButtonReturn else {
-                        self.handleProviderMigrationCancelled(statusText: sessionProviderMigrationCancelledStatusText())
-                        return
-                    }
-                    includeFamily = false
-                }
+                guard let includeFamily = self.promptForSessionProviderMigration(
+                    session: session,
+                    targetProvider: targetProvider,
+                    currentProviderDisplay: currentProviderDisplay,
+                    isSubagent: isSubagent,
+                    familyCount: familyCount,
+                    familyMigrateNeeded: familyMigrateNeeded,
+                    directChildCount: directChildCount
+                ) else { return }
 
                 self.performProviderMigrationExecution(
                     runningStatusText: sessionProviderMigrationRunningStatusText(),
