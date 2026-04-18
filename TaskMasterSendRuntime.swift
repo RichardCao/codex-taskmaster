@@ -1159,6 +1159,40 @@ final class SendRequestCoordinator {
         )
     }
 
+    private func retrySendViaRecoveredLiveTTY(
+        target: String,
+        startingTTY: String,
+        message: String,
+        clearExistingInput: Bool
+    ) throws -> String {
+        let resolved = recoverLiveTTY(target: target, previousTTY: startingTTY)
+        guard let liveTTY = resolved.tty, !liveTTY.isEmpty, resolved.changed else {
+            throw makeResolvedTTYFocusFailure(
+                target: target,
+                startingTTY: startingTTY,
+                resolution: resolved
+            )
+        }
+
+        do {
+            return try sendViaResolvedTTY(
+                target: target,
+                initialTTY: liveTTY,
+                message: message,
+                clearExistingInput: clearExistingInput
+            )
+        } catch {
+            if isTTYFocusFailure(error) {
+                throw makeResolvedTTYFocusFailure(
+                    target: target,
+                    startingTTY: startingTTY,
+                    resolution: resolved
+                )
+            }
+            throw error
+        }
+    }
+
     private func sendWithLiveTTYRecovery(target: String, initialTTY: String, message: String, clearExistingInput: Bool) throws -> String {
         let startingTTY = normalizeTTYIdentifier(initialTTY)
 
@@ -1173,33 +1207,12 @@ final class SendRequestCoordinator {
             guard isTTYFocusFailure(error) else {
                 throw error
             }
-
-            let resolved = recoverLiveTTY(target: target, previousTTY: startingTTY)
-            guard let liveTTY = resolved.tty, !liveTTY.isEmpty, resolved.changed else {
-                throw makeResolvedTTYFocusFailure(
-                    target: target,
-                    startingTTY: startingTTY,
-                    resolution: resolved
-                )
-            }
-
-            do {
-                return try sendViaResolvedTTY(
-                    target: target,
-                    initialTTY: liveTTY,
-                    message: message,
-                    clearExistingInput: clearExistingInput
-                )
-            } catch {
-                if isTTYFocusFailure(error) {
-                    throw makeResolvedTTYFocusFailure(
-                        target: target,
-                        startingTTY: startingTTY,
-                        resolution: resolved
-                    )
-                }
-                throw error
-            }
+            return try retrySendViaRecoveredLiveTTY(
+                target: target,
+                startingTTY: startingTTY,
+                message: message,
+                clearExistingInput: clearExistingInput
+            )
         }
     }
 
