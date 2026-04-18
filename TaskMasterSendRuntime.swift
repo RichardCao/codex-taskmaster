@@ -690,6 +690,28 @@ final class SendRequestCoordinator {
         )
     }
 
+    private func finishQueuedSendDeliveryFailure(
+        target: String,
+        forceSend: Bool,
+        probeStatus: String,
+        terminalState: String,
+        error: Error,
+        resolution: LiveTTYResolution?,
+        finish: ([String: Any]) -> Void
+    ) {
+        let failureReason = sendFailureReason(for: error)
+        let detail = appendLiveTTYResolutionDetail(error.localizedDescription, resolution: resolution)
+        finishFailedSendRequest(
+            target: target,
+            forceSend: forceSend,
+            reason: failureReason,
+            detail: detail,
+            probeStatus: probeStatus,
+            terminalState: terminalState,
+            finish: finish
+        )
+    }
+
     private func finishFailedSendRequest(
         target: String,
         forceSend: Bool,
@@ -1009,15 +1031,13 @@ final class SendRequestCoordinator {
                 clearExistingInput: clearResidualInputBeforeSend
             )
         } catch {
-            let failureReason = sendFailureReason(for: error)
-            let detail = appendLiveTTYResolutionDetail(error.localizedDescription, resolution: preparedProbe.resolution)
-            finishFailedSendRequest(
+            finishQueuedSendDeliveryFailure(
                 target: target,
                 forceSend: forceSend,
-                reason: failureReason,
-                detail: detail,
                 probeStatus: probeStatus,
                 terminalState: terminalState,
+                error: error,
+                resolution: preparedProbe.resolution,
                 finish: finishQueuedRequest
             )
             return
