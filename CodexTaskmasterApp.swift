@@ -3405,7 +3405,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         if session.isArchived {
             return .systemBlue
         }
-        if session.terminalState == "unavailable" && shouldCollapseUnavailableTerminalIntoDisconnectedStatus(session) {
+        if session.terminalStateKind == .unavailable && shouldCollapseUnavailableTerminalIntoDisconnectedStatus(session) {
             return .systemRed
         }
         switch session.status {

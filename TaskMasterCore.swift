@@ -712,6 +712,10 @@ struct SessionSnapshot {
     var updatedAtTimeInterval: TimeInterval? {
         updatedAtEpoch
     }
+
+    var terminalStateKind: SessionTerminalState {
+        SessionTerminalState(rawValueOrUnknown: terminalState)
+    }
 }
 
 struct SendResultSnapshot {
@@ -1082,11 +1086,26 @@ func mergeSessionSnapshots(existing: [SessionSnapshot], newSnapshots: [SessionSn
     }
 }
 
+enum SessionTerminalState: String {
+    case promptReady = "prompt_ready"
+    case promptWithInput = "prompt_with_input"
+    case queuedMessagesPending = "queued_messages_pending"
+    case noVisiblePrompt = "no_visible_prompt"
+    case busy = "busy"
+    case unavailable = "unavailable"
+    case archived = "archived"
+    case unknown
+
+    init(rawValueOrUnknown rawValue: String) {
+        self = SessionTerminalState(rawValue: rawValue) ?? .unknown
+    }
+}
+
 func localizedSessionStatusLabel(_ session: SessionSnapshot) -> String {
     if session.isArchived {
         return "已归档"
     }
-    if session.terminalState == "unavailable" && shouldCollapseUnavailableTerminalIntoDisconnectedStatus(session) {
+    if session.terminalStateKind == .unavailable && shouldCollapseUnavailableTerminalIntoDisconnectedStatus(session) {
         return "断联"
     }
 
@@ -1119,7 +1138,7 @@ func localizedSessionStatusLabel(_ session: SessionSnapshot) -> String {
 }
 
 func shouldCollapseUnavailableTerminalIntoDisconnectedStatus(_ session: SessionSnapshot) -> Bool {
-    guard session.terminalState == "unavailable" else { return false }
+    guard session.terminalStateKind == .unavailable else { return false }
     switch session.status {
     case let status where status.hasPrefix("active"):
         return false
