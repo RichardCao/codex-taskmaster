@@ -1403,6 +1403,7 @@ enum SessionTerminalState: String {
     case promptReady = "prompt_ready"
     case promptWithInput = "prompt_with_input"
     case queuedMessagesPending = "queued_messages_pending"
+    case footerVisibleOnly = "footer_visible_only"
     case noVisiblePrompt = "no_visible_prompt"
     case busy = "busy"
     case unavailable = "unavailable"
@@ -1526,6 +1527,8 @@ func localizedTerminalState(_ state: String) -> String {
         return "有残留输入"
     case "queued_messages_pending":
         return "消息排队中"
+    case "footer_visible_only":
+        return "仅见模型底栏"
     case "no_visible_prompt":
         return "未见提示符"
     case "busy":
@@ -1698,6 +1701,8 @@ func localizedLoopTerminalState(_ state: String) -> String {
         return "提示符上有输入"
     case "queued_messages_pending":
         return "消息已排队待处理"
+    case "footer_visible_only":
+        return "仅看到模型底栏"
     case "no_visible_prompt":
         return "未看到可用提示符"
     case "busy":
@@ -1990,6 +1995,8 @@ func detailedNotSendableLabel(probeStatus: String, terminalState: String) -> Str
     switch terminalState {
     case "queued_messages_pending":
         return "消息排队中"
+    case "footer_visible_only":
+        return "仅见模型底栏"
     case "no_visible_prompt":
         return "未看到可用提示符"
     case "unavailable":

@@ -24,10 +24,10 @@
 3. `done` session runtime status 协议对齐
    目标：让 helper 与 Swift/Core 的 session status 集合保持一致，补上 `idle_with_queued_messages` 等缺失映射，并补 core 回归。
 
-4. `in_progress` terminal state 协议对齐
+4. `done` terminal state 协议对齐
    目标：让 helper 与 Swift/Core 的 terminal state 集合保持一致，显式支持 `footer_visible_only`，避免 UI 退化成原始字符串。
 
-5. `pending` 最近发送结果扫描正确性修复
+5. `in_progress` 最近发送结果扫描正确性修复
    目标：修正 session 详情区“最近发送结果”的扫描逻辑，不再因为全局最新文件裁剪而漏掉当前 session 的较旧结果。
 
 6. `pending` prompt 搜索缓存失效修复

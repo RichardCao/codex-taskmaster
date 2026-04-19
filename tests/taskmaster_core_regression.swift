@@ -840,6 +840,8 @@ struct TaskMasterCoreRegressionRunner {
     private static func runLocalizationChecks() {
         expect(localizedSendReason("missing_accessibility_permission") == "缺少辅助功能权限", "expected permission failure to localize consistently")
         expect(localizedTerminalState("queued_messages_pending") == "消息排队中", "expected queued terminal state to localize consistently")
+        expect(localizedTerminalState("footer_visible_only") == "仅见模型底栏", "expected footer-only terminal state to localize consistently")
+        expect(localizedLoopTerminalState("footer_visible_only") == "仅看到模型底栏", "expected footer-only loop terminal state to localize consistently")
         expect(localizedProbeStatus("idle_with_queued_messages") == "空闲但消息排队", "expected queued idle probe status to localize consistently")
         expect(
             localizedSessionReason("a started turn has no later task_complete") == "检测到已开始的回合，但后面没有看到 task_complete，当前可能仍在执行",
@@ -897,6 +899,7 @@ struct TaskMasterCoreRegressionRunner {
         expect(isSendableProbeState(probeStatus: "idle_stable", terminalState: "prompt_ready"), "expected idle stable prompt-ready to be sendable")
         expect(isSendableProbeState(probeStatus: "idle_with_residual_input", terminalState: "prompt_with_input"), "expected residual input case to remain sendable")
         expect(!isSendableProbeState(probeStatus: "busy_turn_open", terminalState: "prompt_with_input"), "expected busy prompt-with-input to remain blocked")
+        expect(detailedNotSendableLabel(probeStatus: "idle_stable", terminalState: "footer_visible_only") == "仅见模型底栏", "expected footer-only terminal state to map to the new blocked label")
     }
 
     private static func runQueuedAcceptanceRuleChecks() {
