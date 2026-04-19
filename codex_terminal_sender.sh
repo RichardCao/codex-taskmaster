@@ -1056,7 +1056,7 @@ probe_session_status() {
   [[ -n "${rollout_path:-}" && -f "${rollout_path:-}" ]] || die "could not find rollout path for target '$target'"
   tty_name="$(resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path" 2>/dev/null || true)"
 
-  python3 - "$thread_id" "$thread_title" "$session_name" "$rollout_path" "$tty_name" "$CODEX_LOGS_DB_PATH" "$PROBE_RECENT_LOG_WINDOW_SECONDS" "$model_provider" "$session_source" "$agent_nickname" "$agent_role" <<'PY'
+  python3 - "$thread_id" "$thread_title" "$session_name" "$rollout_path" "$tty_name" "$CODEX_LOGS_DB_PATH" "$PROBE_RECENT_LOG_WINDOW_SECONDS" "$model_provider" "$session_source" "$agent_nickname" "$agent_role" "${CODEX_TASKMASTER_TERMINAL_SNAPSHOT_FIXTURE:-}" <<'PY'
 import json
 import sqlite3
 import sys
@@ -1064,7 +1064,7 @@ import time
 import subprocess
 from pathlib import Path
 
-thread_id, thread_title, session_name, rollout_path, tty_name, logs_db, recent_log_window, model_provider, session_source, agent_nickname, agent_role = sys.argv[1:]
+thread_id, thread_title, session_name, rollout_path, tty_name, logs_db, recent_log_window, model_provider, session_source, agent_nickname, agent_role, terminal_snapshot_fixture = sys.argv[1:]
 recent_log_window = int(recent_log_window)
 
 
@@ -1080,14 +1080,97 @@ def read_terminal_snapshot(tty_value: str):
         }
 
     target_tty = tty_value if tty_value.startswith("/dev/") else f"/dev/{tty_value}"
+    def parse_terminal_snapshot_record(window_id: str, busy_text: str, processes: str, nonempty_tail, tab_selected):
+        prompt_line = ""
+        for line in reversed(nonempty_tail):
+            if line.startswith("› "):
+                prompt_line = line
+                break
+
+        footer_visible = any(("· ~" in line or "· /" in line) and "left" in line for line in nonempty_tail)
+        placeholder_visible = any("› Improve documentation in @filename" in line for line in nonempty_tail)
+        queued_messages_visible = any(
+            line.lstrip().startswith("↳ ") or "Messages to be submitted after next tool call" in line
+            for line in nonempty_tail
+        )
+
+        state = "no_visible_prompt"
+        reason = "prompt/footer not visible in terminal tail"
+        if queued_messages_visible:
+            state = "queued_messages_pending"
+            reason = "queued messages are visible in the terminal tail"
+        elif placeholder_visible and footer_visible:
+            state = "prompt_ready"
+            reason = "placeholder prompt and model footer are visible"
+        elif prompt_line and footer_visible:
+            state = "prompt_with_input"
+            reason = "prompt line and model footer are visible with non-placeholder input"
+        elif footer_visible:
+            state = "footer_visible_only"
+            reason = "model footer is visible without a clear prompt line"
+
+        return {
+            "state": state,
+            "reason": reason,
+            "window_id": window_id,
+            "busy": (busy_text == "true"),
+            "processes": processes,
+            "tail": nonempty_tail,
+            "tab_selected": tab_selected,
+        }
+
+    if terminal_snapshot_fixture:
+        try:
+            records = json.loads(Path(terminal_snapshot_fixture).read_text(encoding="utf-8"))
+        except Exception as exc:
+            return {
+                "state": "unavailable",
+                "reason": f"terminal snapshot fixture failed: {exc}",
+                "window_id": "",
+                "busy": None,
+                "processes": "",
+                "tail": [],
+                "tab_selected": None,
+            }
+
+        for record in records if isinstance(records, list) else []:
+            if str(record.get("tty", "")).strip() != target_tty:
+                continue
+            contents = str(record.get("contents", "") or "")
+            nonempty_tail = [line.rstrip() for line in contents.splitlines() if line.strip()][-14:]
+            return parse_terminal_snapshot_record(
+                window_id=str(record.get("window_id", "") or ""),
+                busy_text=str(record.get("busy", "") or ""),
+                processes=str(record.get("processes", "") or ""),
+                nonempty_tail=nonempty_tail,
+                tab_selected=bool(record.get("tab_selected", False)),
+            )
+        return {
+            "state": "unavailable",
+            "reason": "tty not found",
+            "window_id": "",
+            "busy": None,
+            "processes": "",
+            "tail": [],
+            "tab_selected": None,
+        }
+
     applescript = f'''
 tell application "Terminal"
   repeat with w in windows
-    try
-      if (tty of selected tab of w) is equal to "{target_tty}" then
-        return (id of w as text) & linefeed & (busy of selected tab of w as text) & linefeed & ((processes of selected tab of w as text)) & linefeed & (contents of selected tab of w)
-      end if
-    end try
+    repeat with t in tabs of w
+      try
+        if (tty of t) is equal to "{target_tty}" then
+          set selectedText to "false"
+          try
+            if t is equal to selected tab of w then
+              set selectedText to "true"
+            end if
+          end try
+          return (id of w as text) & linefeed & selectedText & linefeed & (busy of t as text) & linefeed & ((processes of t as text)) & linefeed & (contents of t)
+        end if
+      end try
+    end repeat
   end repeat
 end tell
 return ""
@@ -1113,47 +1196,18 @@ return ""
 
     lines = raw.splitlines()
     window_id = lines[0].strip() if len(lines) >= 1 else ""
-    busy_text = lines[1].strip().lower() if len(lines) >= 2 else ""
-    processes = lines[2].strip() if len(lines) >= 3 else ""
-    contents = "\n".join(lines[3:]) if len(lines) >= 4 else ""
+    tab_selected = lines[1].strip().lower() == "true" if len(lines) >= 2 else None
+    busy_text = lines[2].strip().lower() if len(lines) >= 3 else ""
+    processes = lines[3].strip() if len(lines) >= 4 else ""
+    contents = "\n".join(lines[4:]) if len(lines) >= 5 else ""
     nonempty_tail = [line.rstrip() for line in contents.splitlines() if line.strip()][-14:]
-
-    prompt_line = ""
-    for line in reversed(nonempty_tail):
-        if line.startswith("› "):
-            prompt_line = line
-            break
-
-    footer_visible = any(("· ~" in line or "· /" in line) and "left" in line for line in nonempty_tail)
-    placeholder_visible = any("› Improve documentation in @filename" in line for line in nonempty_tail)
-    queued_messages_visible = any(
-        line.lstrip().startswith("↳ ") or "Messages to be submitted after next tool call" in line
-        for line in nonempty_tail
+    return parse_terminal_snapshot_record(
+        window_id=window_id,
+        busy_text=busy_text,
+        processes=processes,
+        nonempty_tail=nonempty_tail,
+        tab_selected=tab_selected,
     )
-
-    state = "no_visible_prompt"
-    reason = "prompt/footer not visible in terminal tail"
-    if queued_messages_visible:
-        state = "queued_messages_pending"
-        reason = "queued messages are visible in the terminal tail"
-    elif placeholder_visible and footer_visible:
-        state = "prompt_ready"
-        reason = "placeholder prompt and model footer are visible"
-    elif prompt_line and footer_visible:
-        state = "prompt_with_input"
-        reason = "prompt line and model footer are visible with non-placeholder input"
-    elif footer_visible:
-        state = "footer_visible_only"
-        reason = "model footer is visible without a clear prompt line"
-
-    return {
-        "state": state,
-        "reason": reason,
-        "window_id": window_id,
-        "busy": (busy_text == "true"),
-        "processes": processes,
-        "tail": nonempty_tail,
-    }
 
 
 events = []

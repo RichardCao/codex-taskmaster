@@ -301,6 +301,20 @@ ttys101 codex resume alpha
 ttys202 codex resume bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
 EOF
 
+TERMINAL_SNAPSHOT_FIXTURE="${TEST_TMP}/terminal-snapshots.json"
+cat >"$TERMINAL_SNAPSHOT_FIXTURE" <<'EOF'
+[
+  {
+    "tty": "/dev/ttys101",
+    "window_id": "101",
+    "tab_selected": false,
+    "busy": false,
+    "processes": "codex",
+    "contents": "context line\n› Improve documentation in @filename\nmodel · ~/repo left"
+  }
+]
+EOF
+
 resolved_tty="$(
   CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_FIXTURE" \
   "$HELPER" resolve-live-tty -t alpha
@@ -323,6 +337,15 @@ probe_metadata_pipe="$("$HELPER" probe -t dddddddd-dddd-dddd-dddd-dddddddddddd)"
 assert_contains "$probe_metadata_pipe" "agent_nickname: worker|d"
 assert_contains "$probe_metadata_pipe" "agent_role: worker|role"
 assert_contains "$probe_metadata_pipe" "source: {\"subagent\":{\"thread_spawn\":{\"parent_thread_id\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\"}}}|worker"
+
+probe_background_tab="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_FIXTURE" \
+  CODEX_TASKMASTER_TERMINAL_SNAPSHOT_FIXTURE="$TERMINAL_SNAPSHOT_FIXTURE" \
+  "$HELPER" probe -t alpha
+)"
+assert_contains "$probe_background_tab" "tty: ttys101"
+assert_contains "$probe_background_tab" "terminal_state: prompt_ready"
+assert_contains "$probe_background_tab" "terminal_reason: placeholder prompt and model footer are visible"
 
 TTY_AMBIGUOUS_FIXTURE="${TEST_TMP}/tty-ps-ambiguous.txt"
 cat >"$TTY_AMBIGUOUS_FIXTURE" <<'EOF'
