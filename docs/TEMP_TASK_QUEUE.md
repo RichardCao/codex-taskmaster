@@ -26,3 +26,7 @@
 
 4. `in_progress` 主控制器残余展示编排清理
    目标：继续压缩 `CodexTaskmasterApp.swift` 中的展示性 helper、重复 UI 收尾逻辑和零散状态判断，为 Linux 迁移前做最后一轮收口。
+   当前子任务：
+   - `done` 重复 alert 执行 helper 收口
+   - `pending` session / provider migration 交互状态收口
+   - `pending` loop / session 选择与 blocked 提示收口

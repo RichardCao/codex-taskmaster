@@ -2750,12 +2750,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func handleProviderMigrationNoop(informativeText: String, logText: String) {
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = sessionProviderMigrationNoopAlertTitle()
-        alert.informativeText = informativeText
-        alert.addButton(withTitle: "确定")
-        alert.runModal()
+        showAlert(
+            style: .informational,
+            title: sessionProviderMigrationNoopAlertTitle(),
+            informativeText: informativeText,
+            buttonTitles: ["确定"]
+        )
         appendOutput(logText)
         setStatus(noMigrationNeededStatusText(), key: "action")
     }
@@ -2770,22 +2770,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         directChildCount: Int
     ) -> Bool? {
         if isSubagent || directChildCount > 0 {
-            let alert = NSAlert()
-            alert.alertStyle = .warning
-            alert.messageText = sessionProviderMigrationRelatedAlertTitle()
-            alert.informativeText = sessionProviderMigrationRelatedAlertText(
-                targetProvider: targetProvider,
-                currentProviderDisplay: currentProviderDisplay,
-                threadID: session.threadID,
-                typeLabel: sessionTypeLabel(session),
-                isSubagent: isSubagent,
-                familyCount: familyCount,
-                familyMigrateNeeded: familyMigrateNeeded
+            let response = runAlert(
+                style: .warning,
+                title: sessionProviderMigrationRelatedAlertTitle(),
+                informativeText: sessionProviderMigrationRelatedAlertText(
+                    targetProvider: targetProvider,
+                    currentProviderDisplay: currentProviderDisplay,
+                    threadID: session.threadID,
+                    typeLabel: sessionTypeLabel(session),
+                    isSubagent: isSubagent,
+                    familyCount: familyCount,
+                    familyMigrateNeeded: familyMigrateNeeded
+                ),
+                buttonTitles: ["迁移相关", "仅迁移当前", "取消"]
             )
-            alert.addButton(withTitle: "迁移相关")
-            alert.addButton(withTitle: "仅迁移当前")
-            alert.addButton(withTitle: "取消")
-            let response = alert.runModal()
             if response == .alertFirstButtonReturn {
                 return true
             }
@@ -2796,18 +2794,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             return nil
         }
 
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = sessionProviderMigrationCurrentAlertTitle()
-        alert.informativeText = sessionProviderMigrationCurrentAlertText(
-            targetProvider: targetProvider,
-            currentProviderDisplay: currentProviderDisplay,
-            threadID: session.threadID,
-            typeLabel: sessionTypeLabel(session)
-        )
-        alert.addButton(withTitle: "迁移")
-        alert.addButton(withTitle: "取消")
-        guard alert.runModal() == .alertFirstButtonReturn else {
+        guard runAlert(
+            style: .informational,
+            title: sessionProviderMigrationCurrentAlertTitle(),
+            informativeText: sessionProviderMigrationCurrentAlertText(
+                targetProvider: targetProvider,
+                currentProviderDisplay: currentProviderDisplay,
+                threadID: session.threadID,
+                typeLabel: sessionTypeLabel(session)
+            ),
+            buttonTitles: ["迁移", "取消"]
+        ) == .alertFirstButtonReturn else {
             handleProviderMigrationCancelled(statusText: sessionProviderMigrationCancelledStatusText())
             return nil
         }
@@ -2819,18 +2816,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         totalThreads: Int,
         migrateNeeded: Int
     ) -> Bool {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = allSessionProviderMigrationAlertTitle()
-        alert.informativeText = allSessionProviderMigrationAlertText(
-            targetProvider: targetProvider,
-            totalThreads: totalThreads,
-            migrateNeeded: migrateNeeded
-        )
-        alert.addButton(withTitle: "全部迁移")
-        alert.addButton(withTitle: "取消")
-        alert.buttons.first?.hasDestructiveAction = true
-        guard alert.runModal() == .alertFirstButtonReturn else {
+        guard runAlert(
+            style: .warning,
+            title: allSessionProviderMigrationAlertTitle(),
+            informativeText: allSessionProviderMigrationAlertText(
+                targetProvider: targetProvider,
+                totalThreads: totalThreads,
+                migrateNeeded: migrateNeeded
+            ),
+            buttonTitles: ["全部迁移", "取消"],
+            destructiveFirstButton: true
+        ) == .alertFirstButtonReturn else {
             handleProviderMigrationCancelled(statusText: allSessionProviderMigrationCancelledStatusText())
             return false
         }
@@ -2838,31 +2834,29 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func confirmSessionArchive(session: SessionSnapshot, matchingLoopTargets: [String]) -> Bool {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = sessionArchiveAlertTitle()
-        alert.informativeText = sessionArchiveAlertText(
-            threadID: session.threadID,
-            target: sessionEffectiveTarget(session),
-            matchingLoopTargets: matchingLoopTargets
-        )
-        alert.addButton(withTitle: "归档")
-        alert.addButton(withTitle: "取消")
-        alert.buttons.first?.hasDestructiveAction = true
-        return alert.runModal() == .alertFirstButtonReturn
+        runAlert(
+            style: .warning,
+            title: sessionArchiveAlertTitle(),
+            informativeText: sessionArchiveAlertText(
+                threadID: session.threadID,
+                target: sessionEffectiveTarget(session),
+                matchingLoopTargets: matchingLoopTargets
+            ),
+            buttonTitles: ["归档", "取消"],
+            destructiveFirstButton: true
+        ) == .alertFirstButtonReturn
     }
 
     private func confirmSessionRestore(session: SessionSnapshot) -> Bool {
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = sessionRestoreAlertTitle()
-        alert.informativeText = sessionRestoreAlertText(
-            threadID: session.threadID,
-            name: sessionActualName(session).isEmpty ? "-" : sessionActualName(session)
-        )
-        alert.addButton(withTitle: "恢复")
-        alert.addButton(withTitle: "取消")
-        return alert.runModal() == .alertFirstButtonReturn
+        runAlert(
+            style: .informational,
+            title: sessionRestoreAlertTitle(),
+            informativeText: sessionRestoreAlertText(
+                threadID: session.threadID,
+                name: sessionActualName(session).isEmpty ? "-" : sessionActualName(session)
+            ),
+            buttonTitles: ["恢复", "取消"]
+        ) == .alertFirstButtonReturn
     }
 
     private func beginProviderMigrationExecution(runningStatusText: String, startLogText: String) {
@@ -5006,27 +5000,27 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func showAmbiguousTargetAlert(target: String, detail: String, actionName: String, throttled: Bool) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = ambiguousTargetAlertTitle()
-        alert.informativeText = ambiguousTargetAlertText(actionName: actionName, detail: detail)
-        alert.addButton(withTitle: "确定")
-        alert.runModal()
+        showAlert(
+            style: .warning,
+            title: ambiguousTargetAlertTitle(),
+            informativeText: ambiguousTargetAlertText(actionName: actionName, detail: detail),
+            buttonTitles: ["确定"]
+        )
     }
 
     private func showRuntimePermissionAlert(actionName: String, detail: String) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = runtimePermissionAlertTitle(actionName: actionName)
-        alert.informativeText = runtimePermissionAlertText(
-            actionName: actionName,
-            runtimeDirectoryPath: runtimeDirectoryPath,
-            userLoopStateDirectoryPath: userLoopStateDirectoryPath,
-            legacyLoopStateDirectoryPath: legacyLoopStateDirectoryPath,
-            detail: detail
+        showAlert(
+            style: .warning,
+            title: runtimePermissionAlertTitle(actionName: actionName),
+            informativeText: runtimePermissionAlertText(
+                actionName: actionName,
+                runtimeDirectoryPath: runtimeDirectoryPath,
+                userLoopStateDirectoryPath: userLoopStateDirectoryPath,
+                legacyLoopStateDirectoryPath: legacyLoopStateDirectoryPath,
+                detail: detail
+            ),
+            buttonTitles: ["确定"]
         )
-        alert.addButton(withTitle: "确定")
-        alert.runModal()
     }
 
     private func ensureWritableDirectory(at path: String) -> String? {
@@ -5198,17 +5192,51 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func showSessionActionBlockedAlert(actionLabel: String, session: SessionSnapshot, detail: String, ambiguous: Bool) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = sessionActionBlockedAlertTitle(actionLabel: actionLabel, ambiguous: ambiguous)
-        alert.informativeText = sessionActionBlockedAlertText(
-            actionLabel: actionLabel,
-            session: session,
-            detail: detail,
-            ambiguous: ambiguous
+        showAlert(
+            style: .warning,
+            title: sessionActionBlockedAlertTitle(actionLabel: actionLabel, ambiguous: ambiguous),
+            informativeText: sessionActionBlockedAlertText(
+                actionLabel: actionLabel,
+                session: session,
+                detail: detail,
+                ambiguous: ambiguous
+            ),
+            buttonTitles: ["知道了"]
         )
-        alert.addButton(withTitle: "知道了")
-        alert.runModal()
+    }
+
+    private func runAlert(
+        style: NSAlert.Style,
+        title: String,
+        informativeText: String,
+        buttonTitles: [String],
+        destructiveFirstButton: Bool = false
+    ) -> NSApplication.ModalResponse {
+        let alert = NSAlert()
+        alert.alertStyle = style
+        alert.messageText = title
+        alert.informativeText = informativeText
+        buttonTitles.forEach { alert.addButton(withTitle: $0) }
+        if destructiveFirstButton {
+            alert.buttons.first?.hasDestructiveAction = true
+        }
+        return alert.runModal()
+    }
+
+    private func showAlert(
+        style: NSAlert.Style,
+        title: String,
+        informativeText: String,
+        buttonTitles: [String],
+        destructiveFirstButton: Bool = false
+    ) {
+        _ = runAlert(
+            style: style,
+            title: title,
+            informativeText: informativeText,
+            buttonTitles: buttonTitles,
+            destructiveFirstButton: destructiveFirstButton
+        )
     }
 
     private func helperTargetArgument(from arguments: [String]) -> String? {
