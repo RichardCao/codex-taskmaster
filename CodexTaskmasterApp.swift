@@ -1869,6 +1869,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         updateSessionFilterHeaderIndicators()
     }
 
+    private func invalidatePromptSearchCache(threadIDs: [String]) {
+        let validThreadIDs = Array(Set(threadIDs.filter { !$0.isEmpty }))
+        guard !validThreadIDs.isEmpty else { return }
+
+        sessionPromptSearchCacheLock.lock()
+        for threadID in validThreadIDs {
+            sessionPromptSearchCache.removeValue(forKey: threadID)
+        }
+        sessionPromptSearchCacheLock.unlock()
+    }
+
     private func isCurrentSessionPromptSearchRevision(_ revision: Int) -> Bool {
         sessionPromptSearchRevisionLock.lock()
         defer { sessionPromptSearchRevisionLock.unlock() }
@@ -1997,6 +2008,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func applyRefreshedSessionSnapshots(_ refreshedSnapshots: [SessionSnapshot], preserveSelectionThreadID: String?) {
         guard !refreshedSnapshots.isEmpty else { return }
 
+        invalidatePromptSearchCache(threadIDs: threadIDsNeedingPromptCacheInvalidation(previous: allSessionSnapshots, refreshed: refreshedSnapshots))
         allSessionSnapshots = overlaySessionSnapshots(existing: allSessionSnapshots, refreshed: refreshedSnapshots)
         sessionStatusRefreshCoordinator.prune(to: allSessionSnapshots)
         renderSessionSnapshots(

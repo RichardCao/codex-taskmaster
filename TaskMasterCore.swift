@@ -1399,6 +1399,25 @@ func resolveClaimedSessionRefreshSnapshots(claimed: [SessionSnapshot], refreshed
     return claimed.map { refreshedByThreadID[$0.threadID] ?? $0 }
 }
 
+func threadIDsNeedingPromptCacheInvalidation(previous: [SessionSnapshot], refreshed: [SessionSnapshot]) -> [String] {
+    guard !refreshed.isEmpty else { return [] }
+
+    let previousByThreadID = Dictionary(uniqueKeysWithValues: previous.map { ($0.threadID, $0) })
+    var invalidated: [String] = []
+
+    for snapshot in refreshed {
+        guard let previousSnapshot = previousByThreadID[snapshot.threadID] else {
+            invalidated.append(snapshot.threadID)
+            continue
+        }
+        if previousSnapshot.updatedAtEpoch != snapshot.updatedAtEpoch || previousSnapshot.rolloutPath != snapshot.rolloutPath {
+            invalidated.append(snapshot.threadID)
+        }
+    }
+
+    return invalidated
+}
+
 enum SessionTerminalState: String {
     case promptReady = "prompt_ready"
     case promptWithInput = "prompt_with_input"

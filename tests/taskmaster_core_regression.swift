@@ -367,6 +367,32 @@ struct TaskMasterCoreRegressionRunner {
 
         let resolved = resolveClaimedSessionRefreshSnapshots(claimed: [existingB, existingA], refreshed: [refreshedB])
         expect(resolved.map(\.name) == ["b-new", "a-old"], "expected resolveClaimedSessionRefreshSnapshots to resolve refreshed entries and preserve claimed order")
+
+        let invalidatedThreadIDs = threadIDsNeedingPromptCacheInvalidation(
+            previous: [existingA, existingB],
+            refreshed: [
+                refreshedB,
+                SessionSnapshot(
+                    name: "c-new",
+                    target: "c",
+                    threadID: "thread-c",
+                    provider: "openai",
+                    source: "cli",
+                    parentThreadID: "",
+                    agentNickname: "",
+                    agentRole: "",
+                    status: "idle_stable",
+                    reason: "",
+                    terminalState: "prompt_ready",
+                    tty: "ttys003",
+                    updatedAtEpoch: 50,
+                    rolloutPath: "/tmp/rollout-c.jsonl",
+                    preview: "",
+                    isArchived: false
+                )
+            ]
+        )
+        expect(invalidatedThreadIDs == ["thread-b", "thread-c"], "expected prompt cache invalidation to follow updated session snapshots")
     }
 
     private static func runMergeLoopSnapshotChecks() {
