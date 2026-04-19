@@ -4,7 +4,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HELPER="${ROOT}/codex_terminal_sender.sh"
 TEST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/codex-taskmaster-test.XXXXXX")"
-trap 'rm -rf "$TEST_TMP"' EXIT
+
+cleanup_test_processes() {
+  local pid
+  for pid in "${SEND_REQUEST_RESPONDER_PID:-}" "${DAEMON_A_PID:-}" "${DAEMON_B_PID:-}"; do
+    [[ -n "${pid:-}" ]] || continue
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  done
+}
+
+trap 'cleanup_test_processes; rm -rf "$TEST_TMP"' EXIT
 
 assert_contains() {
   local haystack="$1"
@@ -723,6 +733,47 @@ CODEX_TASKMASTER_LOOP_FORCE_FAILURE_RETRY_SECONDS=17 \
 force_status="$("$HELPER" status -t "$force_target")"
 force_next_run="$(printf '%s\n' "$force_status" | awk -F': ' '$1=="next_run_epoch"{print $2}')"
 (( force_next_run - force_now_before >= 18 ))
+
+DAEMON_STATE_A="${TEST_TMP}/daemon-state-a"
+DAEMON_STATE_B="${TEST_TMP}/daemon-state-b"
+mkdir -p "${DAEMON_STATE_A}" "${DAEMON_STATE_B}"
+CODEX_TASKMASTER_STATE_DIR="$DAEMON_STATE_A" "$HELPER" loop-daemon --state-dir="$DAEMON_STATE_A" >/dev/null 2>&1 &
+DAEMON_A_PID="$!"
+CODEX_TASKMASTER_STATE_DIR="$DAEMON_STATE_B" "$HELPER" loop-daemon --state-dir="$DAEMON_STATE_B" >/dev/null 2>&1 &
+DAEMON_B_PID="$!"
+
+python3 - "$DAEMON_STATE_A" "$DAEMON_STATE_B" <<'PY'
+import os
+import sys
+import time
+
+state_a, state_b = sys.argv[1:]
+deadline = time.time() + 5
+while time.time() < deadline:
+    pid_a = os.path.join(state_a, "runtime", "loop-daemon.pid")
+    pid_b = os.path.join(state_b, "runtime", "loop-daemon.pid")
+    if os.path.exists(pid_a) and os.path.exists(pid_b):
+        raise SystemExit(0)
+    time.sleep(0.1)
+raise SystemExit("timed out waiting for loop daemons to write pid files")
+PY
+
+daemon_stop_output="$(CODEX_TASKMASTER_STATE_DIR="$DAEMON_STATE_A" "$HELPER" stop --all)"
+assert_contains "$daemon_stop_output" "no loops"
+sleep 1
+if kill -0 "$DAEMON_A_PID" 2>/dev/null; then
+  printf 'assertion failed: expected daemon A to stop with matching STATE_DIR\n' >&2
+  exit 1
+fi
+wait "$DAEMON_A_PID" 2>/dev/null || true
+if ! kill -0 "$DAEMON_B_PID" 2>/dev/null; then
+  printf 'assertion failed: expected daemon B to remain running for a different STATE_DIR\n' >&2
+  exit 1
+fi
+kill "$DAEMON_B_PID" 2>/dev/null || true
+wait "$DAEMON_B_PID" 2>/dev/null || true
+DAEMON_A_PID=""
+DAEMON_B_PID=""
 
 stop_output="$("$HELPER" stop -t alpha)"
 assert_contains "$stop_output" "stopped loop for target=alpha"

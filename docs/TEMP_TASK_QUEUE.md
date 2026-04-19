@@ -33,10 +33,10 @@
 6. `done` loop `STATE_TAG` 平台无关化
    目标：替换 BSD `stat -f '%m:%z'` 依赖，改用跨平台实现，为 Linux 迁移扫清明确阻断点。
 
-7. `in_progress` loop daemon 实例隔离
+7. `done` loop daemon 实例隔离
    目标：让 daemon 生命周期至少绑定到 `STATE_DIR` 或实例 id，避免多个隔离实例互相踩踏。
 
-8. `pending` loop 调度去全局串行阻塞
+8. `in_progress` loop 调度去全局串行阻塞
    目标：拆开“扫描到期 loop”和“执行单次发送”，避免一个慢 target 拖住所有其他 loop。
 
 9. `pending` `probe-all --json` / `status --json` 去除 `ARG_MAX` 脆弱点

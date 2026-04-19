@@ -501,7 +501,11 @@ sender_daemon_records() {
       } else if (index(command, script " daemon") > 0) {
         mode = "legacy-daemon"
       }
-      print user "|" pid "|" mode "|" command
+      state_dir = ""
+      if (match(command, /--state-dir=[^[:space:]]+/)) {
+        state_dir = substr(command, RSTART + 12, RLENGTH - 12)
+      }
+      print user "|" pid "|" mode "|" state_dir "|" command
     }
   '
 }
@@ -510,7 +514,7 @@ legacy_sender_warning_lines() {
   local line
   local warning_found=1
 
-  while IFS='|' read -r daemon_user daemon_pid daemon_mode daemon_command; do
+  while IFS='|' read -r daemon_user daemon_pid daemon_mode daemon_state_dir daemon_command; do
     [[ -n "${daemon_pid:-}" ]] || continue
     warning_found=0
     if [[ "$daemon_user" != "$(id -un)" ]]; then
@@ -522,13 +526,16 @@ legacy_sender_warning_lines() {
 }
 
 stop_user_owned_sender_daemons() {
+  local target_state_dir="${1:-$STATE_DIR}"
   local current_user
   local stop_failed=0
   current_user="$(id -un)"
 
-  while IFS='|' read -r daemon_user daemon_pid daemon_mode daemon_command; do
+  while IFS='|' read -r daemon_user daemon_pid daemon_mode daemon_state_dir daemon_command; do
     [[ -n "${daemon_pid:-}" ]] || continue
     [[ "$daemon_user" == "$current_user" ]] || continue
+    [[ -n "${daemon_state_dir:-}" ]] || continue
+    [[ "$daemon_state_dir" == "$target_state_dir" ]] || continue
     kill "$daemon_pid" 2>/dev/null || stop_failed=1
   done < <(sender_daemon_records)
 
@@ -3292,7 +3299,7 @@ for fd in (fd0, fd1, fd2):
 
 env = os.environ.copy()
 env["CODEX_TASKMASTER_STATE_DIR"] = state_dir
-os.execve(script, [script, "loop-daemon"], env)
+os.execve(script, [script, "loop-daemon", f"--state-dir={state_dir}"], env)
 PY
 
   sleep 1
@@ -4133,6 +4140,23 @@ parse_wait_idle_args() {
   [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
 }
 
+parse_loop_daemon_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --state-dir=*)
+        shift
+        ;;
+      --state-dir)
+        [[ $# -ge 2 ]] || die "--state-dir requires a value"
+        shift 2
+        ;;
+      *)
+        die "unexpected positional arguments: $*"
+        ;;
+    esac
+  done
+}
+
 main() {
   local cmd="${1:-}"
   [[ -n "$cmd" ]] || { usage; exit 2; }
@@ -4252,7 +4276,7 @@ main() {
       resume_loop "$TARGET" "$LOOP_ID"
       ;;
     loop-daemon)
-      [[ $# -eq 0 ]] || die "unexpected positional arguments: $*"
+      parse_loop_daemon_args "$@"
       loop_daemon_loop
       ;;
     -h|--help|help)
