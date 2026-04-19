@@ -646,6 +646,8 @@ mutex_loser_status="$("$HELPER" status -t "$mutex_loser")"
 assert_contains "$mutex_loser_status" "paused: yes"
 assert_contains "$mutex_loser_status" "failure_reason: loop_conflict_active_session"
 assert_contains "$mutex_loser_status" "pause_reason: loop_conflict_active_session"
+"$HELPER" loop-delete -t "$mutex_a" >/dev/null
+"$HELPER" loop-delete -t "$mutex_b" >/dev/null
 
 same_force_request_id="same-force-inflight-request"
 fresh_request_created_at="$(date +%s)"
@@ -938,8 +940,8 @@ delete_loop_output="$("$HELPER" loop-delete -t alpha)"
 assert_contains "$delete_loop_output" "deleted loop for target=alpha"
 "$HELPER" loop-delete -k "$start_failed_loop_id" >/dev/null
 "$HELPER" loop-delete -t duplicate >/dev/null
-"$HELPER" loop-delete -t "$mutex_a" >/dev/null
-"$HELPER" loop-delete -t "$mutex_b" >/dev/null
+"$HELPER" loop-delete -t "$mutex_a" >/dev/null 2>&1 || true
+"$HELPER" loop-delete -t "$mutex_b" >/dev/null 2>&1 || true
 "$HELPER" loop-delete -t "$accepted_target" >/dev/null
 "$HELPER" loop-delete -t "$force_target" >/dev/null
 status_after_loop_delete="$("$HELPER" status)"

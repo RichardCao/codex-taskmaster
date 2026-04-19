@@ -39,10 +39,10 @@
 8. `done` loop 调度去全局串行阻塞
    目标：拆开“扫描到期 loop”和“执行单次发送”，避免一个慢 target 拖住所有其他 loop。
 
-9. `in_progress` `probe-all --json` / `status --json` 去除 `ARG_MAX` 脆弱点
+9. `done` `probe-all --json` / `status --json` 去除 `ARG_MAX` 脆弱点
    目标：避免把大文本结果塞进单个 argv，改成 stdin 或原生 JSON 流。
 
-10. `pending` loop/state 数据文件执行边界收紧
+10. `in_progress` loop/state 数据文件执行边界收紧
    目标：减少 `source` 直接执行数据文件的风险，至少先把读取边界校验收紧，再评估后续 JSON 化迁移。
 
 11. `pending` `CodexTaskmasterApp.swift` 继续瘦身

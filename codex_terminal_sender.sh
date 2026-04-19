@@ -2279,11 +2279,11 @@ PY
 probe_all_sessions_json() {
   local probe_output
   probe_output="$(probe_all_sessions_text)"
-  python3 - "$probe_output" <<'PY'
+  printf '%s\n' "$probe_output" | python3 -c '
 import json
 import sys
 
-text = sys.argv[1]
+text = sys.stdin.read()
 sessions = []
 current = {}
 
@@ -2306,7 +2306,7 @@ for raw_line in text.splitlines():
 
 flush_current()
 print(json.dumps({"sessions": sessions}, ensure_ascii=False))
-PY
+'
 }
 
 probe_all_sessions() {
@@ -3581,11 +3581,11 @@ save_loop_stopped() {
 
 status_json_from_text() {
   local status_text="$1"
-  python3 - "$status_text" <<'PY'
+  printf '%s\n' "$status_text" | python3 -c '
 import json
 import sys
 
-text = sys.argv[1]
+text = sys.stdin.read()
 loops = []
 warnings = []
 current = {}
@@ -3614,7 +3614,7 @@ for raw_line in text.splitlines():
 
 flush_current()
 print(json.dumps({"loops": loops, "warnings": warnings}, ensure_ascii=False))
-PY
+'
 }
 
 status_one_text_by_key() {
