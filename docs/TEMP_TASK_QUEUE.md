@@ -24,10 +24,10 @@
 3. `done` delete allowlist 与自定义 Codex 根目录对齐
    目标：让 `thread-delete` / `thread-delete-plan` 的 rollout allowlist 根目录从实际配置推导，不再硬编码 `~/.codex/...`。
 
-4. `in_progress` `Package.swift` 测试路径大小写修复
+4. `done` `Package.swift` 测试路径大小写修复
    目标：修正 SwiftPM test target 路径大小写问题，清除 Linux / case-sensitive 文件系统上的直接阻断点。
 
-5. `pending` 默认检查链路补齐核心回归
+5. `in_progress` 默认检查链路补齐核心回归
    目标：把 `test_taskmaster_core.sh`、`test_loop_history_model.sh` 与可选 `swift test` 策略纳入默认或严格检查链路，避免误导性绿灯。
 
 6. `pending` loop `STATE_TAG` 平台无关化

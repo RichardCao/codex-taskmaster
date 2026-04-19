@@ -22,7 +22,7 @@ let package = Package(
         .testTarget(
             name: "TaskMasterCoreLibTests",
             dependencies: ["TaskMasterCoreLib"],
-            path: "Tests/TaskMasterCoreLibTests"
+            path: "tests/TaskMasterCoreLibTests"
         )
     ]
 )
