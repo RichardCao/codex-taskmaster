@@ -166,7 +166,24 @@ paths_for_target() {
 }
 
 loop_source_tag() {
-  stat -f '%m:%z' "$LOOP_FILE" 2>/dev/null || echo missing
+  loop_source_tag_for_file "$LOOP_FILE"
+}
+
+loop_source_tag_for_file() {
+  local file="$1"
+  python3 - "$file" <<'PY'
+import os
+import sys
+
+path = sys.argv[1]
+try:
+    stat_result = os.stat(path)
+except FileNotFoundError:
+    print("missing")
+    raise SystemExit(0)
+
+print(f"{stat_result.st_mtime_ns}:{stat_result.st_size}")
+PY
 }
 
 load_kv_file() {
@@ -3134,7 +3151,7 @@ process_loops_once() {
     local stopped_reason=""
     key="$(basename "${loop_file%.loop}")"
     paths_for_target "$key"
-    source_tag="$(stat -f '%m:%z' "$loop_file" 2>/dev/null || echo missing)"
+    source_tag="$(loop_source_tag_for_file "$loop_file")"
 
     if load_current_loop_status_file "$source_tag"; then
       if [[ "${NEXT_RUN:-}" =~ ^[0-9]+$ ]]; then
@@ -3394,7 +3411,7 @@ resume_loop() {
   MESSAGE=""
   FORCE_SEND="0"
   load_kv_file "$LOOP_FILE"
-  source_tag="$(stat -f '%m:%z' "$LOOP_FILE" 2>/dev/null || echo missing)"
+  source_tag="$(loop_source_tag)"
 
   if load_current_loop_status_file "$source_tag"; then
     failure_reason="${PAUSED_REASON:-${STOPPED_REASON:-${FAILURE_REASON:-}}}"

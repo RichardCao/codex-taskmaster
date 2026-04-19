@@ -30,10 +30,10 @@
 5. `done` 默认检查链路补齐核心回归
    目标：把 `test_taskmaster_core.sh`、`test_loop_history_model.sh` 与可选 `swift test` 策略纳入默认或严格检查链路，避免误导性绿灯。
 
-6. `in_progress` loop `STATE_TAG` 平台无关化
+6. `done` loop `STATE_TAG` 平台无关化
    目标：替换 BSD `stat -f '%m:%z'` 依赖，改用跨平台实现，为 Linux 迁移扫清明确阻断点。
 
-7. `pending` loop daemon 实例隔离
+7. `in_progress` loop daemon 实例隔离
    目标：让 daemon 生命周期至少绑定到 `STATE_DIR` 或实例 id，避免多个隔离实例互相踩踏。
 
 8. `pending` loop 调度去全局串行阻塞

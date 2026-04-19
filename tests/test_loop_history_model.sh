@@ -51,6 +51,10 @@ loop_id_1="$(printf '%s\n' "$first_save" | awk -F': ' '$1=="loop_id"{print $2}')
 loop_id_2="$(printf '%s\n' "$second_save" | awk -F': ' '$1=="loop_id"{print $2}')"
 assert_not_equals "$loop_id_1" "$loop_id_2"
 
+state_tag_1="$(sed -n "s/^STATE_TAG=//p" "${STATE_DIR}/runtime/user-loop-state/${loop_id_1}.state")"
+assert_contains "$state_tag_1" ":"
+assert_not_equals "$state_tag_1" "missing"
+
 all_status_json="$("$HELPER" status --json)"
 all_loop_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin)["loops"]))' <<<"$all_status_json")"
 demo_loop_count="$(python3 -c 'import json,sys; data=json.load(sys.stdin)["loops"]; print(sum(1 for loop in data if loop.get("target") == "demo"))' <<<"$all_status_json")"
