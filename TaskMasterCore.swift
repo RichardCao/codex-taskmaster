@@ -1055,6 +1055,105 @@ func runningLoopConflicts(for target: String, sessionSnapshots: [SessionSnapshot
     return loopSnapshots.filter { $0.target == trimmedTarget && !$0.isStopped }
 }
 
+struct RuntimePermissionPaths {
+    let stateDirectoryPath: String
+    let pendingRequestDirectoryPath: String
+    let processingRequestDirectoryPath: String
+    let resultRequestDirectoryPath: String
+    let runtimeDirectoryPath: String
+    let loopsDirectoryPath: String
+    let loopLogDirectoryPath: String
+    let userLoopStateDirectoryPath: String
+    let legacyLoopStateDirectoryPath: String
+}
+
+func taskMasterEnsureWritableDirectory(at path: String, fileManager: FileManager = .default) -> String? {
+    var isDirectory: ObjCBool = false
+
+    if fileManager.fileExists(atPath: path, isDirectory: &isDirectory) {
+        guard isDirectory.boolValue else {
+            return "\(path) 已存在，但它不是目录。"
+        }
+        guard fileManager.isWritableFile(atPath: path) else {
+            return "\(path) 当前不可写。请检查属主或权限设置。"
+        }
+        return nil
+    }
+
+    do {
+        try fileManager.createDirectory(atPath: path, withIntermediateDirectories: true)
+        return nil
+    } catch {
+        return "无法创建目录 \(path)：\(error.localizedDescription)"
+    }
+}
+
+func taskMasterRuntimePermissionIssueForAction(
+    paths: RuntimePermissionPaths,
+    requiresLoopState: Bool,
+    fileManager: FileManager = .default
+) -> String? {
+    var checkedPaths = [
+        paths.stateDirectoryPath,
+        "\(paths.stateDirectoryPath)/requests",
+        paths.pendingRequestDirectoryPath,
+        paths.processingRequestDirectoryPath,
+        paths.resultRequestDirectoryPath,
+        paths.runtimeDirectoryPath
+    ]
+
+    if requiresLoopState {
+        checkedPaths.append(contentsOf: [
+            paths.loopsDirectoryPath,
+            paths.loopLogDirectoryPath,
+            paths.userLoopStateDirectoryPath
+        ])
+    }
+
+    for path in checkedPaths {
+        if let issue = taskMasterEnsureWritableDirectory(at: path, fileManager: fileManager) {
+            return issue
+        }
+    }
+
+    var isDirectory: ObjCBool = false
+    if fileManager.fileExists(atPath: paths.legacyLoopStateDirectoryPath, isDirectory: &isDirectory),
+       isDirectory.boolValue,
+       !fileManager.isWritableFile(atPath: paths.legacyLoopStateDirectoryPath) {
+        return "\(paths.legacyLoopStateDirectoryPath) 当前不可写。这个旧目录可能会让旧 loop daemon 或旧状态文件持续报权限错误。"
+    }
+
+    return nil
+}
+
+func taskMasterHelperPermissionIssueDetail(_ detail: String) -> String? {
+    let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    let lowercased = trimmed.lowercased()
+    guard lowercased.contains("permission denied") || lowercased.contains("operation not permitted") else {
+        return nil
+    }
+    return trimmed
+}
+
+func taskMasterHelperTargetArgument(from arguments: [String]) -> String? {
+    guard let index = arguments.firstIndex(of: "-t"), index + 1 < arguments.count else {
+        return nil
+    }
+    return arguments[index + 1]
+}
+
+func taskMasterHelperArgumentValue(flag: String, from arguments: [String]) -> String? {
+    guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else {
+        return nil
+    }
+    return arguments[index + 1]
+}
+
+func taskMasterHelperArgumentHasFlag(_ flag: String, in arguments: [String]) -> Bool {
+    arguments.contains(flag)
+}
+
 func sessionTypeLabel(_ session: SessionSnapshot) -> String {
     let source = session.source.trimmingCharacters(in: .whitespacesAndNewlines)
     if source == "cli" {

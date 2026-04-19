@@ -5064,60 +5064,21 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         )
     }
 
-    private func ensureWritableDirectory(at path: String) -> String? {
-        let fileManager = FileManager.default
-        var isDirectory: ObjCBool = false
-
-        if fileManager.fileExists(atPath: path, isDirectory: &isDirectory) {
-            guard isDirectory.boolValue else {
-                return "\(path) 已存在，但它不是目录。"
-            }
-            guard fileManager.isWritableFile(atPath: path) else {
-                return "\(path) 当前不可写。请检查属主或权限设置。"
-            }
-            return nil
-        }
-
-        do {
-            try fileManager.createDirectory(atPath: path, withIntermediateDirectories: true)
-            return nil
-        } catch {
-            return "无法创建目录 \(path)：\(error.localizedDescription)"
-        }
-    }
-
     private func runtimePermissionIssueForAction(requiresLoopState: Bool) -> String? {
-        var paths = [
-            stateDirectoryPath,
-            "\(stateDirectoryPath)/requests",
-            pendingRequestDirectoryPath,
-            processingRequestDirectoryPath,
-            resultRequestDirectoryPath,
-            runtimeDirectoryPath
-        ]
-
-        if requiresLoopState {
-            paths.append(contentsOf: [
-                loopsDirectoryPath,
-                loopLogDirectoryPath,
-                userLoopStateDirectoryPath
-            ])
-        }
-
-        for path in paths {
-            if let issue = ensureWritableDirectory(at: path) {
-                return issue
-            }
-        }
-
-        var isDirectory: ObjCBool = false
-        if FileManager.default.fileExists(atPath: legacyLoopStateDirectoryPath, isDirectory: &isDirectory),
-           isDirectory.boolValue,
-           !FileManager.default.isWritableFile(atPath: legacyLoopStateDirectoryPath) {
-            return "\(legacyLoopStateDirectoryPath) 当前不可写。这个旧目录可能会让旧 loop daemon 或旧状态文件持续报权限错误。"
-        }
-
-        return nil
+        taskMasterRuntimePermissionIssueForAction(
+            paths: RuntimePermissionPaths(
+                stateDirectoryPath: stateDirectoryPath,
+                pendingRequestDirectoryPath: pendingRequestDirectoryPath,
+                processingRequestDirectoryPath: processingRequestDirectoryPath,
+                resultRequestDirectoryPath: resultRequestDirectoryPath,
+                runtimeDirectoryPath: runtimeDirectoryPath,
+                loopsDirectoryPath: loopsDirectoryPath,
+                loopLogDirectoryPath: loopLogDirectoryPath,
+                userLoopStateDirectoryPath: userLoopStateDirectoryPath,
+                legacyLoopStateDirectoryPath: legacyLoopStateDirectoryPath
+            ),
+            requiresLoopState: requiresLoopState
+        )
     }
 
     private func preflightRuntimePermissions(actionName: String, requiresLoopState: Bool) -> Bool {
@@ -5133,13 +5094,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func helperPermissionIssueDetail(_ detail: String) -> String? {
-        let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let lowercased = trimmed.lowercased()
-        guard lowercased.contains("permission denied") || lowercased.contains("operation not permitted") else {
-            return nil
-        }
-        return trimmed
+        taskMasterHelperPermissionIssueDetail(detail)
     }
 
     @discardableResult
@@ -5280,24 +5235,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         )
     }
 
-    private func helperTargetArgument(from arguments: [String]) -> String? {
-        guard let index = arguments.firstIndex(of: "-t"), index + 1 < arguments.count else {
-            return nil
-        }
-        return arguments[index + 1]
-    }
-
-    private func helperArgumentValue(flag: String, from arguments: [String]) -> String? {
-        guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else {
-            return nil
-        }
-        return arguments[index + 1]
-    }
-
-    private func helperArgumentHasFlag(_ flag: String, in arguments: [String]) -> Bool {
-        arguments.contains(flag)
-    }
-
     private func optimisticMarkLoopRunning(target: String, interval: String?, message: String?, forceSend: Bool?) {
         let existingSnapshot = loopSnapshots.first(where: { $0.target == target && !$0.isStopped && !$0.isPaused })
             ?? loopSnapshots.first(where: { $0.target == target })
@@ -5380,16 +5317,16 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.recordCurrentInputsInHistory()
                 }
                 if actionName == "开始循环",
-                   let target = self.helperTargetArgument(from: displayArguments) {
+                   let target = taskMasterHelperTargetArgument(from: displayArguments) {
                     self.optimisticMarkLoopRunning(
                         target: target,
-                        interval: self.helperArgumentValue(flag: "-i", from: displayArguments),
-                        message: self.helperArgumentValue(flag: "-m", from: displayArguments),
-                        forceSend: self.helperArgumentHasFlag("-f", in: displayArguments)
+                        interval: taskMasterHelperArgumentValue(flag: "-i", from: displayArguments),
+                        message: taskMasterHelperArgumentValue(flag: "-m", from: displayArguments),
+                        forceSend: taskMasterHelperArgumentHasFlag("-f", in: displayArguments)
                     )
                     self.scheduleLoopSnapshotRefreshes(after: [1.5, 5.0])
                 } else if actionName == "恢复当前",
-                          let target = self.helperTargetArgument(from: displayArguments) {
+                          let target = taskMasterHelperTargetArgument(from: displayArguments) {
                     let existingSnapshot = self.loopSnapshots.first(where: { $0.target == target })
                     self.optimisticMarkLoopRunning(
                         target: target,
@@ -5400,7 +5337,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.scheduleLoopSnapshotRefreshes(after: [1.5, 5.0])
                 }
                 if actionName == "删除当前",
-                   let deletedTarget = self.helperTargetArgument(from: displayArguments) {
+                   let deletedTarget = taskMasterHelperTargetArgument(from: displayArguments) {
                     self.loopSnapshots.removeAll { $0.target == deletedTarget }
                     if self.preferredLoopSelectionIdentifier == "target:\(deletedTarget)" {
                         self.preferredLoopSelectionIdentifier = nil
