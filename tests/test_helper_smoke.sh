@@ -590,6 +590,25 @@ nonforce_log="$(cat "${STATE_DIR}/runtime/loop-logs/${nonforce_key}.log")"
 assert_not_contains "$nonforce_log" "paused: consecutive forced-send failure threshold reached"
 "$HELPER" loop-delete -t "$nonforce_target" >/dev/null
 
+malicious_target="malicious-loop"
+malicious_key="$(printf '%s' "$malicious_target" | shasum -a 256 | awk '{print $1}')"
+malicious_marker="${TEST_TMP}/malicious-loop-marker.txt"
+cat >"${STATE_DIR}/loops/${malicious_key}.loop" <<EOF
+TARGET=${malicious_target}
+INTERVAL=5
+MESSAGE=\$(touch "${malicious_marker}")
+FORCE_SEND=0
+THREAD_ID=malicious-thread
+EOF
+set +e
+malicious_status_output="$("$HELPER" status -t "$malicious_target" 2>&1)"
+malicious_status_code=$?
+set -e
+[[ "$malicious_status_code" -ne 0 ]]
+assert_contains "$malicious_status_output" "unsafe kv file"
+[[ ! -e "$malicious_marker" ]]
+rm -f "${STATE_DIR}/loops/${malicious_key}.loop"
+
 CONFLICT_SEND_STUB="${TEST_TMP}/loop-send-success-stub.sh"
 CONFLICT_SEND_COUNTER="${TEST_TMP}/loop-send-success-counter.txt"
 cat >"$CONFLICT_SEND_STUB" <<'EOF'

@@ -190,14 +190,130 @@ PY
 
 load_kv_file() {
   local file="$1"
+  validate_kv_file_for_loading "$file"
   # shellcheck disable=SC1090
   source "$file"
+}
+
+validate_kv_file_for_loading() {
+  local file="$1"
+  require_cmd python3
+  python3 - "$file" "$STATE_DIR" <<'PY'
+import os
+import stat
+import sys
+
+path = sys.argv[1]
+state_dir = os.path.realpath(sys.argv[2])
+
+loop_root = os.path.realpath(os.path.join(state_dir, "loops"))
+state_root = os.path.realpath(os.path.join(state_dir, "runtime", "user-loop-state"))
+
+allowed_keys_by_suffix = {
+    ".loop": {"LOOP_ID", "TARGET", "INTERVAL", "MESSAGE", "FORCE_SEND", "THREAD_ID"},
+    ".state": {
+        "STATE_TAG",
+        "NEXT_RUN",
+        "FAILURE_COUNT",
+        "FAILURE_REASON",
+        "PAUSED",
+        "PAUSED_REASON",
+        "STOPPED",
+        "STOPPED_REASON",
+    },
+}
+
+forbidden_unescaped = set(" \t\r\n\"'`$;&|<>(){}*?[]!")
+
+def fail(message: str) -> None:
+    raise SystemExit(message)
+
+def within_root(real_path: str, root: str) -> bool:
+    try:
+        return os.path.commonpath([real_path, root]) == root
+    except ValueError:
+        return False
+
+def ansi_c_quoted_safe(value: str) -> bool:
+    if len(value) < 3 or not value.startswith("$'") or not value.endswith("'"):
+        return False
+    body = value[2:-1]
+    idx = 0
+    while idx < len(body):
+        char = body[idx]
+        if char == "\\":
+            idx += 2
+            continue
+        if char == "'":
+            return False
+        idx += 1
+    return True
+
+def bare_value_safe(value: str) -> bool:
+    if value == "":
+        return True
+    idx = 0
+    while idx < len(value):
+        char = value[idx]
+        if char == "\\":
+            if idx + 1 >= len(value):
+                return False
+            idx += 2
+            continue
+        if char in forbidden_unescaped:
+            return False
+        idx += 1
+    return True
+
+real_path = os.path.realpath(path)
+if os.path.islink(path):
+    fail(f"unsafe kv file: symlink not allowed: {path}")
+if not os.path.exists(path):
+    fail(f"kv file not found: {path}")
+
+st = os.stat(path)
+if not stat.S_ISREG(st.st_mode):
+    fail(f"unsafe kv file: not a regular file: {path}")
+if st.st_size > 65536:
+    fail(f"unsafe kv file: file too large: {path}")
+
+suffix = os.path.splitext(path)[1]
+allowed_keys = allowed_keys_by_suffix.get(suffix)
+if allowed_keys is None:
+    fail(f"unsafe kv file: unsupported suffix: {path}")
+
+if suffix == ".loop":
+    if not within_root(real_path, loop_root):
+        fail(f"unsafe kv file: outside loop root: {path}")
+else:
+    if not within_root(real_path, state_root):
+        fail(f"unsafe kv file: outside state root: {path}")
+
+with open(path, "r", encoding="utf-8", errors="surrogateescape") as fh:
+    for line_number, raw_line in enumerate(fh, start=1):
+        line = raw_line.rstrip("\n")
+        if not line:
+            continue
+        if "=" not in line:
+            fail(f"unsafe kv file: malformed line {line_number}: {path}")
+        key, value = line.split("=", 1)
+        if key not in allowed_keys:
+            fail(f"unsafe kv file: unexpected key {key!r} in {path}")
+        if value == "''":
+            continue
+        if ansi_c_quoted_safe(value):
+            continue
+        if bare_value_safe(value):
+            continue
+        fail(f"unsafe kv file: unsupported value syntax for {key!r} in {path}")
+PY
 }
 
 write_kv_file() {
   local file="$1"
   shift
   local tmp
+  mkdir -p "$(dirname "$file")"
   tmp="$(mktemp "${TMPDIR:-/tmp}/${APP_NAME}.kv.XXXXXX")"
   {
     while [[ $# -gt 0 ]]; do
@@ -560,6 +676,7 @@ stop_user_owned_sender_daemons() {
 append_loop_log_line() {
   local file="$1"
   shift
+  mkdir -p "$(dirname "$file")" 2>/dev/null || true
   touch "$file" 2>/dev/null || true
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$file" 2>/dev/null || true
 }

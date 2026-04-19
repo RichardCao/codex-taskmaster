@@ -42,10 +42,10 @@
 9. `done` `probe-all --json` / `status --json` 去除 `ARG_MAX` 脆弱点
    目标：避免把大文本结果塞进单个 argv，改成 stdin 或原生 JSON 流。
 
-10. `in_progress` loop/state 数据文件执行边界收紧
+10. `done` loop/state 数据文件执行边界收紧
    目标：减少 `source` 直接执行数据文件的风险，至少先把读取边界校验收紧，再评估后续 JSON 化迁移。
 
-11. `pending` `CodexTaskmasterApp.swift` 继续瘦身
+11. `in_progress` `CodexTaskmasterApp.swift` 继续瘦身
    目标：继续把展示编排、状态回写和 helper 调用细节从 UI 控制器下沉到 core/service。
 
 12. `pending` merge / refresh / fallback 规则继续收口
