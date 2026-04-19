@@ -27,10 +27,10 @@
 4. `done` `Package.swift` 测试路径大小写修复
    目标：修正 SwiftPM test target 路径大小写问题，清除 Linux / case-sensitive 文件系统上的直接阻断点。
 
-5. `in_progress` 默认检查链路补齐核心回归
+5. `done` 默认检查链路补齐核心回归
    目标：把 `test_taskmaster_core.sh`、`test_loop_history_model.sh` 与可选 `swift test` 策略纳入默认或严格检查链路，避免误导性绿灯。
 
-6. `pending` loop `STATE_TAG` 平台无关化
+6. `in_progress` loop `STATE_TAG` 平台无关化
    目标：替换 BSD `stat -f '%m:%z'` 依赖，改用跨平台实现，为 Linux 迁移扫清明确阻断点。
 
 7. `pending` loop daemon 实例隔离

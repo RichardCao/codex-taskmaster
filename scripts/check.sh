@@ -9,13 +9,21 @@ APP_SWIFT_SOURCES=(
   "${ROOT}/main.swift"
 )
 
-printf '==> shell syntax\n'
-bash -n "${ROOT}/codex_terminal_sender.sh"
+run_step() {
+  local label="$1"
+  shift
+  printf '==> %s\n' "$label"
+  "$@"
+}
 
-printf '==> helper smoke tests\n'
-bash "${ROOT}/tests/test_helper_smoke.sh"
+run_step "shell syntax" bash -n "${ROOT}/codex_terminal_sender.sh"
 
-printf '==> swift typecheck\n'
+run_step "helper smoke tests" bash "${ROOT}/tests/test_helper_smoke.sh"
+
+run_step "taskmaster core regression" bash "${ROOT}/tests/test_taskmaster_core.sh"
+
+run_step "loop history regression" bash "${ROOT}/tests/test_loop_history_model.sh"
+
 SDK_PATH="${MACOS_SDK_PATH:-}"
 if [[ -z "$SDK_PATH" ]]; then
   for sdk_root in \
@@ -36,13 +44,13 @@ if [[ -z "$SDK_PATH" ]]; then
   SDK_PATH="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
 fi
 
+printf '==> swift typecheck\n'
 if [[ -n "$SDK_PATH" ]]; then
   xcrun swiftc -sdk "$SDK_PATH" -warnings-as-errors -typecheck "${APP_SWIFT_SOURCES[@]}"
 else
   xcrun swiftc -warnings-as-errors -typecheck "${APP_SWIFT_SOURCES[@]}"
 fi
 
-printf '==> build app\n'
-"${ROOT}/build_codex_taskmaster_app.sh"
+run_step "build app" "${ROOT}/build_codex_taskmaster_app.sh"
 
 printf 'all checks passed\n'
