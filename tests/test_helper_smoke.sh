@@ -113,6 +113,8 @@ ROLLOUT_A="${CODEX_DIR}/sessions/2026/03/31/rollout-a.jsonl"
 ROLLOUT_B="${CODEX_DIR}/sessions/2026/03/31/rollout-b.jsonl"
 ROLLOUT_C="${CODEX_DIR}/archived_sessions/rollout-c.jsonl"
 ROLLOUT_D="${CODEX_DIR}/sessions/2026/03/31/rollout-d.jsonl"
+ROLLOUT_F="${CODEX_DIR}/sessions/2026/03/31/rollout-f.jsonl"
+ROLLOUT_G="${CODEX_DIR}/archived_sessions/rollout-g.jsonl"
 ROLLOUT_ESCAPE="${TEST_TMP}/escape-rollout.jsonl"
 mkdir -p "$(dirname "$ROLLOUT_A")" "$(dirname "$ROLLOUT_C")"
 
@@ -134,6 +136,16 @@ EOF
 cat >"$ROLLOUT_D" <<'EOF'
 {"timestamp":"2026-03-31T13:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"delete me"}}
 {"timestamp":"2026-03-31T13:00:01Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"d"}}
+EOF
+
+cat >"$ROLLOUT_F" <<'EOF'
+{"timestamp":"2026-03-31T13:30:00Z","type":"event_msg","payload":{"type":"user_message","message":"shared live title"}}
+{"timestamp":"2026-03-31T13:30:01Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"f"}}
+EOF
+
+cat >"$ROLLOUT_G" <<'EOF'
+{"timestamp":"2026-03-31T13:40:00Z","type":"event_msg","payload":{"type":"user_message","message":"shared archived title"}}
+{"timestamp":"2026-03-31T13:40:01Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"g"}}
 EOF
 
 cat >"$ROLLOUT_ESCAPE" <<'EOF'
@@ -196,6 +208,8 @@ insert into threads(
   ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '$ROLLOUT_B', 100, '/tmp/beta-cwd', 'Second prompt', 'Second prompt', 0, 'openai', 'cli', '', ''),
   ('cccccccc-cccc-cccc-cccc-cccccccccccc', '$ROLLOUT_C', 90, '/tmp/archived-cwd', 'Archived prompt', 'Archived prompt', 1, 'openai', 'cli', '', ''),
   ('dddddddd-dddd-dddd-dddd-dddddddddddd', '$ROLLOUT_D', 80, '/tmp/delta-cwd', 'Delete prompt', 'Delete | prompt', 0, 'openai', '{"subagent":{"thread_spawn":{"parent_thread_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}}|worker', 'worker|d', 'worker|role'),
+  ('ffffffff-ffff-ffff-ffff-ffffffffffff', '$ROLLOUT_F', 95, '/tmp/shared-live-cwd', 'Shared prompt', 'Shared prompt', 0, 'openai', 'cli', '', ''),
+  ('99999999-9999-9999-9999-999999999999', '$ROLLOUT_G', 85, '/tmp/shared-archived-cwd', 'Shared prompt', 'Shared prompt', 1, 'openai', 'cli', '', ''),
   ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', '$ROLLOUT_ESCAPE', 70, '/tmp/escape-cwd', 'Escape prompt', 'Escape prompt', 0, 'openai', 'cli', '', '');
 insert into thread_dynamic_tools(thread_id, position, name, description, input_schema, defer_loading) values
   ('dddddddd-dddd-dddd-dddd-dddddddddddd', 0, 'tool-a', 'desc', '{}', 0);
@@ -245,7 +259,7 @@ insert into logs(ts, level, target, message, thread_id, estimated_bytes) values
 EOF
 
 count_output="$("$HELPER" session-count)"
-[[ "$count_output" == "4" ]]
+[[ "$count_output" == "5" ]]
 
 config_provider_output="$("$HELPER" config-model-provider)"
 assert_contains "$config_provider_output" "status: success"
@@ -281,6 +295,13 @@ set -e
 [[ "$ambiguous_target_status" -ne 0 ]]
 assert_contains "$ambiguous_target_output" "found multiple matching sessions for target 'duplicate'"
 
+set +e
+ambiguous_title_output="$("$HELPER" resolve-thread-id -t "Shared prompt" 2>&1)"
+ambiguous_title_status=$?
+set -e
+[[ "$ambiguous_title_status" -ne 0 ]]
+assert_contains "$ambiguous_title_output" "found multiple matching thread titles for target 'Shared prompt'"
+
 probe_all="$("$HELPER" probe-all -l 2 -o 0)"
 assert_contains "$probe_all" "name: alpha"
 assert_contains "$probe_all" "target: alpha"
@@ -299,6 +320,8 @@ TTY_FIXTURE="${TEST_TMP}/tty-ps.txt"
 cat >"$TTY_FIXTURE" <<'EOF'
 ttys101 codex resume alpha
 ttys202 codex resume bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+ttys303 codex resume duplicate
+ttys404 codex resume Shared prompt
 EOF
 
 TERMINAL_SNAPSHOT_FIXTURE="${TEST_TMP}/terminal-snapshots.json"
@@ -332,6 +355,18 @@ resolved_tty_alpha_by_thread_id="$(
   "$HELPER" resolve-live-tty -t aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
 )"
 assert_equals "$resolved_tty_alpha_by_thread_id" "ttys101"
+
+resolved_tty_duplicate_live_only="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_FIXTURE" \
+  "$HELPER" resolve-live-tty -t duplicate
+)"
+assert_equals "$resolved_tty_duplicate_live_only" "ttys303"
+
+resolved_tty_shared_title_live_only="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_FIXTURE" \
+  "$HELPER" resolve-live-tty -t "Shared prompt"
+)"
+assert_equals "$resolved_tty_shared_title_live_only" "ttys404"
 
 probe_metadata_pipe="$("$HELPER" probe -t dddddddd-dddd-dddd-dddd-dddddddddddd)"
 assert_contains "$probe_metadata_pipe" "agent_nickname: worker|d"
@@ -373,7 +408,14 @@ ambiguous_duplicate_tty_output="$(
 ambiguous_duplicate_tty_status=$?
 set -e
 [[ "$ambiguous_duplicate_tty_status" -ne 0 ]]
-assert_contains "$ambiguous_duplicate_tty_output" "found multiple matching Terminal ttys for target 'duplicate'"
+assert_contains "$ambiguous_duplicate_tty_output" "could not resolve live Codex thread id for target 'cccccccc-cccc-cccc-cccc-cccccccccccc'"
+
+set +e
+archived_only_live_output="$("$HELPER" probe -t gamma 2>&1)"
+archived_only_live_status=$?
+set -e
+[[ "$archived_only_live_status" -ne 0 ]]
+assert_contains "$archived_only_live_output" "could not resolve live Codex thread id for target 'gamma'"
 
 TTY_PROCESS_FIXTURE="${TEST_TMP}/tty-processes.txt"
 TTY_CWD_FIXTURE="${TEST_TMP}/tty-cwds.txt"
@@ -719,11 +761,14 @@ assert_contains "$start_failed_loop_status" "message: start-failure"
 
 "$HELPER" loop-save-stopped -t duplicate -i 50 -m duplicate-message -r stopped_by_user >/dev/null
 set +e
-duplicate_resume_output="$("$HELPER" loop-resume -t duplicate 2>&1)"
+duplicate_resume_output="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_AMBIGUOUS_FIXTURE" \
+  "$HELPER" loop-resume -t duplicate 2>&1
+)"
 duplicate_resume_status=$?
 set -e
 [[ "$duplicate_resume_status" -ne 0 ]]
-assert_contains "$duplicate_resume_output" "found multiple matching sessions for target 'duplicate'"
+assert_contains "$duplicate_resume_output" "found multiple matching Terminal ttys for target 'duplicate'"
 
 delete_loop_output="$("$HELPER" loop-delete -t alpha)"
 assert_contains "$delete_loop_output" "deleted loop for target=alpha"
@@ -784,7 +829,7 @@ assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from thread_dynamic_tools 
 assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from stage1_outputs where thread_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd';")" "0"
 assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from logs where thread_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd';")" "0"
 assert_equals "$(sqlite3 "$LOGS_DB" "select count(*) from logs where thread_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd';")" "0"
-assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from threads where archived = 0;")" "3"
+assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from threads where archived = 0;")" "4"
 [[ ! -e "$ROLLOUT_D" ]]
 assert_not_contains "$(cat "$SESSION_INDEX")" "dddddddd-dddd-dddd-dddd-dddddddddddd"
 

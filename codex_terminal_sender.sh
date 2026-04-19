@@ -782,20 +782,49 @@ for key in keys:
 
 resolve_thread_id() {
   local target="$1"
+  local resolve_scope="${2:-any}"
   local thread_id=""
 
-  if [[ "$target" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
-    thread_id="$target"
-  else
-    thread_id="$(
-      python3 - "$CODEX_STATE_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "$target" <<'PY'
+  thread_id="$(
+    python3 - "$CODEX_STATE_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "$target" "$resolve_scope" <<'PY'
 import json
 import os
+import re
 import sqlite3
 import sys
 
-db_path, session_index_path, target = sys.argv[1:]
+db_path, session_index_path, target, resolve_scope = sys.argv[1:]
 target = target.strip()
+live_only = resolve_scope == "live_only"
+uuid_pattern = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+
+def filter_matching_ids(thread_ids):
+    if not live_only or not thread_ids:
+        return thread_ids
+    placeholders = ",".join("?" for _ in thread_ids)
+    rows = cur.execute(
+        f"select id from threads where id in ({placeholders}) and archived = 0",
+        thread_ids,
+    ).fetchall()
+    live_ids = {row[0] for row in rows if row and row[0]}
+    return [thread_id for thread_id in thread_ids if thread_id in live_ids]
+
+if uuid_pattern.fullmatch(target):
+    if not live_only:
+        print(target, end="")
+        conn.close()
+        raise SystemExit(0)
+    row = cur.execute(
+        "select id from threads where id = ? and archived = 0",
+        (target,),
+    ).fetchone()
+    conn.close()
+    if row and row[0]:
+        print(row[0], end="")
+    raise SystemExit(0)
 
 latest_names = {}
 if os.path.exists(session_index_path):
@@ -814,29 +843,40 @@ if os.path.exists(session_index_path):
                 latest_names[thread_id] = thread_name
 
 matching_ids = [thread_id for thread_id, thread_name in latest_names.items() if thread_name == target]
+matching_ids = filter_matching_ids(matching_ids)
 if len(matching_ids) == 1:
     print(matching_ids[0], end="")
+    conn.close()
     raise SystemExit(0)
 if len(matching_ids) > 1:
+    conn.close()
     raise SystemExit(f"found multiple matching sessions for target '{target}': {' '.join(matching_ids)}")
 
-conn = sqlite3.connect(db_path)
-cur = conn.cursor()
-rows = cur.execute(
-    "select id from threads where title = ? order by updated_at desc",
-    (target,),
-).fetchall()
+query = "select id from threads where title = ?"
+if live_only:
+    query += " and archived = 0"
+query += " order by updated_at desc"
+rows = cur.execute(query, (target,)).fetchall()
 conn.close()
 if len(rows) > 1:
     raise SystemExit(f"found multiple matching thread titles for target '{target}': {' '.join(row[0] for row in rows if row and row[0])}")
 if len(rows) == 1 and rows[0][0]:
     print(rows[0][0], end="")
 PY
-    )"
-  fi
+  )"
 
-  [[ -n "$thread_id" ]] || die "could not resolve Codex thread id for target '$target'"
+  if [[ -z "$thread_id" ]]; then
+    if [[ "$resolve_scope" == "live_only" ]]; then
+      die "could not resolve live Codex thread id for target '$target'"
+    fi
+    die "could not resolve Codex thread id for target '$target'"
+  fi
   printf '%s\n' "$thread_id"
+}
+
+resolve_live_thread_id() {
+  local target="$1"
+  resolve_thread_id "$target" "live_only"
 }
 
 load_target_metadata() {
@@ -1035,7 +1075,7 @@ probe_session_status() {
   require_cmd python3
   require_cmd sqlite3
 
-  thread_id="$(resolve_thread_id "$target")"
+  thread_id="$(resolve_live_thread_id "$target")"
   local target_cwd
   local model_provider
   local session_source
@@ -2951,7 +2991,7 @@ resolve_live_tty() {
   local first_user_message
   local session_name
 
-  thread_id="$(resolve_thread_id "$target")"
+  thread_id="$(resolve_live_thread_id "$target")"
   local target_cwd
   local model_provider
   local session_source
@@ -3226,7 +3266,7 @@ start_loop() {
   paths_for_target "$key"
   write_loop_definition "$key" "$target" "$interval" "$message" "$force_send"
 
-  if ! start_detail="$(resolve_thread_id "$target" 2>&1)"; then
+  if ! start_detail="$(resolve_live_thread_id "$target" 2>&1)"; then
     failure_reason="$(classify_loop_reason "$start_detail")"
     mark_loop_stopped_entry "$target" "$interval" "$message" "$force_send" "$failure_reason" "loop start failed target=${target} reason=${failure_reason} detail=${start_detail//$'\n'/ | }"
     stop_loop_daemon_if_idle
@@ -3324,7 +3364,7 @@ resume_loop() {
     failure_reason="${PAUSED_REASON:-${STOPPED_REASON:-${FAILURE_REASON:-}}}"
   fi
 
-  thread_id="$(resolve_thread_id "$target")"
+  thread_id="$(resolve_live_thread_id "$target")"
   conflicting_target="$(find_conflicting_running_loop_target "$thread_id" "$key" 2>/dev/null || true)"
   [[ -z "$conflicting_target" ]] || die "another active loop already targets this session: ${conflicting_target}"
   local target_cwd

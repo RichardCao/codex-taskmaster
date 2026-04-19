@@ -18,10 +18,10 @@
 1. `done` Terminal probe 后台 tab 误判修复
    目标：修复 `probe` 只读取 `selected tab` 的问题，避免后台 tab 被误判为 `unavailable` 并阻断默认发送。
 
-2. `in_progress` live-only target 解析排除 archived session
+2. `done` live-only target 解析排除 archived session
    目标：让 `send`、`start`、`probe`、`resolve-live-tty` 等 live-only 路径默认只命中 `archived = 0` 的 session。
 
-3. `pending` delete allowlist 与自定义 Codex 根目录对齐
+3. `in_progress` delete allowlist 与自定义 Codex 根目录对齐
    目标：让 `thread-delete` / `thread-delete-plan` 的 rollout allowlist 根目录从实际配置推导，不再硬编码 `~/.codex/...`。
 
 4. `pending` `Package.swift` 测试路径大小写修复
