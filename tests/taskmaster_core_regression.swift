@@ -25,6 +25,7 @@ struct TaskMasterCoreRegressionRunner {
         runLocalizationChecks()
         runStatusPresentationChecks()
         runAlertTemplateChecks()
+        runSelectionAndBlockedCopyChecks()
         runLoopStateLabelChecks()
         runProbeStateRuleChecks()
         runQueuedAcceptanceRuleChecks()
@@ -738,6 +739,16 @@ struct TaskMasterCoreRegressionRunner {
             loopConflictAlertText(target: "demo", conflicts: [conflictLoop]).contains("目标 demo 已存在运行中的循环"),
             "expected loop conflict alert text to include conflict target"
         )
+    }
+
+    private static func runSelectionAndBlockedCopyChecks() {
+        expect(sessionSelectionRequiredStatusText() == "请选择一个 session", "expected session selection required text to stay stable")
+        expect(loopSelectionRequiredLogText() == "请先在 Active Loops 中选择一条循环任务。", "expected loop selection required log text to stay stable")
+        expect(loopSelectionRequiredStatusText() == "请选择一个循环任务", "expected loop selection required status text to stay stable")
+        expect(stoppedLoopBlockedStatusText() == "当前循环已停止", "expected stopped loop blocked status text to stay stable")
+        expect(resumeLoopBlockedStatusText() == "当前循环不可恢复", "expected resume loop blocked status text to stay stable")
+        expect(accessibilityPermissionDeniedStatusText() == "缺少辅助功能权限", "expected permission denied status text to stay stable")
+        expect(emptyMessageRequiredStatusText() == "请填写输出内容", "expected empty message status text to stay stable")
     }
 
     private static func runLoopConflictResolutionChecks() {

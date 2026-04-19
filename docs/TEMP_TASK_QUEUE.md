@@ -24,9 +24,9 @@
 3. `done` loop / send 交互提示模板收口
    目标：把剩余的 loop conflict、ambiguous target、runtime permission 等提示框文案与交互模板从控制器中抽离。
 
-4. `in_progress` 主控制器残余展示编排清理
+4. `done` 主控制器残余展示编排清理
    目标：继续压缩 `CodexTaskmasterApp.swift` 中的展示性 helper、重复 UI 收尾逻辑和零散状态判断，为 Linux 迁移前做最后一轮收口。
    当前子任务：
    - `done` 重复 alert 执行 helper 收口
    - `done` session / provider migration 交互状态收口
-   - `pending` loop / session 选择与 blocked 提示收口
+   - `done` loop / session 选择与 blocked 提示收口

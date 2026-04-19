@@ -2197,8 +2197,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func handleLoopSelectionRequired() {
-        appendOutput("请先在 Active Loops 中选择一条循环任务。")
-        setStatus("请选择一个循环任务")
+        appendOutput(loopSelectionRequiredLogText())
+        setStatus(loopSelectionRequiredStatusText())
         NSSound.beep()
     }
 
@@ -2210,15 +2210,15 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
     private func handleStoppedLoopBlocked() {
         handleLoopActionBlocked(
-            logText: "当前选中的循环已经是停止状态。",
-            statusText: "当前循环已停止"
+            logText: stoppedLoopBlockedLogText(),
+            statusText: stoppedLoopBlockedStatusText()
         )
     }
 
     private func handleResumeLoopBlocked() {
         handleLoopActionBlocked(
-            logText: "当前选中的循环既不是暂停状态，也不是停止状态。",
-            statusText: "当前循环不可恢复"
+            logText: resumeLoopBlockedLogText(),
+            statusText: resumeLoopBlockedStatusText()
         )
     }
 
@@ -2228,7 +2228,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sideEffect: (() -> Void)? = nil
     ) {
         appendOutput(logText)
-        setStatus("缺少辅助功能权限", key: "general", color: .systemRed)
+        setStatus(accessibilityPermissionDeniedStatusText(), key: "general", color: .systemRed)
         sideEffect?()
         if let actionStatusText {
             setStatus(actionStatusText, key: "action", color: .systemRed)
@@ -2253,8 +2253,8 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func handleEmptyMessageRequired() {
-        appendOutput("输出内容不能为空。")
-        setStatus("请填写输出内容")
+        appendOutput(emptyMessageRequiredLogText())
+        setStatus(emptyMessageRequiredStatusText())
         NSSound.beep()
     }
 

@@ -3263,6 +3263,42 @@ func sessionSelectionRequiredStatusText() -> String {
     "请选择一个 session"
 }
 
+func loopSelectionRequiredLogText() -> String {
+    "请先在 Active Loops 中选择一条循环任务。"
+}
+
+func loopSelectionRequiredStatusText() -> String {
+    "请选择一个循环任务"
+}
+
+func stoppedLoopBlockedLogText() -> String {
+    "当前选中的循环已经是停止状态。"
+}
+
+func stoppedLoopBlockedStatusText() -> String {
+    "当前循环已停止"
+}
+
+func resumeLoopBlockedLogText() -> String {
+    "当前选中的循环既不是暂停状态，也不是停止状态。"
+}
+
+func resumeLoopBlockedStatusText() -> String {
+    "当前循环不可恢复"
+}
+
+func accessibilityPermissionDeniedStatusText() -> String {
+    "缺少辅助功能权限"
+}
+
+func emptyMessageRequiredLogText() -> String {
+    "输出内容不能为空。"
+}
+
+func emptyMessageRequiredStatusText() -> String {
+    "请填写输出内容"
+}
+
 func sessionFastMatchesQuery(_ session: SessionSnapshot, normalizedQuery: String) -> Bool {
     guard !normalizedQuery.isEmpty else { return true }
     let candidates = [
