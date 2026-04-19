@@ -27,10 +27,10 @@
 4. `done` terminal state 协议对齐
    目标：让 helper 与 Swift/Core 的 terminal state 集合保持一致，显式支持 `footer_visible_only`，避免 UI 退化成原始字符串。
 
-5. `in_progress` 最近发送结果扫描正确性修复
+5. `done` 最近发送结果扫描正确性修复
    目标：修正 session 详情区“最近发送结果”的扫描逻辑，不再因为全局最新文件裁剪而漏掉当前 session 的较旧结果。
 
-6. `pending` prompt 搜索缓存失效修复
+6. `in_progress` prompt 搜索缓存失效修复
    目标：后台 refresh 更新 session 快照时，同步失效受影响 session 的 prompt cache，避免搜索使用陈旧 rollout 文本。
 
 7. `pending` helper metadata 协议安全化

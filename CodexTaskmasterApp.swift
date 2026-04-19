@@ -3373,7 +3373,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return loopSnapshots.filter { candidates.contains($0.target.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
 
-    private func recentSendResults(for session: SessionSnapshot, maxItems: Int = 6, scanLimit: Int = 180) -> [SendResultSnapshot] {
+    private func recentSendResults(for session: SessionSnapshot, maxItems: Int = 6) -> [SendResultSnapshot] {
         let candidates = Set(sessionPossibleTargets(session))
         guard !candidates.isEmpty else { return [] }
 
@@ -3395,7 +3395,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             }
 
         var results: [SendResultSnapshot] = []
-        for fileURL in sortedFiles.prefix(scanLimit) {
+        for fileURL in sortedFiles {
             guard let data = try? Data(contentsOf: fileURL) else {
                 continue
             }
