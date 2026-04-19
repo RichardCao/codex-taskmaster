@@ -2369,10 +2369,22 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         )
     }
 
-    private func beginSelectedSessionAction(runningStatusText: String, startLogText: String) {
-        disableSelectedSessionActionControls()
+    private func beginActionExecution(
+        disableUI: () -> Void,
+        runningStatusText: String,
+        startLogText: String
+    ) {
+        disableUI()
         setStatus(runningStatusText, key: "action")
         appendOutput(startLogText)
+    }
+
+    private func beginSelectedSessionAction(runningStatusText: String, startLogText: String) {
+        beginActionExecution(
+            disableUI: disableSelectedSessionActionControls,
+            runningStatusText: runningStatusText,
+            startLogText: startLogText
+        )
     }
 
     private func beginSessionDeletePlanLoading() {
@@ -2445,7 +2457,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         error: String
     ) {
         showSessionArchiveBlockedAlertIfNeeded(session: session, error: error)
-        handleSelectedSessionActionFailure(
+        handleActionExecutionFailure(
             statusText: sessionArchiveFailureStatusText(),
             detail: error
         )
@@ -2462,7 +2474,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             failedFields: failedFields
         )
         updateSessionDetailView()
-        handleSelectedSessionActionFailure(
+        handleActionExecutionFailure(
             statusText: sessionDeleteFailureStatusText(),
             detail: detail
         )
@@ -2662,10 +2674,28 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         updateProviderMigrationButtons()
     }
 
-    private func handleSelectedSessionActionFailure(statusText: String, detail: String) {
+    private func handleActionExecutionFailure(statusText: String, detail: String) {
         setStatus(statusText, key: "action")
         appendStderrDetailIfPresent(detail)
         NSSound.beep()
+    }
+
+    private func applyActionExecutionResult(
+        success: Bool,
+        detail: String,
+        completionStatusText: String,
+        failureStatusText: String,
+        finishUI: () -> Void,
+        onSuccess: () -> Void
+    ) {
+        finishUI()
+        if success {
+            setStatus(completionStatusText, key: "action")
+            appendOutput(detail)
+            onSuccess()
+        } else {
+            handleActionExecutionFailure(statusText: failureStatusText, detail: detail)
+        }
     }
 
     private func failSelectedSessionAction(
@@ -2674,7 +2704,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         selectedSessionIsArchived: Bool
     ) {
         restoreSelectedSessionActionControls(selectedSessionIsArchived: selectedSessionIsArchived)
-        handleSelectedSessionActionFailure(statusText: statusText, detail: detail)
+        handleActionExecutionFailure(statusText: statusText, detail: detail)
     }
 
     private func handleSelectedSessionActionBlocked(logText: String, statusText: String) {
@@ -2691,14 +2721,12 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     private func handleProviderMigrationMissingProvider() {
         finishProviderMigrationInteraction()
         appendOutput(sessionProviderMissingLogText())
-        setStatus(sessionProviderMissingStatusText(), key: "action")
-        NSSound.beep()
+        handleActionExecutionFailure(statusText: sessionProviderMissingStatusText(), detail: "")
     }
 
     private func handleProviderMigrationPlanFailure(logText: String) {
         appendOutput(logText)
-        setStatus(sessionProviderMigrationPlanFailureStatusText(), key: "action")
-        NSSound.beep()
+        handleActionExecutionFailure(statusText: sessionProviderMigrationPlanFailureStatusText(), detail: "")
     }
 
     private func handleProviderMigrationCancelled(statusText: String) {
@@ -2860,9 +2888,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func beginProviderMigrationExecution(runningStatusText: String, startLogText: String) {
-        setButtonsEnabled(false)
-        setStatus(runningStatusText, key: "action")
-        appendOutput(startLogText)
+        beginActionExecution(
+            disableUI: { self.setButtonsEnabled(false) },
+            runningStatusText: runningStatusText,
+            startLogText: startLogText
+        )
     }
 
     private func performProviderMigrationExecution(
@@ -2895,15 +2925,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         completionStatusText: String,
         failureStatusText: String
     ) {
-        finishProviderMigrationInteraction()
-        if success {
-            setStatus(completionStatusText, key: "action")
-            appendOutput(detail)
-            detectStatuses()
-        } else {
-            setStatus(failureStatusText, key: "action")
-            appendStderrDetailIfPresent(detail)
-            NSSound.beep()
+        applyActionExecutionResult(
+            success: success,
+            detail: detail,
+            completionStatusText: completionStatusText,
+            failureStatusText: failureStatusText,
+            finishUI: finishProviderMigrationInteraction
+        ) {
+            self.detectStatuses()
         }
     }
 
