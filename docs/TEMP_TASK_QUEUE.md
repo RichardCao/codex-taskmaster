@@ -36,10 +36,10 @@
 7. `done` loop daemon 实例隔离
    目标：让 daemon 生命周期至少绑定到 `STATE_DIR` 或实例 id，避免多个隔离实例互相踩踏。
 
-8. `in_progress` loop 调度去全局串行阻塞
+8. `done` loop 调度去全局串行阻塞
    目标：拆开“扫描到期 loop”和“执行单次发送”，避免一个慢 target 拖住所有其他 loop。
 
-9. `pending` `probe-all --json` / `status --json` 去除 `ARG_MAX` 脆弱点
+9. `in_progress` `probe-all --json` / `status --json` 去除 `ARG_MAX` 脆弱点
    目标：避免把大文本结果塞进单个 argv，改成 stdin 或原生 JSON 流。
 
 10. `pending` loop/state 数据文件执行边界收紧

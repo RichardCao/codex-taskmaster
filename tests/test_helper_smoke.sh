@@ -45,6 +45,25 @@ assert_equals() {
   fi
 }
 
+wait_for_loop_workers() {
+  python3 - "${STATE_DIR}/runtime/loop-runners" <<'PY'
+import os
+import sys
+import time
+
+runner_dir = sys.argv[1]
+deadline = time.time() + 8
+while time.time() < deadline:
+    if not os.path.isdir(runner_dir):
+        raise SystemExit(0)
+    pending = [name for name in os.listdir(runner_dir) if name.endswith(".pid")]
+    if not pending:
+        raise SystemExit(0)
+    time.sleep(0.05)
+raise SystemExit(f"timed out waiting for loop workers to finish in {runner_dir}")
+PY
+}
+
 start_send_request_responder() {
   local target="$1"
   local message="$2"
@@ -521,6 +540,7 @@ for _ in 1 2 3; do
   CODEX_TASKMASTER_LOOP_BUSY_RETRY_SECONDS=0 \
   CODEX_TASKMASTER_LOOP_FAILURE_PAUSE_THRESHOLD=3 \
   "$HELPER" loop-once
+  wait_for_loop_workers
 done
 
 paused_status="$("$HELPER" status -t alpha)"
@@ -537,6 +557,7 @@ CODEX_TASKMASTER_TEST_COUNTER_FILE="$LOOP_SEND_COUNTER" \
 CODEX_TASKMASTER_LOOP_BUSY_RETRY_SECONDS=0 \
 CODEX_TASKMASTER_LOOP_FAILURE_PAUSE_THRESHOLD=3 \
 "$HELPER" loop-once
+wait_for_loop_workers
 paused_counter_after="$(cat "$LOOP_SEND_COUNTER")"
 assert_equals "$paused_counter_after" "$paused_counter_before"
 
@@ -557,6 +578,7 @@ for _ in 1 2 3 4; do
   CODEX_TASKMASTER_LOOP_BUSY_RETRY_SECONDS=0 \
   CODEX_TASKMASTER_LOOP_FAILURE_PAUSE_THRESHOLD=3 \
   "$HELPER" loop-once
+  wait_for_loop_workers
 done
 
 nonforce_status="$("$HELPER" status -t "$nonforce_target")"
@@ -612,6 +634,7 @@ EOF
 CODEX_TASKMASTER_SEND_STUB="$CONFLICT_SEND_STUB" \
 CODEX_TASKMASTER_TEST_COUNTER_FILE="$CONFLICT_SEND_COUNTER" \
 "$HELPER" loop-once
+wait_for_loop_workers
 
 assert_equals "$(cat "$CONFLICT_SEND_COUNTER")" "1"
 if [[ "$mutex_a_key" > "$mutex_b_key" ]]; then
@@ -678,6 +701,7 @@ accepted_now_before="$(date +%s)"
 CODEX_TASKMASTER_SEND_STUB="$ACCEPTED_SEND_STUB" \
 CODEX_TASKMASTER_LOOP_ACCEPTED_RETRY_SECONDS=40 \
 "$HELPER" loop-once
+wait_for_loop_workers
 accepted_status="$("$HELPER" status -t "$accepted_target")"
 accepted_next_run="$(printf '%s\n' "$accepted_status" | awk -F': ' '$1=="next_run_epoch"{print $2}')"
 (( accepted_next_run - accepted_now_before >= 35 ))
@@ -700,6 +724,7 @@ printf '0' >"$CONFLICT_SEND_COUNTER"
 CODEX_TASKMASTER_SEND_STUB="$CONFLICT_SEND_STUB" \
 CODEX_TASKMASTER_TEST_COUNTER_FILE="$CONFLICT_SEND_COUNTER" \
 "$HELPER" loop-once
+wait_for_loop_workers
 assert_equals "$(cat "$CONFLICT_SEND_COUNTER")" "1"
 [[ ! -f "${STATE_DIR}/requests/processing/${stale_request_id}.request.json" ]]
 "$HELPER" loop-delete -t "$stale_target" >/dev/null
@@ -730,9 +755,97 @@ CODEX_TASKMASTER_SEND_STUB="$FORCE_FAILURE_STUB" \
 CODEX_TASKMASTER_LOOP_UNVERIFIED_RETRY_SECONDS=22 \
 CODEX_TASKMASTER_LOOP_FORCE_FAILURE_RETRY_SECONDS=17 \
 "$HELPER" loop-once
+wait_for_loop_workers
 force_status="$("$HELPER" status -t "$force_target")"
 force_next_run="$(printf '%s\n' "$force_status" | awk -F': ' '$1=="next_run_epoch"{print $2}')"
 (( force_next_run - force_now_before >= 18 ))
+
+FAIRNESS_SEND_STUB="${TEST_TMP}/loop-send-fairness-stub.sh"
+FAIRNESS_LOG="${TEST_TMP}/loop-send-fairness.log"
+cat >"$FAIRNESS_SEND_STUB" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+target="$1"
+log_file="${CODEX_TASKMASTER_FAIRNESS_LOG_FILE:?}"
+printf '%s %s\n' "$target" "$(date +%s)" >>"$log_file"
+if [[ "$target" == "slow-loop" ]]; then
+  sleep 2
+fi
+printf 'status: success\n'
+printf 'reason: sent\n'
+printf 'detail: fairness send complete\n'
+EOF
+chmod +x "$FAIRNESS_SEND_STUB"
+
+slow_target="slow-loop"
+fast_target="fast-loop"
+slow_key="$(printf '%s' "$slow_target" | shasum -a 256 | awk '{print $1}')"
+fast_key="$(printf '%s' "$fast_target" | shasum -a 256 | awk '{print $1}')"
+cat >"${STATE_DIR}/loops/${slow_key}.loop" <<EOF
+TARGET=${slow_target}
+INTERVAL=30
+MESSAGE=slow-message
+FORCE_SEND=0
+THREAD_ID=slow-thread
+EOF
+cat >"${STATE_DIR}/loops/${fast_key}.loop" <<EOF
+TARGET=${fast_target}
+INTERVAL=30
+MESSAGE=fast-message
+FORCE_SEND=0
+THREAD_ID=fast-thread
+EOF
+: > "${STATE_DIR}/runtime/loop-logs/${slow_key}.log"
+: > "${STATE_DIR}/runtime/loop-logs/${fast_key}.log"
+: > "$FAIRNESS_LOG"
+
+fairness_started_at="$(date +%s)"
+CODEX_TASKMASTER_SEND_STUB="$FAIRNESS_SEND_STUB" \
+CODEX_TASKMASTER_FAIRNESS_LOG_FILE="$FAIRNESS_LOG" \
+"$HELPER" loop-once
+fairness_after_dispatch="$(date +%s)"
+(( fairness_after_dispatch - fairness_started_at < 2 ))
+
+python3 - "$FAIRNESS_LOG" <<'PY'
+import os
+import sys
+import time
+
+log_path = sys.argv[1]
+deadline = time.time() + 1.5
+while time.time() < deadline:
+    if os.path.exists(log_path):
+        with open(log_path, "r", encoding="utf-8") as fh:
+            rows = [line.strip() for line in fh if line.strip()]
+        if any(row.startswith("fast-loop ") for row in rows):
+            raise SystemExit(0)
+    time.sleep(0.05)
+raise SystemExit("timed out waiting for fast-loop dispatch")
+PY
+
+python3 - "$FAIRNESS_LOG" <<'PY'
+import os
+import sys
+import time
+
+log_path = sys.argv[1]
+deadline = time.time() + 4
+while time.time() < deadline:
+    if os.path.exists(log_path):
+        with open(log_path, "r", encoding="utf-8") as fh:
+            rows = [line.strip() for line in fh if line.strip()]
+        if any(row.startswith("slow-loop ") for row in rows) and any(row.startswith("fast-loop ") for row in rows):
+            raise SystemExit(0)
+    time.sleep(0.05)
+raise SystemExit("timed out waiting for both loop dispatches")
+PY
+
+sleep 3
+fairness_rows="$(cat "$FAIRNESS_LOG")"
+assert_contains "$fairness_rows" "slow-loop "
+assert_contains "$fairness_rows" "fast-loop "
+"$HELPER" loop-delete -t "$slow_target" >/dev/null
+"$HELPER" loop-delete -t "$fast_target" >/dev/null
 
 DAEMON_STATE_A="${TEST_TMP}/daemon-state-a"
 DAEMON_STATE_B="${TEST_TMP}/daemon-state-b"
