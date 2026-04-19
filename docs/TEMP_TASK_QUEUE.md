@@ -15,18 +15,23 @@
 
 ## 当前队列
 
-1. `done` 表格展示 formatter 收口
-   目标：把 loop / session 表格列值、重复 target 展示、tooltip 与相关展示判断从 `CodexTaskmasterApp.swift` 下沉到 core formatter/helper。
+1. `done` `thread-delete` rollout 删除边界收口
+   目标：对 `thread-delete` 使用的 `rollout_path` 做严格 allowlist 校验，只允许删除 `~/.codex/sessions` 与 `~/.codex/archived_sessions` 下的真实文件路径；对越界路径直接 fail closed，并补 helper smoke 覆盖。
 
-2. `done` 顶部状态条规则收口
-   目标：把状态条的颜色判定、优先级、自动清理时机与默认文案从控制器下沉到 core 纯规则。
+2. `in_progress` inflight request 去重键修正
+   目标：把发送请求 identity 明确为 `target + message + force_send`，避免普通发送与强制发送互相错误去重，并补 helper 覆盖。
 
-3. `done` loop / send 交互提示模板收口
-   目标：把剩余的 loop conflict、ambiguous target、runtime permission 等提示框文案与交互模板从控制器中抽离。
+3. `pending` session runtime status 协议对齐
+   目标：让 helper 与 Swift/Core 的 session status 集合保持一致，补上 `idle_with_queued_messages` 等缺失映射，并补 core 回归。
 
-4. `done` 主控制器残余展示编排清理
-   目标：继续压缩 `CodexTaskmasterApp.swift` 中的展示性 helper、重复 UI 收尾逻辑和零散状态判断，为 Linux 迁移前做最后一轮收口。
-   当前子任务：
-   - `done` 重复 alert 执行 helper 收口
-   - `done` session / provider migration 交互状态收口
-   - `done` loop / session 选择与 blocked 提示收口
+4. `pending` terminal state 协议对齐
+   目标：让 helper 与 Swift/Core 的 terminal state 集合保持一致，显式支持 `footer_visible_only`，避免 UI 退化成原始字符串。
+
+5. `pending` 最近发送结果扫描正确性修复
+   目标：修正 session 详情区“最近发送结果”的扫描逻辑，不再因为全局最新文件裁剪而漏掉当前 session 的较旧结果。
+
+6. `pending` prompt 搜索缓存失效修复
+   目标：后台 refresh 更新 session 快照时，同步失效受影响 session 的 prompt cache，避免搜索使用陈旧 rollout 文本。
+
+7. `pending` helper metadata 协议安全化
+   目标：替换 `load_target_metadata()` 及相关调用点当前未转义的 `|` 拼接协议，改成安全 JSON/编码协议，并补包含 `|` 的测试样例。

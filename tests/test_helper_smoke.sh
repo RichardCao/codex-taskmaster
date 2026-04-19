@@ -48,6 +48,7 @@ ROLLOUT_A="${CODEX_DIR}/sessions/2026/03/31/rollout-a.jsonl"
 ROLLOUT_B="${CODEX_DIR}/sessions/2026/03/31/rollout-b.jsonl"
 ROLLOUT_C="${CODEX_DIR}/archived_sessions/rollout-c.jsonl"
 ROLLOUT_D="${CODEX_DIR}/sessions/2026/03/31/rollout-d.jsonl"
+ROLLOUT_ESCAPE="${TEST_TMP}/escape-rollout.jsonl"
 mkdir -p "$(dirname "$ROLLOUT_A")" "$(dirname "$ROLLOUT_C")"
 
 cat >"$ROLLOUT_A" <<'EOF'
@@ -68,6 +69,10 @@ EOF
 cat >"$ROLLOUT_D" <<'EOF'
 {"timestamp":"2026-03-31T13:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"delete me"}}
 {"timestamp":"2026-03-31T13:00:01Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"d"}}
+EOF
+
+cat >"$ROLLOUT_ESCAPE" <<'EOF'
+{"timestamp":"2026-03-31T14:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"escape me"}}
 EOF
 
 cat >"$CONFIG_PATH" <<'EOF'
@@ -125,7 +130,8 @@ insert into threads(
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '$ROLLOUT_A', 200, '/tmp/alpha-cwd', 'First prompt', 'First prompt', 0, 'openai', 'cli', '', ''),
   ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '$ROLLOUT_B', 100, '/tmp/beta-cwd', 'Second prompt', 'Second prompt', 0, 'openai', 'cli', '', ''),
   ('cccccccc-cccc-cccc-cccc-cccccccccccc', '$ROLLOUT_C', 90, '/tmp/archived-cwd', 'Archived prompt', 'Archived prompt', 1, 'openai', 'cli', '', ''),
-  ('dddddddd-dddd-dddd-dddd-dddddddddddd', '$ROLLOUT_D', 80, '/tmp/delta-cwd', 'Delete prompt', 'Delete prompt', 0, 'openai', '{"subagent":{"thread_spawn":{"parent_thread_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}}', 'worker-d', 'worker');
+  ('dddddddd-dddd-dddd-dddd-dddddddddddd', '$ROLLOUT_D', 80, '/tmp/delta-cwd', 'Delete prompt', 'Delete prompt', 0, 'openai', '{"subagent":{"thread_spawn":{"parent_thread_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}}', 'worker-d', 'worker'),
+  ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', '$ROLLOUT_ESCAPE', 70, '/tmp/escape-cwd', 'Escape prompt', 'Escape prompt', 0, 'openai', 'cli', '', '');
 insert into thread_dynamic_tools(thread_id, position, name, description, input_schema, defer_loading) values
   ('dddddddd-dddd-dddd-dddd-dddddddddddd', 0, 'tool-a', 'desc', '{}', 0);
 insert into stage1_outputs(thread_id, source_updated_at, raw_memory, rollout_summary, generated_at) values
@@ -174,7 +180,7 @@ insert into logs(ts, level, target, message, thread_id, estimated_bytes) values
 EOF
 
 count_output="$("$HELPER" session-count)"
-[[ "$count_output" == "3" ]]
+[[ "$count_output" == "4" ]]
 
 config_provider_output="$("$HELPER" config-model-provider)"
 assert_contains "$config_provider_output" "status: success"
@@ -656,7 +662,7 @@ assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from thread_dynamic_tools 
 assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from stage1_outputs where thread_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd';")" "0"
 assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from logs where thread_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd';")" "0"
 assert_equals "$(sqlite3 "$LOGS_DB" "select count(*) from logs where thread_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd';")" "0"
-assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from threads where archived = 0;")" "2"
+assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from threads where archived = 0;")" "3"
 [[ ! -e "$ROLLOUT_D" ]]
 assert_not_contains "$(cat "$SESSION_INDEX")" "dddddddd-dddd-dddd-dddd-dddddddddddd"
 
@@ -673,5 +679,27 @@ assert_equals "$(sqlite3 "$LOGS_DB" "select count(*) from logs where thread_id =
 [[ ! -e "$ROLLOUT_C" ]]
 [[ ! -d "${CODEX_DIR}/archived_sessions" ]]
 assert_not_contains "$(cat "$SESSION_INDEX")" "cccccccc-cccc-cccc-cccc-cccccccccccc"
+
+set +e
+escaped_delete_plan_output="$("$HELPER" thread-delete-plan -t eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee 2>&1)"
+escaped_delete_plan_status=$?
+set -e
+[[ "$escaped_delete_plan_status" -ne 0 ]]
+assert_contains "$escaped_delete_plan_output" "status: failed"
+assert_contains "$escaped_delete_plan_output" "reason: rollout_path_not_allowed"
+assert_contains "$escaped_delete_plan_output" "rollout_path_allowed: no"
+
+set +e
+escaped_delete_output="$("$HELPER" thread-delete -t eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee 2>&1)"
+escaped_delete_status=$?
+set -e
+[[ "$escaped_delete_status" -ne 0 ]]
+assert_contains "$escaped_delete_output" "status: failed"
+assert_contains "$escaped_delete_output" "reason: rollout_path_not_allowed"
+assert_contains "$escaped_delete_output" "deleted: no"
+assert_contains "$escaped_delete_output" "failed_step: rollout_path_validation"
+assert_contains "$escaped_delete_output" "rollout_removed: no"
+assert_equals "$(sqlite3 "$STATE_DB" "select count(*) from threads where id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';")" "1"
+[[ -f "$ROLLOUT_ESCAPE" ]]
 
 printf 'helper smoke tests passed\n'

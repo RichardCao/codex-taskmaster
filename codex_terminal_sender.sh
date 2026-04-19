@@ -1679,6 +1679,26 @@ def prune_empty_parent_dirs(path, stop_at):
             break
         current = os.path.dirname(current)
 
+def allowed_rollout_roots():
+    codex_root = os.path.join(os.path.expanduser("~"), ".codex")
+    return [
+        os.path.join(codex_root, "sessions"),
+        os.path.join(codex_root, "archived_sessions"),
+    ]
+
+def rollout_path_is_allowed(path):
+    if not path:
+        return True
+    real_path = os.path.realpath(path)
+    for root in allowed_rollout_roots():
+        real_root = os.path.realpath(root)
+        try:
+            if os.path.commonpath([real_path, real_root]) == real_root:
+                return True
+        except ValueError:
+            continue
+    return False
+
 planned_steps = [
     "state_db_cleanup",
     "logs_db_cleanup",
@@ -1742,6 +1762,11 @@ try:
         emit(1, "failed", "thread_not_found")
     rollout_path, archived = row
     rollout_exists_before = bool(rollout_path and os.path.exists(rollout_path))
+    if not rollout_path_is_allowed(rollout_path):
+        failed_step = "rollout_path_validation"
+        error_message = f"rollout_path is outside allowed Codex session roots: {rollout_path}"
+        repair_hint = "为避免误删任意本地文件，已拒绝删除；请先修正状态库中的 rollout_path。"
+        emit(1, "failed", "rollout_path_not_allowed")
 
     try:
         dynamic_tool_rows_removed = state_cur.execute(
@@ -1842,6 +1867,26 @@ import sys
 
 state_db_path, logs_db_path, session_index_path, thread_id = sys.argv[1:]
 
+def allowed_rollout_roots():
+    codex_root = os.path.join(os.path.expanduser("~"), ".codex")
+    return [
+        os.path.join(codex_root, "sessions"),
+        os.path.join(codex_root, "archived_sessions"),
+    ]
+
+def rollout_path_is_allowed(path):
+    if not path:
+        return True
+    real_path = os.path.realpath(path)
+    for root in allowed_rollout_roots():
+        real_root = os.path.realpath(root)
+        try:
+            if os.path.commonpath([real_path, real_root]) == real_root:
+                return True
+        except ValueError:
+            continue
+    return False
+
 def count_session_index_entries(path, target_thread_id):
     if not os.path.exists(path):
         return 0
@@ -1872,6 +1917,15 @@ if row is None:
     raise SystemExit(1)
 
 rollout_path, archived = row
+if not rollout_path_is_allowed(rollout_path):
+    print("status: failed")
+    print("reason: rollout_path_not_allowed")
+    print(f"thread_id: {thread_id}")
+    print(f"rollout_path: {rollout_path}")
+    print("rollout_path_allowed: no")
+    print("detail: rollout_path is outside allowed Codex session roots")
+    raise SystemExit(1)
+
 dynamic_tool_rows = cur.execute(
     "select count(*) from thread_dynamic_tools where thread_id = ?",
     (thread_id,),
@@ -1904,6 +1958,7 @@ print("status: success")
 print("reason: delete_plan_ready")
 print(f"thread_id: {thread_id}")
 print(f"rollout_path: {rollout_path}")
+print("rollout_path_allowed: yes")
 print(f"archived: {'yes' if archived else 'no'}")
 print(f"dynamic_tool_rows: {dynamic_tool_rows}")
 print(f"stage1_output_rows: {stage1_output_rows}")
