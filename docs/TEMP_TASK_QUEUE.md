@@ -21,10 +21,10 @@
 2. `done` live-only target 解析排除 archived session
    目标：让 `send`、`start`、`probe`、`resolve-live-tty` 等 live-only 路径默认只命中 `archived = 0` 的 session。
 
-3. `in_progress` delete allowlist 与自定义 Codex 根目录对齐
+3. `done` delete allowlist 与自定义 Codex 根目录对齐
    目标：让 `thread-delete` / `thread-delete-plan` 的 rollout allowlist 根目录从实际配置推导，不再硬编码 `~/.codex/...`。
 
-4. `pending` `Package.swift` 测试路径大小写修复
+4. `in_progress` `Package.swift` 测试路径大小写修复
    目标：修正 SwiftPM test target 路径大小写问题，清除 Linux / case-sensitive 文件系统上的直接阻断点。
 
 5. `pending` 默认检查链路补齐核心回归

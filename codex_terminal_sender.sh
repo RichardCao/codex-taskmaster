@@ -1782,13 +1782,13 @@ thread_delete() {
   is_uuid_like "$thread_id" || die "thread id must be a UUID"
   thread_action_guard_live_session "$thread_id" "delete"
 
-  python3 - "$CODEX_STATE_DB_PATH" "$CODEX_LOGS_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "$thread_id" <<'PY'
+  python3 - "$CODEX_STATE_DB_PATH" "$CODEX_LOGS_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "$CODEX_CONFIG_PATH" "$thread_id" <<'PY'
 import json
 import os
 import sqlite3
 import sys
 
-state_db_path, logs_db_path, session_index_path, thread_id = sys.argv[1:]
+state_db_path, logs_db_path, session_index_path, config_path, thread_id = sys.argv[1:]
 
 def remove_session_index_entry(path, target_thread_id):
     if not os.path.exists(path):
@@ -1828,25 +1828,46 @@ def prune_empty_parent_dirs(path, stop_at):
             break
         current = os.path.dirname(current)
 
-def allowed_rollout_roots():
-    codex_root = os.path.join(os.path.expanduser("~"), ".codex")
-    return [
-        os.path.join(codex_root, "sessions"),
-        os.path.join(codex_root, "archived_sessions"),
-    ]
+def candidate_codex_roots():
+    roots = []
+    for path in (state_db_path, logs_db_path, session_index_path, config_path):
+        if not path:
+            continue
+        real_path = os.path.realpath(path)
+        root = real_path if os.path.isdir(real_path) else os.path.dirname(real_path)
+        if root and root not in roots:
+            roots.append(root)
+    default_root = os.path.realpath(os.path.join(os.path.expanduser("~"), ".codex"))
+    if default_root not in roots:
+        roots.append(default_root)
+    return roots
 
-def rollout_path_is_allowed(path):
+def allowed_rollout_roots():
+    roots = []
+    for codex_root in candidate_codex_roots():
+        for suffix in ("sessions", "archived_sessions"):
+            root = os.path.realpath(os.path.join(codex_root, suffix))
+            if root not in roots:
+                roots.append(root)
+    return roots
+
+def matching_rollout_root(path):
     if not path:
-        return True
+        return None
     real_path = os.path.realpath(path)
+    matches = []
     for root in allowed_rollout_roots():
-        real_root = os.path.realpath(root)
         try:
-            if os.path.commonpath([real_path, real_root]) == real_root:
-                return True
+            if os.path.commonpath([real_path, root]) == root:
+                matches.append(root)
         except ValueError:
             continue
-    return False
+    if not matches:
+        return None
+    return max(matches, key=len)
+
+def rollout_path_is_allowed(path):
+    return matching_rollout_root(path) is not None
 
 planned_steps = [
     "state_db_cleanup",
@@ -1860,6 +1881,7 @@ error_message = ""
 repair_hint = ""
 rollout_path = ""
 archived = 0
+rollout_root = ""
 logs_db_present = os.path.exists(logs_db_path)
 rollout_exists_before = False
 state_thread_deleted = False
@@ -1911,7 +1933,8 @@ try:
         emit(1, "failed", "thread_not_found")
     rollout_path, archived = row
     rollout_exists_before = bool(rollout_path and os.path.exists(rollout_path))
-    if not rollout_path_is_allowed(rollout_path):
+    rollout_root = matching_rollout_root(rollout_path) or ""
+    if not rollout_root:
         failed_step = "rollout_path_validation"
         error_message = f"rollout_path is outside allowed Codex session roots: {rollout_path}"
         repair_hint = "为避免误删任意本地文件，已拒绝删除；请先修正状态库中的 rollout_path。"
@@ -1980,10 +2003,7 @@ try:
         if rollout_exists_before:
             os.remove(rollout_path)
             rollout_removed = True
-            if archived:
-                prune_empty_parent_dirs(rollout_path, os.path.expanduser("~/.codex/archived_sessions"))
-            else:
-                prune_empty_parent_dirs(rollout_path, os.path.expanduser("~/.codex/sessions"))
+            prune_empty_parent_dirs(rollout_path, rollout_root)
         completed_steps.append("rollout_cleanup")
     except Exception as exc:
         failed_step = "rollout_cleanup"
@@ -2008,20 +2028,36 @@ thread_delete_plan() {
   require_cmd python3
   is_uuid_like "$thread_id" || die "thread id must be a UUID"
 
-  python3 - "$CODEX_STATE_DB_PATH" "$CODEX_LOGS_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "$thread_id" <<'PY'
+  python3 - "$CODEX_STATE_DB_PATH" "$CODEX_LOGS_DB_PATH" "$CODEX_SESSION_INDEX_PATH" "$CODEX_CONFIG_PATH" "$thread_id" <<'PY'
 import json
 import os
 import sqlite3
 import sys
 
-state_db_path, logs_db_path, session_index_path, thread_id = sys.argv[1:]
+state_db_path, logs_db_path, session_index_path, config_path, thread_id = sys.argv[1:]
+
+def candidate_codex_roots():
+    roots = []
+    for path in (state_db_path, logs_db_path, session_index_path, config_path):
+        if not path:
+            continue
+        real_path = os.path.realpath(path)
+        root = real_path if os.path.isdir(real_path) else os.path.dirname(real_path)
+        if root and root not in roots:
+            roots.append(root)
+    default_root = os.path.realpath(os.path.join(os.path.expanduser("~"), ".codex"))
+    if default_root not in roots:
+        roots.append(default_root)
+    return roots
 
 def allowed_rollout_roots():
-    codex_root = os.path.join(os.path.expanduser("~"), ".codex")
-    return [
-        os.path.join(codex_root, "sessions"),
-        os.path.join(codex_root, "archived_sessions"),
-    ]
+    roots = []
+    for codex_root in candidate_codex_roots():
+        for suffix in ("sessions", "archived_sessions"):
+            root = os.path.realpath(os.path.join(codex_root, suffix))
+            if root not in roots:
+                roots.append(root)
+    return roots
 
 def rollout_path_is_allowed(path):
     if not path:

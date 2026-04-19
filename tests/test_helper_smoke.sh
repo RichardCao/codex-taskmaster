@@ -101,9 +101,9 @@ PY
 }
 
 HOME_DIR="${TEST_TMP}/home"
-CODEX_DIR="${HOME_DIR}/.codex"
+CODEX_DIR="${TEST_TMP}/custom-codex-root"
 STATE_DIR="${TEST_TMP}/state"
-mkdir -p "$CODEX_DIR" "$STATE_DIR"
+mkdir -p "$HOME_DIR" "$CODEX_DIR" "$STATE_DIR"
 
 STATE_DB="${TEST_TMP}/state.sqlite"
 LOGS_DB="${TEST_TMP}/logs.sqlite"
