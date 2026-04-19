@@ -195,7 +195,7 @@ insert into threads(
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '$ROLLOUT_A', 200, '/tmp/alpha-cwd', 'First prompt', 'First prompt', 0, 'openai', 'cli', '', ''),
   ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '$ROLLOUT_B', 100, '/tmp/beta-cwd', 'Second prompt', 'Second prompt', 0, 'openai', 'cli', '', ''),
   ('cccccccc-cccc-cccc-cccc-cccccccccccc', '$ROLLOUT_C', 90, '/tmp/archived-cwd', 'Archived prompt', 'Archived prompt', 1, 'openai', 'cli', '', ''),
-  ('dddddddd-dddd-dddd-dddd-dddddddddddd', '$ROLLOUT_D', 80, '/tmp/delta-cwd', 'Delete prompt', 'Delete prompt', 0, 'openai', '{"subagent":{"thread_spawn":{"parent_thread_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}}', 'worker-d', 'worker'),
+  ('dddddddd-dddd-dddd-dddd-dddddddddddd', '$ROLLOUT_D', 80, '/tmp/delta-cwd', 'Delete prompt', 'Delete | prompt', 0, 'openai', '{"subagent":{"thread_spawn":{"parent_thread_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}}|worker', 'worker|d', 'worker|role'),
   ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', '$ROLLOUT_ESCAPE', 70, '/tmp/escape-cwd', 'Escape prompt', 'Escape prompt', 0, 'openai', 'cli', '', '');
 insert into thread_dynamic_tools(thread_id, position, name, description, input_schema, defer_loading) values
   ('dddddddd-dddd-dddd-dddd-dddddddddddd', 0, 'tool-a', 'desc', '{}', 0);
@@ -318,6 +318,11 @@ resolved_tty_alpha_by_thread_id="$(
   "$HELPER" resolve-live-tty -t aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
 )"
 assert_equals "$resolved_tty_alpha_by_thread_id" "ttys101"
+
+probe_metadata_pipe="$("$HELPER" probe -t dddddddd-dddd-dddd-dddd-dddddddddddd)"
+assert_contains "$probe_metadata_pipe" "agent_nickname: worker|d"
+assert_contains "$probe_metadata_pipe" "agent_role: worker|role"
+assert_contains "$probe_metadata_pipe" "source: {\"subagent\":{\"thread_spawn\":{\"parent_thread_id\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\"}}}|worker"
 
 TTY_AMBIGUOUS_FIXTURE="${TEST_TMP}/tty-ps-ambiguous.txt"
 cat >"$TTY_AMBIGUOUS_FIXTURE" <<'EOF'

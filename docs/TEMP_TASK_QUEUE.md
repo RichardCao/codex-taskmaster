@@ -33,5 +33,5 @@
 6. `done` prompt 搜索缓存失效修复
    目标：后台 refresh 更新 session 快照时，同步失效受影响 session 的 prompt cache，避免搜索使用陈旧 rollout 文本。
 
-7. `in_progress` helper metadata 协议安全化
+7. `done` helper metadata 协议安全化
    目标：替换 `load_target_metadata()` 及相关调用点当前未转义的 `|` 拼接协议，改成安全 JSON/编码协议，并补包含 `|` 的测试样例。

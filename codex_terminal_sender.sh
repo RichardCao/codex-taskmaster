@@ -875,10 +875,41 @@ row = cur.execute(
 ).fetchone()
 conn.close()
 if row:
-    values = [(value or "").replace("\n", " ") for value in row[:4]]
-    values.append(session_name)
-    values.extend((value or "").replace("\n", " ") for value in row[4:])
-    print("|".join(values))
+    print(json.dumps({
+        "rollout_path": (row[0] or "").replace("\n", " "),
+        "thread_title": (row[1] or "").replace("\n", " "),
+        "first_user_message": (row[2] or "").replace("\n", " "),
+        "target_cwd": (row[3] or "").replace("\n", " "),
+        "session_name": session_name,
+        "model_provider": (row[4] or "").replace("\n", " "),
+        "session_source": (row[5] or "").replace("\n", " "),
+        "agent_nickname": (row[6] or "").replace("\n", " "),
+        "agent_role": (row[7] or "").replace("\n", " "),
+    }, ensure_ascii=False))
+PY
+}
+
+read_target_metadata_fields() {
+  local metadata_json="$1"
+  python3 - "$metadata_json" <<'PY'
+import json
+import sys
+
+raw = sys.argv[1].strip()
+data = json.loads(raw) if raw else {}
+for key in (
+    "rollout_path",
+    "thread_title",
+    "first_user_message",
+    "target_cwd",
+    "session_name",
+    "model_provider",
+    "session_source",
+    "agent_nickname",
+    "agent_role",
+):
+    sys.stdout.write(str(data.get(key, "")))
+    sys.stdout.write("\0")
 PY
 }
 
@@ -1010,7 +1041,17 @@ probe_session_status() {
   local session_source
   local agent_nickname
   local agent_role
-  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name model_provider session_source agent_nickname agent_role <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
+  {
+    IFS= read -r -d '' rollout_path || true
+    IFS= read -r -d '' thread_title || true
+    IFS= read -r -d '' first_user_message || true
+    IFS= read -r -d '' target_cwd || true
+    IFS= read -r -d '' session_name || true
+    IFS= read -r -d '' model_provider || true
+    IFS= read -r -d '' session_source || true
+    IFS= read -r -d '' agent_nickname || true
+    IFS= read -r -d '' agent_role || true
+  } < <(read_target_metadata_fields "$(load_target_metadata "$thread_id" 2>/dev/null)")
 
   [[ -n "${rollout_path:-}" && -f "${rollout_path:-}" ]] || die "could not find rollout path for target '$target'"
   tty_name="$(resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path" 2>/dev/null || true)"
@@ -1587,7 +1628,17 @@ thread_action_guard_live_session() {
 
   metadata="$(load_target_metadata "$thread_id" 2>/dev/null || true)"
   [[ -n "$metadata" ]] || return 0
-  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name model_provider session_source agent_nickname agent_role <<<"$metadata"
+  {
+    IFS= read -r -d '' rollout_path || true
+    IFS= read -r -d '' thread_title || true
+    IFS= read -r -d '' first_user_message || true
+    IFS= read -r -d '' target_cwd || true
+    IFS= read -r -d '' session_name || true
+    IFS= read -r -d '' model_provider || true
+    IFS= read -r -d '' session_source || true
+    IFS= read -r -d '' agent_nickname || true
+    IFS= read -r -d '' agent_role || true
+  } < <(read_target_metadata_fields "$metadata")
 
   set +e
   live_tty_output="$(resolve_target_tty "$thread_id" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path" 2>&1)"
@@ -2852,7 +2903,17 @@ resolve_live_tty() {
   local session_source
   local agent_nickname
   local agent_role
-  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name model_provider session_source agent_nickname agent_role <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
+  {
+    IFS= read -r -d '' rollout_path || true
+    IFS= read -r -d '' thread_title || true
+    IFS= read -r -d '' first_user_message || true
+    IFS= read -r -d '' target_cwd || true
+    IFS= read -r -d '' session_name || true
+    IFS= read -r -d '' model_provider || true
+    IFS= read -r -d '' session_source || true
+    IFS= read -r -d '' agent_nickname || true
+    IFS= read -r -d '' agent_role || true
+  } < <(read_target_metadata_fields "$(load_target_metadata "$thread_id" 2>/dev/null)")
   resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path"
 }
 
@@ -3140,7 +3201,17 @@ start_loop() {
   local session_source
   local agent_nickname
   local agent_role
-  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name model_provider session_source agent_nickname agent_role <<<"$start_detail"
+  {
+    IFS= read -r -d '' rollout_path || true
+    IFS= read -r -d '' thread_title || true
+    IFS= read -r -d '' first_user_message || true
+    IFS= read -r -d '' target_cwd || true
+    IFS= read -r -d '' session_name || true
+    IFS= read -r -d '' model_provider || true
+    IFS= read -r -d '' session_source || true
+    IFS= read -r -d '' agent_nickname || true
+    IFS= read -r -d '' agent_role || true
+  } < <(read_target_metadata_fields "$start_detail")
 
   if ! start_detail="$(resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path" 2>&1)"; then
     failure_reason="$(classify_loop_reason "$start_detail")"
@@ -3207,7 +3278,17 @@ resume_loop() {
   local session_source
   local agent_nickname
   local agent_role
-  IFS='|' read -r rollout_path thread_title first_user_message target_cwd session_name model_provider session_source agent_nickname agent_role <<<"$(load_target_metadata "$thread_id" 2>/dev/null)"
+  {
+    IFS= read -r -d '' rollout_path || true
+    IFS= read -r -d '' thread_title || true
+    IFS= read -r -d '' first_user_message || true
+    IFS= read -r -d '' target_cwd || true
+    IFS= read -r -d '' session_name || true
+    IFS= read -r -d '' model_provider || true
+    IFS= read -r -d '' session_source || true
+    IFS= read -r -d '' agent_nickname || true
+    IFS= read -r -d '' agent_role || true
+  } < <(read_target_metadata_fields "$(load_target_metadata "$thread_id" 2>/dev/null)")
   resolve_target_tty "$target" "$thread_id" "$thread_title" "$first_user_message" "$session_name" "$target_cwd" "$rollout_path" >/dev/null
   ensure_loop_daemon
   write_loop_definition "$key" "$target" "${INTERVAL:-$DEFAULT_INTERVAL}" "${MESSAGE:-$DEFAULT_MESSAGE}" "${FORCE_SEND:-0}" "$thread_id"
