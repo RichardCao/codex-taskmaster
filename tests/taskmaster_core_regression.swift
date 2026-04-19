@@ -840,6 +840,7 @@ struct TaskMasterCoreRegressionRunner {
     private static func runLocalizationChecks() {
         expect(localizedSendReason("missing_accessibility_permission") == "缺少辅助功能权限", "expected permission failure to localize consistently")
         expect(localizedTerminalState("queued_messages_pending") == "消息排队中", "expected queued terminal state to localize consistently")
+        expect(localizedProbeStatus("idle_with_queued_messages") == "空闲但消息排队", "expected queued idle probe status to localize consistently")
         expect(
             localizedSessionReason("a started turn has no later task_complete") == "检测到已开始的回合，但后面没有看到 task_complete，当前可能仍在执行",
             "expected known session reason to localize consistently"
@@ -848,6 +849,25 @@ struct TaskMasterCoreRegressionRunner {
             localizedSessionReason("osascript failed: not authorized") == "读取 Terminal 状态失败: not authorized",
             "expected osascript session reason to preserve detail with localized prefix"
         )
+        let queuedIdle = SessionSnapshot(
+            name: "queued",
+            target: "queued",
+            threadID: "thread-queued",
+            provider: "openai",
+            source: "cli",
+            parentThreadID: "",
+            agentNickname: "",
+            agentRole: "",
+            status: "idle_with_queued_messages",
+            reason: "turn is complete, but queued messages are still visible in Terminal",
+            terminalState: "queued_messages_pending",
+            tty: "ttys001",
+            updatedAtEpoch: 1,
+            rolloutPath: "",
+            preview: "",
+            isArchived: false
+        )
+        expect(localizedSessionStatusLabel(queuedIdle) == "消息排队", "expected queued idle session status to map to 消息排队")
     }
 
     private static func runLoopStateLabelChecks() {

@@ -21,10 +21,10 @@
 2. `done` inflight request 去重键修正
    目标：把发送请求 identity 明确为 `target + message + force_send`，避免普通发送与强制发送互相错误去重，并补 helper 覆盖。
 
-3. `in_progress` session runtime status 协议对齐
+3. `done` session runtime status 协议对齐
    目标：让 helper 与 Swift/Core 的 session status 集合保持一致，补上 `idle_with_queued_messages` 等缺失映射，并补 core 回归。
 
-4. `pending` terminal state 协议对齐
+4. `in_progress` terminal state 协议对齐
    目标：让 helper 与 Swift/Core 的 terminal state 集合保持一致，显式支持 `footer_visible_only`，避免 UI 退化成原始字符串。
 
 5. `pending` 最近发送结果扫描正确性修复

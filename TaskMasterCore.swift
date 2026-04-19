@@ -1419,6 +1419,7 @@ enum SessionRuntimeStatus: Equatable {
     case idleStable
     case interruptedIdle
     case idleWithResidualInput
+    case idleWithQueuedMessages
     case busyTurnOpen
     case postFinalizing
     case busyWithStreamIssue
@@ -1443,6 +1444,8 @@ enum SessionRuntimeStatus: Equatable {
             self = .interruptedIdle
         case "idle_with_residual_input":
             self = .idleWithResidualInput
+        case "idle_with_queued_messages":
+            self = .idleWithQueuedMessages
         case "busy_turn_open":
             self = .busyTurnOpen
         case "post_finalizing":
@@ -1484,6 +1487,8 @@ func localizedSessionStatusLabel(_ session: SessionSnapshot) -> String {
         return "中断后空闲"
     case .idleWithResidualInput:
         return "残留输入"
+    case .idleWithQueuedMessages:
+        return "消息排队"
     case .busyTurnOpen:
         return "运行中"
     case .postFinalizing:
@@ -1662,6 +1667,8 @@ func localizedProbeStatus(_ status: String) -> String {
         return "中断后空闲"
     case "idle_with_residual_input":
         return "空闲但有残留输入"
+    case "idle_with_queued_messages":
+        return "空闲但消息排队"
     case "busy_turn_open":
         return "回合进行中"
     case "post_finalizing":
@@ -1974,6 +1981,8 @@ func detailedNotSendableLabel(probeStatus: String, terminalState: String) -> Str
         return "回合状态滞后"
     case "idle_with_residual_input":
         return terminalState == "prompt_with_input" ? "提示符残留输入" : "残留输入"
+    case "idle_with_queued_messages":
+        return "消息排队中"
     default:
         break
     }
