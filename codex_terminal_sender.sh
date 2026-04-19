@@ -594,15 +594,17 @@ request_paths_for_id() {
 find_matching_inflight_request() {
   local target="$1"
   local message="$2"
+  local force_send="${3:-0}"
 
   prune_stale_request_files
-  python3 - "$PENDING_REQUEST_DIR" "$PROCESSING_REQUEST_DIR" "$target" "$message" <<'PY'
+  python3 - "$PENDING_REQUEST_DIR" "$PROCESSING_REQUEST_DIR" "$target" "$message" "$force_send" <<'PY'
 import json
 import os
 import sys
 
-pending_dir, processing_dir, target, message = sys.argv[1:]
+pending_dir, processing_dir, target, message, force_send = sys.argv[1:]
 candidates = []
+expected_force_send = force_send == "1"
 
 for queue_state, directory in (("pending", pending_dir), ("processing", processing_dir)):
     if not os.path.isdir(directory):
@@ -619,6 +621,8 @@ for queue_state, directory in (("pending", pending_dir), ("processing", processi
         if str(payload.get("target", "")) != target:
             continue
         if str(payload.get("message", "")) != message:
+            continue
+        if bool(payload.get("force_send")) != expected_force_send:
             continue
         request_id = str(payload.get("request_id", "")) or name.removesuffix(".request.json")
         created_at = int(payload.get("created_at", 0) or 0)
@@ -2470,7 +2474,7 @@ send_message_when_ready() {
     return $?
   fi
   local inflight_request=""
-  inflight_request="$(find_matching_inflight_request "$target" "$message" 2>/dev/null || true)"
+  inflight_request="$(find_matching_inflight_request "$target" "$message" "$force_send" 2>/dev/null || true)"
   if [[ -n "$inflight_request" ]]; then
     local inflight_request_id
     local inflight_queue_state
@@ -2482,7 +2486,7 @@ send_message_when_ready() {
       "request_already_inflight" \
       "$target" \
       "$([[ "$force_send" == "1" ]] && echo yes || echo no)" \
-      "same target/message request is already ${inflight_queue_state:-pending} with request_id=${inflight_request_id:-unknown} created_at=${inflight_created_at:-0}"
+      "same target/message/force_send request is already ${inflight_queue_state:-pending} with request_id=${inflight_request_id:-unknown} created_at=${inflight_created_at:-0}"
     return 2
   fi
   local request_id

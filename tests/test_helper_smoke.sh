@@ -35,6 +35,71 @@ assert_equals() {
   fi
 }
 
+start_send_request_responder() {
+  local target="$1"
+  local message="$2"
+  local force_send="$3"
+  (
+    python3 - "${STATE_DIR}/requests/pending" "${STATE_DIR}/requests/results" "$target" "$message" "$force_send" <<'PY'
+import json
+import os
+import pathlib
+import sys
+import time
+
+pending_dir, results_dir, target, message, force_send = sys.argv[1:]
+expected_force_send = force_send == "1"
+
+deadline = time.time() + 8
+while time.time() < deadline:
+    if os.path.isdir(pending_dir):
+        for name in sorted(os.listdir(pending_dir)):
+            if not name.endswith(".request.json"):
+                continue
+            request_path = os.path.join(pending_dir, name)
+            try:
+                with open(request_path, "r", encoding="utf-8") as fh:
+                    payload = json.load(fh)
+            except Exception:
+                continue
+            if payload.get("target") != target:
+                continue
+            if payload.get("message") != message:
+                continue
+            if bool(payload.get("force_send")) != expected_force_send:
+                continue
+            request_id = payload.get("request_id") or name.removesuffix(".request.json")
+            result_path = os.path.join(results_dir, f"{request_id}.result.json")
+            pathlib.Path(results_dir).mkdir(parents=True, exist_ok=True)
+            with open(result_path, "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "status": "success",
+                        "reason": "sent",
+                        "target": target,
+                        "force_send": expected_force_send,
+                        "detail": "test responder completed request",
+                    },
+                    fh,
+                    ensure_ascii=False,
+                )
+            try:
+                os.remove(request_path)
+            except FileNotFoundError:
+                pass
+            raise SystemExit(0)
+    time.sleep(0.1)
+
+print(
+    f"timed out waiting for send request target={target} force_send={force_send}",
+    file=sys.stderr,
+)
+raise SystemExit(1)
+PY
+  ) &
+  SEND_REQUEST_RESPONDER_PID="$!"
+}
+
 HOME_DIR="${TEST_TMP}/home"
 CODEX_DIR="${HOME_DIR}/.codex"
 STATE_DIR="${TEST_TMP}/state"
@@ -478,6 +543,35 @@ mutex_loser_status="$("$HELPER" status -t "$mutex_loser")"
 assert_contains "$mutex_loser_status" "paused: yes"
 assert_contains "$mutex_loser_status" "failure_reason: loop_conflict_active_session"
 assert_contains "$mutex_loser_status" "pause_reason: loop_conflict_active_session"
+
+same_force_request_id="same-force-inflight-request"
+fresh_request_created_at="$(date +%s)"
+cat >"${STATE_DIR}/requests/pending/${same_force_request_id}.request.json" <<EOF
+{"request_id":"${same_force_request_id}","target":"dedupe-target","message":"dedupe-message","source_tag":"helper-send","timeout_seconds":12,"force_send":false,"created_at":${fresh_request_created_at}}
+EOF
+set +e
+same_force_output="$("$HELPER" send -t dedupe-target -m dedupe-message 2>&1)"
+same_force_status=$?
+set -e
+[[ "$same_force_status" -eq 2 ]]
+assert_contains "$same_force_output" "status: accepted"
+assert_contains "$same_force_output" "reason: request_already_inflight"
+assert_contains "$same_force_output" "force_send: no"
+assert_contains "$same_force_output" "same target/message/force_send request is already pending"
+rm -f "${STATE_DIR}/requests/pending/${same_force_request_id}.request.json"
+
+force_mismatch_request_id="force-mismatch-inflight-request"
+cat >"${STATE_DIR}/requests/pending/${force_mismatch_request_id}.request.json" <<EOF
+{"request_id":"${force_mismatch_request_id}","target":"dedupe-target","message":"dedupe-message","source_tag":"helper-send","timeout_seconds":12,"force_send":false,"created_at":${fresh_request_created_at}}
+EOF
+start_send_request_responder "dedupe-target" "dedupe-message" "1"
+force_mismatch_output="$("$HELPER" send -t dedupe-target -m dedupe-message -f)"
+wait "$SEND_REQUEST_RESPONDER_PID"
+assert_contains "$force_mismatch_output" "status: success"
+assert_contains "$force_mismatch_output" "reason: sent"
+assert_contains "$force_mismatch_output" "force_send: yes"
+[[ -f "${STATE_DIR}/requests/pending/${force_mismatch_request_id}.request.json" ]]
+rm -f "${STATE_DIR}/requests/pending/${force_mismatch_request_id}.request.json"
 
 ACCEPTED_SEND_STUB="${TEST_TMP}/loop-send-accepted-stub.sh"
 cat >"$ACCEPTED_SEND_STUB" <<'EOF'

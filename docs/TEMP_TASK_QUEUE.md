@@ -18,10 +18,10 @@
 1. `done` `thread-delete` rollout 删除边界收口
    目标：对 `thread-delete` 使用的 `rollout_path` 做严格 allowlist 校验，只允许删除 `~/.codex/sessions` 与 `~/.codex/archived_sessions` 下的真实文件路径；对越界路径直接 fail closed，并补 helper smoke 覆盖。
 
-2. `in_progress` inflight request 去重键修正
+2. `done` inflight request 去重键修正
    目标：把发送请求 identity 明确为 `target + message + force_send`，避免普通发送与强制发送互相错误去重，并补 helper 覆盖。
 
-3. `pending` session runtime status 协议对齐
+3. `in_progress` session runtime status 协议对齐
    目标：让 helper 与 Swift/Core 的 session status 集合保持一致，补上 `idle_with_queued_messages` 等缺失映射，并补 core 回归。
 
 4. `pending` terminal state 协议对齐
