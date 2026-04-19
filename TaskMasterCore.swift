@@ -1382,6 +1382,49 @@ func mergeLoopSnapshots(previous: [LoopSnapshot], incoming: [LoopSnapshot]) -> [
     }
 }
 
+func optimisticLoopSnapshot(
+    target: String,
+    interval: String?,
+    message: String?,
+    forceSend: Bool?,
+    existingSnapshots: [LoopSnapshot],
+    now: TimeInterval = Date().timeIntervalSince1970
+) -> LoopSnapshot {
+    let existingSnapshot = existingSnapshots.first(where: { $0.target == target && !$0.isStopped && !$0.isPaused })
+        ?? existingSnapshots.first(where: { $0.target == target })
+
+    return LoopSnapshot(
+        loopID: existingSnapshot?.loopID ?? "",
+        target: target,
+        loopDaemonRunning: true,
+        intervalSeconds: interval ?? existingSnapshot?.intervalSeconds ?? "unknown",
+        forceSend: forceSend ?? existingSnapshot?.isForceSendEnabled ?? false,
+        message: message ?? existingSnapshot?.message ?? "",
+        nextRunEpoch: now,
+        stopped: false,
+        stoppedReason: "",
+        paused: false,
+        failureCount: "0",
+        failureReason: "",
+        pauseReason: "",
+        logPath: existingSnapshot?.logPath ?? "-",
+        lastLogLine: ""
+    )
+}
+
+func applyingOptimisticLoopSnapshot(
+    _ snapshot: LoopSnapshot,
+    to existingSnapshots: [LoopSnapshot]
+) -> [LoopSnapshot] {
+    var updatedSnapshots = existingSnapshots
+    if let index = updatedSnapshots.firstIndex(where: { $0.target == snapshot.target && !$0.isStopped && !$0.isPaused }) {
+        updatedSnapshots[index] = snapshot
+    } else {
+        updatedSnapshots.append(snapshot)
+    }
+    return updatedSnapshots
+}
+
 func parsedEpochTimeInterval(_ rawValue: Any?) -> TimeInterval {
     switch rawValue {
     case let value as TimeInterval:

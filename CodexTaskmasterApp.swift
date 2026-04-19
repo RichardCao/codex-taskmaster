@@ -5236,31 +5236,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
     }
 
     private func optimisticMarkLoopRunning(target: String, interval: String?, message: String?, forceSend: Bool?) {
-        let existingSnapshot = loopSnapshots.first(where: { $0.target == target && !$0.isStopped && !$0.isPaused })
-            ?? loopSnapshots.first(where: { $0.target == target })
-        let updatedSnapshot = LoopSnapshot(
-            loopID: existingSnapshot?.loopID ?? "",
+        let updatedSnapshot = optimisticLoopSnapshot(
             target: target,
-            loopDaemonRunning: true,
-            intervalSeconds: interval ?? existingSnapshot?.intervalSeconds ?? "unknown",
-            forceSend: forceSend ?? existingSnapshot?.isForceSendEnabled ?? false,
-            message: message ?? existingSnapshot?.message ?? "",
-            nextRunEpoch: Date().timeIntervalSince1970,
-            stopped: false,
-            stoppedReason: "",
-            paused: false,
-            failureCount: "0",
-            failureReason: "",
-            pauseReason: "",
-            logPath: existingSnapshot?.logPath ?? "-",
-            lastLogLine: ""
+            interval: interval,
+            message: message,
+            forceSend: forceSend,
+            existingSnapshots: loopSnapshots
         )
-
-        if let index = loopSnapshots.firstIndex(where: { $0.target == target && !$0.isStopped && !$0.isPaused }) {
-            loopSnapshots[index] = updatedSnapshot
-        } else {
-            loopSnapshots.append(updatedSnapshot)
-        }
+        loopSnapshots = applyingOptimisticLoopSnapshot(updatedSnapshot, to: loopSnapshots)
 
         applyLoopSorting()
         activeLoopsMetaLabel.stringValue = loopSnapshots.isEmpty ? "循环: 0" : "循环: \(loopSnapshots.count)"
