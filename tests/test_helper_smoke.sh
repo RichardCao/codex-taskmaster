@@ -941,6 +941,14 @@ assert_contains "$start_failed_loop_status" "stopped: yes"
 assert_contains "$start_failed_loop_status" "stopped_reason: tty_unavailable"
 assert_contains "$start_failed_loop_status" "interval_seconds: 45"
 assert_contains "$start_failed_loop_status" "message: start-failure"
+resumed_loop_output="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_FIXTURE" \
+  "$HELPER" loop-resume -k "$start_failed_loop_id"
+)"
+assert_contains "$resumed_loop_output" "resumed loop"
+assert_contains "$resumed_loop_output" "loop_id: ${start_failed_loop_id}"
+assert_contains "$resumed_loop_output" "target: alpha"
+assert_contains "$resumed_loop_output" "previous_reason: tty_unavailable"
 
 start_failure_target="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 start_failure_hash="$(printf '%s' "$start_failure_target" | shasum -a 256 | awk '{print $1}')"
@@ -998,9 +1006,10 @@ set -e
 [[ "$duplicate_resume_status" -ne 0 ]]
 assert_contains "$duplicate_resume_output" "found multiple matching Terminal ttys for target 'duplicate'"
 
+resumed_loop_delete_output="$("$HELPER" loop-delete -k "$start_failed_loop_id")"
+assert_contains "$resumed_loop_delete_output" "deleted loop for target=${start_failed_loop_id}"
 delete_loop_output="$("$HELPER" loop-delete -t alpha)"
 assert_contains "$delete_loop_output" "deleted loop for target=alpha"
-"$HELPER" loop-delete -k "$start_failed_loop_id" >/dev/null
 "$HELPER" loop-delete -t "$start_failure_target" >/dev/null
 "$HELPER" loop-delete -t duplicate >/dev/null
 "$HELPER" loop-delete -t "$mutex_a" >/dev/null 2>&1 || true

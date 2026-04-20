@@ -60,10 +60,10 @@
 15. `done` failed start orphan loop 清理
    目标：避免 `start` 失败后同时留下 stopped history 和一条假活跃 orphan loop。
 
-16. `in_progress` `loop-resume -k LOOP_ID` 修复
+16. `done` `loop-resume -k LOOP_ID` 修复
    目标：恢复时优先使用 loop 文件内的 target，而不是错误解析空 target。
 
-17. `pending` app 退出是否默认 stop all 语义收口
+17. `in_progress` app 退出是否默认 stop all 语义收口
    目标：明确并实现“关闭窗口/退出 app 是否应停止全部 loop”的产品契约。
 
 18. `pending` 多实例运行语义收口

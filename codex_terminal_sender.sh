@@ -3616,6 +3616,8 @@ resume_loop() {
   MESSAGE=""
   FORCE_SEND="0"
   load_kv_file "$LOOP_FILE"
+  target="${TARGET:-$target}"
+  [[ -n "$target" ]] || die "loop file is missing target metadata"
   source_tag="$(loop_source_tag)"
 
   if load_current_loop_status_file "$source_tag"; then
