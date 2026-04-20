@@ -428,6 +428,41 @@ final class SessionScanService {
     }
 }
 
+struct ArchivedSessionLoadPlan {
+    let snapshots: [SessionSnapshot]?
+    let failureDetail: String
+    let statusText: String
+    let metaText: String?
+    let completionLogText: String?
+
+    var isSuccess: Bool {
+        snapshots != nil
+    }
+}
+
+func archivedSessionLoadPlan(
+    _ result: Result<[SessionSnapshot], SessionScanService.Failure>
+) -> ArchivedSessionLoadPlan {
+    switch result {
+    case let .success(snapshots):
+        return ArchivedSessionLoadPlan(
+            snapshots: snapshots,
+            failureDetail: "",
+            statusText: archivedSessionCompletionStatusText(),
+            metaText: nil,
+            completionLogText: archivedSessionCompletionLogText(count: snapshots.count)
+        )
+    case let .failure(error):
+        return ArchivedSessionLoadPlan(
+            snapshots: nil,
+            failureDetail: error.detail,
+            statusText: archivedSessionFailureStatusText(),
+            metaText: archivedSessionFailureMetaText(detail: error.detail),
+            completionLogText: nil
+        )
+    }
+}
+
 final class LoopCommandService {
     private let helperService: HelperCommandService
 

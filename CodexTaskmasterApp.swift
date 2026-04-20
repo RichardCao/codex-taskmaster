@@ -2141,19 +2141,19 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         DispatchQueue.global(qos: .utility).async {
             let result = self.sessionScanService.threadListArchived()
             DispatchQueue.main.async {
+                let plan = archivedSessionLoadPlan(result)
                 guard self.displayedSessionListMode == .archived, !self.isSessionScanRunning else {
                     if showProgress {
-                        switch result {
-                        case .success:
+                        if plan.isSuccess {
                             self.applySessionStatusRefreshResult(.success)
-                        case .failure:
+                        } else {
                             self.applySessionStatusRefreshResult(.failure)
                         }
                     }
                     return
                 }
 
-                guard case let .success(snapshots) = result else {
+                guard let snapshots = plan.snapshots else {
                     if showProgress {
                         self.applySessionStatusRefreshResult(.failure)
                     }
@@ -5650,28 +5650,24 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             }
 
             DispatchQueue.main.async {
+                let plan = archivedSessionLoadPlan(result)
                 guard self.isCurrentSessionScan(generation) else { return }
                 self.finishSessionScanUIState()
 
-                guard case let .success(snapshots) = result else {
-                    let failureDetail: String
-                    switch result {
-                    case let .failure(error):
-                        failureDetail = error.detail
-                    case .success:
-                        failureDetail = ""
-                    }
-                    self.sessionStatusMetaLabel.stringValue = archivedSessionFailureMetaText(detail: failureDetail)
-                    self.setStatus(archivedSessionFailureStatusText(), key: "scan")
-                    self.appendStderrDetailIfPresent(failureDetail)
+                guard let snapshots = plan.snapshots else {
+                    self.sessionStatusMetaLabel.stringValue = plan.metaText ?? archivedSessionLoadingMetaText()
+                    self.setStatus(plan.statusText, key: "scan")
+                    self.appendStderrDetailIfPresent(plan.failureDetail)
                     return
                 }
 
                 self.allSessionSnapshots = snapshots
                 self.sessionScanTotal = snapshots.count
                 self.renderSessionSnapshots(scannedCount: snapshots.count, totalCount: snapshots.count, isComplete: true)
-                self.setStatus(archivedSessionCompletionStatusText(), key: "scan")
-                self.appendOutput(archivedSessionCompletionLogText(count: snapshots.count))
+                self.setStatus(plan.statusText, key: "scan")
+                if let completionLogText = plan.completionLogText {
+                    self.appendOutput(completionLogText)
+                }
             }
         }
     }
