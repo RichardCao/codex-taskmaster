@@ -48,8 +48,8 @@
 11. `done` `CodexTaskmasterApp.swift` 继续瘦身
    目标：继续把展示编排、状态回写和 helper 调用细节从 UI 控制器下沉到 core/service。
 
-12. `in_progress` merge / refresh / fallback 规则继续收口
+12. `done` merge / refresh / fallback 规则继续收口
    目标：把刷新后保留旧字段、快照合并和回退语义进一步从 UI 中移出，避免控制器继续膨胀。
 
-13. `pending` 默认与严格检查链路文档同步
+13. `done` 默认与严格检查链路文档同步
    目标：把实际验证入口、默认检查覆盖范围、严格检查覆盖范围同步到文档，避免后续使用者误判。

@@ -94,10 +94,14 @@ bash ./scripts/check.sh
 
 - shell 语法检查
 - helper 冒烟测试
+- core 回归测试
+- loop history 回归测试
 - Swift 类型检查
 - app 构建
 
 当前 helper smoke 夹具已经补齐了 helper 现阶段会读取的 `threads` 字段，不再停在旧的 `alpha rollout path` 假失败上。
+
+这个入口对应“默认检查”。它适合日常开发时快速确认 helper 主路径、核心语义和 `.app` 构建没有明显回归。
 
 如果你想执行一轮更完整的本地回归检查，可以运行：
 
@@ -105,10 +109,22 @@ bash ./scripts/check.sh
 bash ./scripts/regression_check.sh
 ```
 
-默认行为：
+这个入口对应“严格检查”。当前默认行为：
 
 - 先执行 `scripts/check.sh`
+- 再尝试执行 `swift test`
 - 不自动跑 UI smoke test
+
+`swift test` 的行为由 `CODEX_TASKMASTER_RUN_SWIFTPM_TESTS` 控制：
+
+- `auto`
+  - 默认值
+  - 如果本机 SwiftPM / toolchain 本身损坏，则输出错误后跳过，不把它算成项目失败
+- `1`
+  - 强制执行
+  - `swift test` 失败会让整轮严格检查失败
+- `0`
+  - 显式跳过 `swift test`
 
 如果希望把 UI 启动烟雾测试也一起跑上，可以执行：
 
@@ -126,6 +142,21 @@ CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh
 
 - UI smoke test 依赖 macOS 辅助功能权限
 - 它适合本机回归，不适合默认塞进所有无头或受限环境
+
+如果你是在做发布前或本地收口验证，建议再补一轮 app 启动级检查：
+
+```bash
+open './Codex Taskmaster.app'
+pgrep -af 'Codex Taskmaster.app/Contents/MacOS/Codex Taskmaster|Codex Taskmaster'
+osascript -e 'tell application "Codex Taskmaster" to quit'
+```
+
+推荐的本地发布前验证顺序：
+
+1. `bash ./scripts/check.sh`
+2. `bash ./scripts/regression_check.sh`
+3. `CODEX_TASKMASTER_RUN_UI_SMOKE=1 bash ./scripts/regression_check.sh`
+4. 手工执行一次上面的 app 启动级检查
 
 ## 工作方式
 
