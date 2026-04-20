@@ -629,6 +629,108 @@ func parseStructuredSendHelperResult(_ text: String) -> [String: String]? {
     return fields
 }
 
+struct HelperExecutionPlan {
+    struct FailurePresentation {
+        let ambiguousTarget: (target: String, detail: String)?
+        let permissionIssue: String?
+    }
+
+    let isAccepted: Bool
+    let isSuccessful: Bool
+    let shouldRecordHistory: Bool
+    let optimisticLoopSnapshot: LoopSnapshot?
+    let optimisticRefreshDelays: [TimeInterval]
+    let deletedLoopTarget: String?
+    let actionStatusText: String
+    let failurePresentation: FailurePresentation?
+}
+
+func helperExecutionPlan(
+    actionName: String,
+    displayArguments: [String],
+    result: HelperCommandResult,
+    loopSnapshots: [LoopSnapshot],
+    currentTarget: String
+) -> HelperExecutionPlan {
+    let isAccepted = (actionName == "发送一次") && result.status == 2
+    let isSuccessful = result.status == 0 || isAccepted
+    let structuredSendResult = actionName == "发送一次" ? parseStructuredSendHelperResult(result.stderr) : nil
+
+    if isSuccessful {
+        let shouldRecordHistory = actionName == "发送一次" || actionName == "开始循环"
+        var optimisticLoopSnapshotValue: LoopSnapshot?
+        var optimisticRefreshDelays: [TimeInterval] = []
+        var deletedLoopTarget: String?
+
+        if actionName == "开始循环",
+           let target = taskMasterHelperTargetArgument(from: displayArguments) {
+            optimisticLoopSnapshotValue = optimisticLoopSnapshot(
+                target: target,
+                interval: taskMasterHelperArgumentValue(flag: "-i", from: displayArguments),
+                message: taskMasterHelperArgumentValue(flag: "-m", from: displayArguments),
+                forceSend: taskMasterHelperArgumentHasFlag("-f", in: displayArguments),
+                existingSnapshots: loopSnapshots
+            )
+            optimisticRefreshDelays = [1.5, 5.0]
+        } else if actionName == "恢复当前",
+                  let target = taskMasterHelperTargetArgument(from: displayArguments) {
+            let existingSnapshot = loopSnapshots.first(where: { $0.target == target })
+            optimisticLoopSnapshotValue = optimisticLoopSnapshot(
+                target: target,
+                interval: existingSnapshot?.intervalSeconds,
+                message: existingSnapshot?.message,
+                forceSend: existingSnapshot?.isForceSendEnabled,
+                existingSnapshots: loopSnapshots
+            )
+            optimisticRefreshDelays = [1.5, 5.0]
+        }
+
+        if actionName == "删除当前" {
+            deletedLoopTarget = taskMasterHelperTargetArgument(from: displayArguments)
+        }
+
+        return HelperExecutionPlan(
+            isAccepted: isAccepted,
+            isSuccessful: true,
+            shouldRecordHistory: shouldRecordHistory,
+            optimisticLoopSnapshot: optimisticLoopSnapshotValue,
+            optimisticRefreshDelays: optimisticRefreshDelays,
+            deletedLoopTarget: deletedLoopTarget,
+            actionStatusText: isAccepted ? "\(actionName)已受理" : "\(actionName)完成",
+            failurePresentation: nil
+        )
+    }
+
+    let combinedErrorDetail = result.combinedText
+    let failurePresentation: HelperExecutionPlan.FailurePresentation
+    if let structuredSendResult,
+       structuredSendResult["reason"] == "ambiguous_target" {
+        failurePresentation = .init(
+            ambiguousTarget: (
+                target: structuredSendResult["target"] ?? currentTarget,
+                detail: structuredSendResult["detail"] ?? result.stderr
+            ),
+            permissionIssue: nil
+        )
+    } else {
+        failurePresentation = .init(
+            ambiguousTarget: nil,
+            permissionIssue: taskMasterHelperPermissionIssueDetail(combinedErrorDetail)
+        )
+    }
+
+    return HelperExecutionPlan(
+        isAccepted: false,
+        isSuccessful: false,
+        shouldRecordHistory: false,
+        optimisticLoopSnapshot: nil,
+        optimisticRefreshDelays: [],
+        deletedLoopTarget: nil,
+        actionStatusText: "\(actionName)失败",
+        failurePresentation: failurePresentation
+    )
+}
+
 func preferredCommandDetail(stdout: String, stderr: String) -> String? {
     let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? stdout : stderr
     let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)

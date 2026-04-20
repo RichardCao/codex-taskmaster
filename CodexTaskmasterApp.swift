@@ -5283,7 +5283,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         appendOutput("执行 \(actionName): \(displayArguments.joined(separator: " "))")
 
         execution { result in
-            let accepted = (actionName == "发送一次") && result.status == 2
+            let plan = helperExecutionPlan(
+                actionName: actionName,
+                displayArguments: displayArguments,
+                result: result,
+                loopSnapshots: self.loopSnapshots,
+                currentTarget: self.currentTarget()
+            )
             if !result.stdout.isEmpty {
                 self.appendOutput(result.stdout)
             }
@@ -5291,36 +5297,28 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 actionName == "发送一次" ? parseStructuredSendHelperResult(result.stderr) : nil
             if !result.stderr.isEmpty {
                 if structuredSendResult == nil {
-                    self.appendOutput(accepted ? result.stderr : "stderr: \(result.stderr)")
+                    self.appendOutput(plan.isAccepted ? result.stderr : "stderr: \(result.stderr)")
                 }
             }
 
-            if result.status == 0 || accepted {
-                if actionName == "发送一次" || actionName == "开始循环" {
+            if plan.isSuccessful {
+                if plan.shouldRecordHistory {
                     self.recordCurrentInputsInHistory()
                 }
-                if actionName == "开始循环",
-                   let target = taskMasterHelperTargetArgument(from: displayArguments) {
-                    self.optimisticMarkLoopRunning(
-                        target: target,
-                        interval: taskMasterHelperArgumentValue(flag: "-i", from: displayArguments),
-                        message: taskMasterHelperArgumentValue(flag: "-m", from: displayArguments),
-                        forceSend: taskMasterHelperArgumentHasFlag("-f", in: displayArguments)
-                    )
-                    self.scheduleLoopSnapshotRefreshes(after: [1.5, 5.0])
-                } else if actionName == "恢复当前",
-                          let target = taskMasterHelperTargetArgument(from: displayArguments) {
-                    let existingSnapshot = self.loopSnapshots.first(where: { $0.target == target })
-                    self.optimisticMarkLoopRunning(
-                        target: target,
-                        interval: existingSnapshot?.intervalSeconds,
-                        message: existingSnapshot?.message,
-                        forceSend: existingSnapshot?.isForceSendEnabled
-                    )
-                    self.scheduleLoopSnapshotRefreshes(after: [1.5, 5.0])
+                if let optimisticSnapshot = plan.optimisticLoopSnapshot {
+                    self.loopSnapshots = applyingOptimisticLoopSnapshot(optimisticSnapshot, to: self.loopSnapshots)
+                    self.applyLoopSorting()
+                    self.activeLoopsMetaLabel.stringValue = self.loopSnapshots.isEmpty ? "循环: 0" : "循环: \(self.loopSnapshots.count)"
+                    self.activeLoopsTableView.reloadData()
+                    self.autoSizeActiveLoopsColumnsIfNeeded()
+                    self.restoreLoopSelection(preferredIdentifier: optimisticSnapshot.loopID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "target:\(optimisticSnapshot.target)" : loopSelectionIdentifier(optimisticSnapshot))
+                    self.refreshTableWrapping(self.activeLoopsTableView)
+                    self.updateLoopActionButtons()
                 }
-                if actionName == "删除当前",
-                   let deletedTarget = taskMasterHelperTargetArgument(from: displayArguments) {
+                if !plan.optimisticRefreshDelays.isEmpty {
+                    self.scheduleLoopSnapshotRefreshes(after: plan.optimisticRefreshDelays)
+                }
+                if let deletedTarget = plan.deletedLoopTarget {
                     self.loopSnapshots.removeAll { $0.target == deletedTarget }
                     if self.preferredLoopSelectionIdentifier == "target:\(deletedTarget)" {
                         self.preferredLoopSelectionIdentifier = nil
@@ -5329,18 +5327,14 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     self.updateLoopActionButtons()
                     self.refreshTableWrapping(self.activeLoopsTableView)
                 }
-                self.setStatus(accepted ? "\(actionName)已受理" : "\(actionName)完成", key: "action")
+                self.setStatus(plan.actionStatusText, key: "action")
             } else {
-                let combinedErrorDetail = result.combinedText
-                if let structuredSendResult,
-                   structuredSendResult["reason"] == "ambiguous_target" {
-                    let detail = structuredSendResult["detail"] ?? result.stderr
-                    let target = structuredSendResult["target"] ?? self.currentTarget()
-                    self.showAmbiguousTargetAlert(target: target, detail: detail, actionName: actionName, throttled: false)
-                } else if let permissionIssue = self.helperPermissionIssueDetail(combinedErrorDetail) {
+                if let ambiguous = plan.failurePresentation?.ambiguousTarget {
+                    self.showAmbiguousTargetAlert(target: ambiguous.target, detail: ambiguous.detail, actionName: actionName, throttled: false)
+                } else if let permissionIssue = plan.failurePresentation?.permissionIssue {
                     self.showRuntimePermissionAlert(actionName: actionName, detail: permissionIssue)
                 }
-                self.setStatus("\(actionName)失败", key: "action", color: .systemRed)
+                self.setStatus(plan.actionStatusText, key: "action", color: .systemRed)
             }
             self.setButtonsEnabled(true)
             self.scheduleLoopSnapshotRefresh()
