@@ -292,6 +292,8 @@ osascript -e 'tell application "Codex Taskmaster" to quit'
 - 但同一时刻只允许一个运行态 loop 指向同一 canonical session / thread id
 - 如果检测到同一 Session 已有其他运行中的 loop，新 loop 会被阻止或暂停，并记录 `loop_conflict_active_session`
 - 对 `accepted`、`send_unverified`、force 模式下的典型忙碌失败，loop 会使用更保守的重试延迟，避免高频重复发送
+- 关闭窗口或退出 `Codex Taskmaster.app` 只会关闭界面，不会隐式执行 `stop --all`
+- 如果需要停止全部 loop，请显式使用界面里的“停止全部”按钮，或执行 `codex_terminal_sender.sh stop --all`
 
 ## Session 操作语义
 

@@ -701,7 +701,6 @@ final class AppFocusTracker {
 
 final class CodexTaskmasterApp: NSObject, NSApplicationDelegate {
     private var windowController: MainWindowController?
-    private var didRunTerminationCleanup = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppFocusTracker.shared.start()
@@ -717,17 +716,6 @@ final class CodexTaskmasterApp: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        performTerminationCleanupIfNeeded()
-    }
-
-    private func performTerminationCleanupIfNeeded() {
-        guard !didRunTerminationCleanup else { return }
-        didRunTerminationCleanup = true
-        let helperService = HelperCommandService(helperPath: resolvedHelperPath())
-        _ = helperService.run(arguments: ["stop", "--all"])
     }
 
     private func buildMainMenu() -> NSMenu {
