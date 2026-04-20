@@ -1896,9 +1896,61 @@ NODE
 thread_name_set() {
   local thread_id="$1"
   local name="$2"
+  thread_action_guard_live_session "$thread_id" "rename"
+
+  if [[ -z "$name" ]]; then
+    local session_index_removed
+    session_index_removed="$(remove_session_index_entry_for_thread "$thread_id")"
+    printf 'thread_id: %s\n' "$thread_id"
+    printf 'name: %s\n' "$name"
+    printf 'session_index_removed: %s\n' "$session_index_removed"
+    return 0
+  fi
+
   codex_app_server_thread_rpc "name-set" "$thread_id" "$name" >/dev/null
   printf 'thread_id: %s\n' "$thread_id"
   printf 'name: %s\n' "$name"
+}
+
+remove_session_index_entry_for_thread() {
+  local thread_id="$1"
+
+  require_cmd python3
+  python3 - "$CODEX_SESSION_INDEX_PATH" "$thread_id" <<'PY'
+import json
+import os
+import sys
+
+path, target_thread_id = sys.argv[1:]
+
+if not os.path.exists(path):
+    print(0)
+    raise SystemExit(0)
+
+removed = 0
+entries = []
+with open(path, "r", encoding="utf-8") as fh:
+    for raw_line in fh:
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        try:
+            obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            entries.append(raw_line.rstrip("\n"))
+            continue
+        if obj.get("id") == target_thread_id:
+            removed += 1
+            continue
+        entries.append(json.dumps(obj, ensure_ascii=False))
+
+tmp_path = path + ".tmp"
+with open(tmp_path, "w", encoding="utf-8") as fh:
+    for entry in entries:
+        fh.write(entry + "\n")
+os.replace(tmp_path, path)
+print(removed)
+PY
 }
 
 thread_action_guard_live_session() {

@@ -294,6 +294,36 @@ config_provider_output="$("$HELPER" config-model-provider)"
 assert_contains "$config_provider_output" "status: success"
 assert_contains "$config_provider_output" "model_provider: openai"
 
+printf '%s\n' '{"id":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","thread_name":"clear-me","updated_at":"2026-03-31T14:00:02Z"}' >>"$SESSION_INDEX"
+clear_name_output="$(
+  CODEX_BIN_PATH="${TEST_TMP}/missing-codex" \
+  "$HELPER" thread-name-set -t eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee -n ""
+)"
+assert_contains "$clear_name_output" "thread_id: eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+assert_contains "$clear_name_output" "session_index_removed: 1"
+clear_name_entry_count="$(
+  python3 - "$SESSION_INDEX" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+count = 0
+with open(path, "r", encoding="utf-8") as fh:
+    for raw_line in fh:
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        try:
+            obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if obj.get("id") == "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee":
+            count += 1
+print(count)
+PY
+)"
+assert_equals "$clear_name_entry_count" "0"
+
 probe_named="$("$HELPER" probe -t alpha)"
 assert_contains "$probe_named" "thread_id: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 assert_contains "$probe_named" "name: alpha"

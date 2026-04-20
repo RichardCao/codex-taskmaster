@@ -69,5 +69,5 @@
 18. `done` 多实例运行语义收口
    目标：明确是否允许多开；若允许，补跨进程请求队列与 Terminal 自动化互斥。
 
-19. `in_progress` 清空 rename 的文档/实现一致性修复
+19. `done` 清空 rename 的文档/实现一致性修复
    目标：补回 empty rename fallback，或收正文档与 UI 语义。
