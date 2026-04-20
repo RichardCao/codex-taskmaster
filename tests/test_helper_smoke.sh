@@ -964,6 +964,45 @@ assert_contains "$delete_loop_output" "deleted loop for target=alpha"
 status_after_loop_delete="$("$HELPER" status)"
 assert_contains "$status_after_loop_delete" "no loops"
 
+RACE_SEND_STUB="${TEST_TMP}/loop-race-stub.sh"
+cat >"$RACE_SEND_STUB" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+sleep 2
+printf 'status: success\n'
+printf 'reason: sent\n'
+printf 'detail: delayed race send complete\n'
+EOF
+chmod +x "$RACE_SEND_STUB"
+
+race_target="race-loop"
+race_key="$(printf '%s' "$race_target" | shasum -a 256 | awk '{print $1}')"
+cat >"${STATE_DIR}/loops/${race_key}.loop" <<EOF
+TARGET=${race_target}
+INTERVAL=30
+MESSAGE=race-message
+FORCE_SEND=0
+THREAD_ID=race-thread
+EOF
+: > "${STATE_DIR}/runtime/loop-logs/${race_key}.log"
+
+CODEX_TASKMASTER_SEND_STUB="$RACE_SEND_STUB" "$HELPER" loop-once
+sleep 0.2
+race_stop_output="$("$HELPER" stop -t "$race_target")"
+assert_contains "$race_stop_output" "stopped loop for target=${race_target}"
+wait_for_loop_workers
+race_stopped_status="$("$HELPER" status -t "$race_target")"
+assert_contains "$race_stopped_status" "stopped: yes"
+assert_contains "$race_stopped_status" "stopped_reason: stopped_by_user"
+
+CODEX_TASKMASTER_SEND_STUB="$RACE_SEND_STUB" "$HELPER" loop-once
+sleep 0.2
+race_delete_output="$("$HELPER" loop-delete -t "$race_target")"
+assert_contains "$race_delete_output" "deleted loop for target=${race_target}"
+wait_for_loop_workers
+race_status_after_delete="$("$HELPER" status)"
+assert_contains "$race_status_after_delete" "no loops"
+
 set +e
 live_archive_output="$(
   CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_FIXTURE" \

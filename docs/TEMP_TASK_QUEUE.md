@@ -53,3 +53,21 @@
 
 13. `done` 默认与严格检查链路文档同步
    目标：把实际验证入口、默认检查覆盖范围、严格检查覆盖范围同步到文档，避免后续使用者误判。
+
+14. `done` loop worker 与 stop/delete 竞态修复
+   目标：避免用户已停止或删除 loop 后，在途 worker 仍把状态写回并“复活” loop。
+
+15. `in_progress` failed start orphan loop 清理
+   目标：避免 `start` 失败后同时留下 stopped history 和一条假活跃 orphan loop。
+
+16. `pending` `loop-resume -k LOOP_ID` 修复
+   目标：恢复时优先使用 loop 文件内的 target，而不是错误解析空 target。
+
+17. `pending` app 退出是否默认 stop all 语义收口
+   目标：明确并实现“关闭窗口/退出 app 是否应停止全部 loop”的产品契约。
+
+18. `pending` 多实例运行语义收口
+   目标：明确是否允许多开；若允许，补跨进程请求队列与 Terminal 自动化互斥。
+
+19. `pending` 清空 rename 的文档/实现一致性修复
+   目标：补回 empty rename fallback，或收正文档与 UI 语义。

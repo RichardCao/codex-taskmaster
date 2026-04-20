@@ -617,6 +617,49 @@ loop_runner_running() {
   [[ -n "$pid" ]] && is_pid_running "$pid"
 }
 
+wait_for_pid_exit() {
+  local pid="$1"
+  local timeout_seconds="${2:-5}"
+  local started_at
+  started_at="$(date +%s)"
+  while is_pid_running "$pid"; do
+    if (( $(date +%s) - started_at >= timeout_seconds )); then
+      return 1
+    fi
+    sleep 0.05
+  done
+  return 0
+}
+
+stop_loop_runner_for_key() {
+  local key="$1"
+  local pid=""
+  paths_for_target "$key"
+  pid="$(loop_runner_pid 2>/dev/null || true)"
+  [[ -n "$pid" ]] || return 0
+  is_pid_running "$pid" || return 0
+
+  kill "$pid" 2>/dev/null || true
+  if ! wait_for_pid_exit "$pid" 2; then
+    kill -9 "$pid" 2>/dev/null || true
+    wait_for_pid_exit "$pid" 2 || true
+  fi
+  rm -f "$LOOP_RUNNER_PID_FILE" 2>/dev/null || true
+}
+
+runner_writeback_allowed() {
+  local key="$1"
+  local loop_file="$2"
+  local source_tag="$3"
+
+  paths_for_target "$key"
+  [[ -f "$loop_file" ]] || return 1
+  if load_current_loop_status_file "$source_tag" >/dev/null 2>&1; then
+    [[ "${STOPPED:-0}" != "1" ]] || return 1
+  fi
+  return 0
+}
+
 sender_daemon_records() {
   ps -axo user=,pid=,command= | awk -v script="$0" '
     index($0, script " loop-daemon") > 0 || index($0, script " daemon") > 0 {
@@ -3345,6 +3388,7 @@ run_loop_iteration_for_key() {
   conflicting_target="$(find_conflicting_running_loop_target "$thread_id" "$key" "1" 2>/dev/null || true)"
   if [[ -n "$conflicting_target" ]]; then
     append_loop_log_line "$LOOP_LOG_FILE" "paused: active loop conflict target=${target} conflicting_target=${conflicting_target} thread_id=${thread_id}"
+    runner_writeback_allowed "$key" "$loop_file" "$source_tag" || return 0
     write_loop_status_kv "$source_tag" "$now" "1" "loop_conflict_active_session" "1" "loop_conflict_active_session" "0" ""
     return 0
   fi
@@ -3356,6 +3400,7 @@ run_loop_iteration_for_key() {
     append_loop_log_line "$LOOP_LOG_FILE" "sent: ${send_output//$'\n'/ | }"
     sleep "$LOOP_POST_SEND_COOLDOWN_SECONDS"
     now="$(date +%s)"
+    runner_writeback_allowed "$key" "$loop_file" "$source_tag" || return 0
     write_loop_status_kv "$source_tag" "$(( now + interval ))" "0" "" "0" "" "0" ""
     return 0
   fi
@@ -3369,6 +3414,7 @@ run_loop_iteration_for_key() {
     accepted_delay="$(accepted_retry_delay_seconds "$interval" "$accepted_reason")"
     append_loop_log_line "$LOOP_LOG_FILE" "accepted: ${send_output//$'\n'/ | }"
     now="$(date +%s)"
+    runner_writeback_allowed "$key" "$loop_file" "$source_tag" || return 0
     write_loop_status_kv "$source_tag" "$(( now + accepted_delay ))" "0" "" "0" "" "0" ""
     return 0
   fi
@@ -3391,9 +3437,11 @@ run_loop_iteration_for_key() {
 
   if [[ "$force_send" == "1" ]] && [[ "$LOOP_FAILURE_PAUSE_THRESHOLD" =~ ^[1-9][0-9]*$ ]] && (( failure_count >= LOOP_FAILURE_PAUSE_THRESHOLD )); then
     append_loop_log_line "$LOOP_LOG_FILE" "paused: consecutive forced-send failure threshold reached count=${failure_count} reason=${current_failure_reason}"
+    runner_writeback_allowed "$key" "$loop_file" "$source_tag" || return 0
     write_loop_status_kv "$source_tag" "$now" "$failure_count" "$current_failure_reason" "1" "$current_failure_reason" "0" ""
   else
     retry_delay="$(failure_retry_delay_seconds "$LOOP_BUSY_RETRY_SECONDS" "$current_failure_reason" "$force_send")"
+    runner_writeback_allowed "$key" "$loop_file" "$source_tag" || return 0
     write_loop_status_kv "$source_tag" "$(( now + retry_delay ))" "$failure_count" "$current_failure_reason" "0" "" "0" ""
   fi
 }
@@ -3617,6 +3665,7 @@ stop_one() {
   local source_tag
   key="$(resolve_loop_key "$target" "$loop_id")" || die "no loop found for selector"
   paths_for_target "$key"
+  stop_loop_runner_for_key "$key"
   [[ -f "$LOOP_FILE" ]] || die "no loop found for selector"
   TARGET=""
   INTERVAL=""
@@ -3645,6 +3694,7 @@ stop_all() {
     target="${TARGET:-unknown}"
     key="$(basename "${loop_file%.loop}")"
     paths_for_target "$key"
+    stop_loop_runner_for_key "$key"
     source_tag="$(loop_source_tag)"
     append_loop_log_line "$LOOP_LOG_FILE" "loop stopped target=${target}"
     write_loop_status_kv "$source_tag" "" "0" "" "0" "" "1" "stopped_by_user"
@@ -3665,6 +3715,7 @@ delete_loop() {
   local key
   key="$(resolve_loop_key "$target" "$loop_id")" || die "no loop found for selector"
   paths_for_target "$key"
+  stop_loop_runner_for_key "$key"
   [[ -f "$LOOP_FILE" ]] || die "no loop found for selector"
   rm -f "$LOOP_FILE"
   rm -f "$LOOP_STATUS_FILE" 2>/dev/null || true
