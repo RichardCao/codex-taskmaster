@@ -508,6 +508,39 @@ func sessionScanCountPlan(
     }
 }
 
+enum SessionScanCompletionOutcome {
+    case partialFailure
+    case complete
+}
+
+struct SessionScanCompletionPlan {
+    let outcome: SessionScanCompletionOutcome
+    let statusText: String
+    let metaSuffix: String
+    let completionLogText: String?
+}
+
+func sessionScanCompletionPlan(
+    encounteredFailure: Bool,
+    renderedSessionCount: Int
+) -> SessionScanCompletionPlan {
+    if encounteredFailure {
+        return SessionScanCompletionPlan(
+            outcome: .partialFailure,
+            statusText: sessionScanPartialFailureStatusText(),
+            metaSuffix: sessionScanPartialFailureSuffix(),
+            completionLogText: nil
+        )
+    }
+
+    return SessionScanCompletionPlan(
+        outcome: .complete,
+        statusText: sessionScanCompletionStatusText(),
+        metaSuffix: "",
+        completionLogText: sessionScanCompletionLogText(count: renderedSessionCount)
+    )
+}
+
 final class LoopCommandService {
     private let helperService: HelperCommandService
 

@@ -5605,13 +5605,17 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             }
 
             DispatchQueue.main.async {
+                let completionPlan = sessionScanCompletionPlan(
+                    encounteredFailure: encounteredFailure,
+                    renderedSessionCount: self.sessionSnapshots.count
+                )
                 guard self.isCurrentSessionScan(generation) else { return }
                 self.finishSessionScanUIState()
 
-                if encounteredFailure {
+                if completionPlan.outcome == .partialFailure {
                     self.renderSessionSnapshots(scannedCount: scannedCount, totalCount: totalCount, isComplete: false)
-                    self.sessionStatusMetaLabel.stringValue += sessionScanPartialFailureSuffix()
-                    self.setStatus(sessionScanPartialFailureStatusText(), key: "scan", color: .systemOrange)
+                    self.sessionStatusMetaLabel.stringValue += completionPlan.metaSuffix
+                    self.setStatus(completionPlan.statusText, key: "scan", color: .systemOrange)
                     self.appendStderrDetailIfPresent(failureDetail)
                     return
                 }
@@ -5622,8 +5626,10 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 for snapshot in self.loadedActiveSessionSnapshotsForStatusRefresh() {
                     self.sessionStatusRefreshCoordinator.scheduleNext(for: snapshot, from: completionDate)
                 }
-                self.setStatus(sessionScanCompletionStatusText(), key: "scan")
-                self.appendOutput(sessionScanCompletionLogText(count: self.sessionSnapshots.count))
+                self.setStatus(completionPlan.statusText, key: "scan")
+                if let completionLogText = completionPlan.completionLogText {
+                    self.appendOutput(completionLogText)
+                }
             }
         }
     }
