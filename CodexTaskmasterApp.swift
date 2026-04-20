@@ -5517,41 +5517,40 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         DispatchQueue.global(qos: .userInitiated).async {
             let processCallbacks = self.sessionScanProcessCallbacks()
             let countResult = self.sessionScanService.sessionCount(processCallbacks: processCallbacks)
+            let countPlan = sessionScanCountPlan(countResult)
 
             if self.shouldAbortSessionScan(generation) {
                 return
             }
 
-            guard case let .success(totalCount) = countResult else {
-                let failureDetail: String
-                switch countResult {
-                case let .failure(error):
-                    failureDetail = error.detail
-                case .success:
-                    failureDetail = ""
-                }
+            guard countPlan.outcome != .failure else {
                 DispatchQueue.main.async {
                     guard self.isCurrentSessionScan(generation) else { return }
                     self.finishSessionScanUIState()
-                    self.sessionStatusMetaLabel.stringValue = sessionScanFailureMetaText(detail: failureDetail)
-                    self.setStatus(sessionScanFailureStatusText(), key: "scan", color: .systemRed)
-                    self.appendStderrDetailIfPresent(failureDetail)
+                    self.sessionStatusMetaLabel.stringValue = countPlan.metaText
+                    if let statusText = countPlan.statusText {
+                        self.setStatus(statusText, key: "scan", color: .systemRed)
+                    }
+                    self.appendStderrDetailIfPresent(countPlan.failureDetail)
                 }
                 return
             }
 
+            let totalCount = countPlan.totalCount
             DispatchQueue.main.async {
                 guard self.isCurrentSessionScan(generation) else { return }
                 self.sessionScanTotal = totalCount
-                if totalCount == 0 {
+                if countPlan.outcome == .empty {
                     self.finishSessionScanUIState()
                     self.allSessionSnapshots = []
                     self.sessionSnapshots = []
-                    self.sessionStatusMetaLabel.stringValue = sessionScanEmptyMetaText()
+                    self.sessionStatusMetaLabel.stringValue = countPlan.metaText
                     self.sessionStatusTableView.reloadData()
-                    self.setStatus(sessionScanCompletionStatusText(), key: "scan")
+                    if let statusText = countPlan.statusText {
+                        self.setStatus(statusText, key: "scan")
+                    }
                 } else {
-                    self.sessionStatusMetaLabel.stringValue = sessionScanProgressMetaText(scannedCount: 0, totalCount: totalCount)
+                    self.sessionStatusMetaLabel.stringValue = countPlan.metaText
                     self.sessionStatusTableView.reloadData()
                 }
             }

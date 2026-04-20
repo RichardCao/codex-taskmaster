@@ -463,6 +463,51 @@ func archivedSessionLoadPlan(
     }
 }
 
+enum SessionScanCountOutcome {
+    case failure
+    case empty
+    case progress
+}
+
+struct SessionScanCountPlan {
+    let outcome: SessionScanCountOutcome
+    let totalCount: Int
+    let failureDetail: String
+    let metaText: String
+    let statusText: String?
+}
+
+func sessionScanCountPlan(
+    _ result: Result<Int, SessionScanService.Failure>
+) -> SessionScanCountPlan {
+    switch result {
+    case let .failure(error):
+        return SessionScanCountPlan(
+            outcome: .failure,
+            totalCount: 0,
+            failureDetail: error.detail,
+            metaText: sessionScanFailureMetaText(detail: error.detail),
+            statusText: sessionScanFailureStatusText()
+        )
+    case let .success(totalCount) where totalCount == 0:
+        return SessionScanCountPlan(
+            outcome: .empty,
+            totalCount: 0,
+            failureDetail: "",
+            metaText: sessionScanEmptyMetaText(),
+            statusText: sessionScanCompletionStatusText()
+        )
+    case let .success(totalCount):
+        return SessionScanCountPlan(
+            outcome: .progress,
+            totalCount: totalCount,
+            failureDetail: "",
+            metaText: sessionScanProgressMetaText(scannedCount: 0, totalCount: totalCount),
+            statusText: nil
+        )
+    }
+}
+
 final class LoopCommandService {
     private let helperService: HelperCommandService
 
