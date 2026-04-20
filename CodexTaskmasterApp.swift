@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Darwin
 import UniformTypeIdentifiers
 
 private let userHomeDirectory = NSHomeDirectory()
@@ -14,6 +15,7 @@ private let runtimeDirectoryPath = "\(stateDirectoryPath)/runtime"
 private let loopLogDirectoryPath = "\(runtimeDirectoryPath)/loop-logs"
 private let userLoopStateDirectoryPath = "\(runtimeDirectoryPath)/user-loop-state"
 private let legacyLoopStateDirectoryPath = "\(runtimeDirectoryPath)/loop-state"
+private let appInstanceLockFilePath = "\(runtimeDirectoryPath)/app-instance.lock"
 private let sessionProbeInitialBatchSize = 4
 private let sessionProbeBatchSize = 12
 private let sessionPromptSearchEntryLimit = 12
@@ -701,8 +703,10 @@ final class AppFocusTracker {
 
 final class CodexTaskmasterApp: NSObject, NSApplicationDelegate {
     private var windowController: MainWindowController?
+    private var singleInstanceLock: SingleInstanceLock?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard acquireSingleInstanceLockOrFocusExistingApp() else { return }
         AppFocusTracker.shared.start()
         NSApp.setActivationPolicy(.regular)
         NSApp.mainMenu = buildMainMenu()
@@ -741,6 +745,70 @@ final class CodexTaskmasterApp: NSObject, NSApplicationDelegate {
         mainMenu.addItem(editMenuItem)
 
         return mainMenu
+    }
+
+    private func acquireSingleInstanceLockOrFocusExistingApp() -> Bool {
+        if let lock = SingleInstanceLock(lockFilePath: appInstanceLockFilePath) {
+            singleInstanceLock = lock
+            return true
+        }
+
+        focusExistingInstance()
+        DispatchQueue.main.async {
+            NSApp.terminate(nil)
+        }
+        return false
+    }
+
+    private func focusExistingInstance() {
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let bundleIdentifier = Bundle.main.bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        let candidates: [NSRunningApplication]
+        if !bundleIdentifier.isEmpty {
+            candidates = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+        } else {
+            candidates = NSWorkspace.shared.runningApplications.filter { app in
+                app.bundleURL?.lastPathComponent == "Codex Taskmaster.app"
+            }
+        }
+
+        guard let existingApp = candidates.first(where: { $0.processIdentifier != currentPID }) else {
+            return
+        }
+
+        _ = existingApp.activate(options: [.activateAllWindows])
+    }
+}
+
+final class SingleInstanceLock {
+    private let fileDescriptor: Int32
+
+    init?(lockFilePath: String) {
+        let directoryURL = URL(fileURLWithPath: lockFilePath).deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        } catch {
+            return nil
+        }
+
+        let path = (lockFilePath as NSString).fileSystemRepresentation
+        let descriptor = open(path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else {
+            return nil
+        }
+
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            close(descriptor)
+            return nil
+        }
+
+        fileDescriptor = descriptor
+    }
+
+    deinit {
+        flock(fileDescriptor, LOCK_UN)
+        close(fileDescriptor)
     }
 }
 

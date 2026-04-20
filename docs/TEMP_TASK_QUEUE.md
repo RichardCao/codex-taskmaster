@@ -66,8 +66,8 @@
 17. `done` app 退出是否默认 stop all 语义收口
    目标：明确并实现“关闭窗口/退出 app 是否应停止全部 loop”的产品契约。
 
-18. `in_progress` 多实例运行语义收口
+18. `done` 多实例运行语义收口
    目标：明确是否允许多开；若允许，补跨进程请求队列与 Terminal 自动化互斥。
 
-19. `pending` 清空 rename 的文档/实现一致性修复
+19. `in_progress` 清空 rename 的文档/实现一致性修复
    目标：补回 empty rename fallback，或收正文档与 UI 语义。

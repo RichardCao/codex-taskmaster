@@ -77,10 +77,15 @@ MACOS_SDK_PATH=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk ./build_c
 构建完成后可直接打开：
 
 ```bash
-open -na "./Codex Taskmaster.app"
+open "./Codex Taskmaster.app"
 ```
 
 也可以在 Finder 里双击打开。
+
+说明：
+
+- app 当前按单实例运行处理
+- 如果已存在一个运行中的 `Codex Taskmaster`，再次打开时会切回现有窗口，而不是保留第二个常驻实例
 
 ## 检查
 
