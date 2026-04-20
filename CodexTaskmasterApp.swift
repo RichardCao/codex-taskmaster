@@ -2005,11 +2005,11 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return allSessionSnapshots.filter { !$0.isArchived }
     }
 
-    private func applyRefreshedSessionSnapshots(_ refreshedSnapshots: [SessionSnapshot], preserveSelectionThreadID: String?) {
-        guard !refreshedSnapshots.isEmpty else { return }
+    private func applyRefreshedSessionSnapshots(_ application: SessionRefreshApplication, preserveSelectionThreadID: String?) {
+        guard !application.overlaidSnapshots.isEmpty else { return }
 
-        invalidatePromptSearchCache(threadIDs: threadIDsNeedingPromptCacheInvalidation(previous: allSessionSnapshots, refreshed: refreshedSnapshots))
-        allSessionSnapshots = overlaySessionSnapshots(existing: allSessionSnapshots, refreshed: refreshedSnapshots)
+        invalidatePromptSearchCache(threadIDs: application.promptCacheInvalidationThreadIDs)
+        allSessionSnapshots = application.overlaidSnapshots
         sessionStatusRefreshCoordinator.prune(to: allSessionSnapshots)
         renderSessionSnapshots(
             scannedCount: lastSessionRenderScannedCount ?? allSessionSnapshots.count,
@@ -2099,8 +2099,13 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         let preservedSelectionThreadID = selectedSessionThreadID()
         probeSessionStatusRefreshSnapshots(claimedSnapshots, collectFailures: true) { refreshedSnapshots, failedThreadIDs in
+            let application = sessionRefreshApplication(
+                previous: self.allSessionSnapshots,
+                claimed: claimedSnapshots,
+                refreshed: refreshedSnapshots
+            )
             let completionDate = Date()
-            for resolved in resolveClaimedSessionRefreshSnapshots(claimed: claimedSnapshots, refreshed: refreshedSnapshots) {
+            for resolved in application.resolvedClaimedSnapshots {
                 self.sessionStatusRefreshCoordinator.scheduleNext(for: resolved, from: completionDate)
             }
 
@@ -2112,7 +2117,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 return
             }
 
-            self.applyRefreshedSessionSnapshots(refreshedSnapshots, preserveSelectionThreadID: preservedSelectionThreadID)
+            self.applyRefreshedSessionSnapshots(application, preserveSelectionThreadID: preservedSelectionThreadID)
             if showProgress {
                 let resultKind = sessionStatusRefreshResultKind(failedCount: failedThreadIDs.count, totalCount: claimedSnapshots.count)
                 self.applySessionStatusRefreshResult(resultKind)
@@ -3058,13 +3063,18 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
 
         let preservedSelectionThreadID = selectedSessionThreadID()
         probeSessionStatusRefreshSnapshots(dueSnapshots, collectFailures: false) { refreshedSnapshots, _ in
+            let application = sessionRefreshApplication(
+                previous: self.allSessionSnapshots,
+                claimed: dueSnapshots,
+                refreshed: refreshedSnapshots
+            )
             let completionDate = Date()
-            for resolved in resolveClaimedSessionRefreshSnapshots(claimed: dueSnapshots, refreshed: refreshedSnapshots) {
+            for resolved in application.resolvedClaimedSnapshots {
                 self.sessionStatusRefreshCoordinator.scheduleNext(for: resolved, from: completionDate)
             }
 
             guard self.displayedSessionListMode == .active, !self.isSessionScanRunning else { return }
-            self.applyRefreshedSessionSnapshots(refreshedSnapshots, preserveSelectionThreadID: preservedSelectionThreadID)
+            self.applyRefreshedSessionSnapshots(application, preserveSelectionThreadID: preservedSelectionThreadID)
         }
     }
 

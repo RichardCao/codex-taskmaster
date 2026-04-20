@@ -1702,6 +1702,24 @@ func threadIDsNeedingPromptCacheInvalidation(previous: [SessionSnapshot], refres
     return invalidated
 }
 
+struct SessionRefreshApplication {
+    let resolvedClaimedSnapshots: [SessionSnapshot]
+    let promptCacheInvalidationThreadIDs: [String]
+    let overlaidSnapshots: [SessionSnapshot]
+}
+
+func sessionRefreshApplication(
+    previous: [SessionSnapshot],
+    claimed: [SessionSnapshot],
+    refreshed: [SessionSnapshot]
+) -> SessionRefreshApplication {
+    SessionRefreshApplication(
+        resolvedClaimedSnapshots: resolveClaimedSessionRefreshSnapshots(claimed: claimed, refreshed: refreshed),
+        promptCacheInvalidationThreadIDs: threadIDsNeedingPromptCacheInvalidation(previous: previous, refreshed: refreshed),
+        overlaidSnapshots: overlaySessionSnapshots(existing: previous, refreshed: refreshed)
+    )
+}
+
 enum SessionTerminalState: String {
     case promptReady = "prompt_ready"
     case promptWithInput = "prompt_with_input"

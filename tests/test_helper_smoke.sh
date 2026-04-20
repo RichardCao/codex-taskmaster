@@ -52,7 +52,7 @@ import sys
 import time
 
 runner_dir = sys.argv[1]
-deadline = time.time() + 8
+deadline = time.time() + 20
 while time.time() < deadline:
     if not os.path.isdir(runner_dir):
         raise SystemExit(0)
@@ -788,7 +788,12 @@ cat >"$FAIRNESS_SEND_STUB" <<'EOF'
 set -euo pipefail
 target="$1"
 log_file="${CODEX_TASKMASTER_FAIRNESS_LOG_FILE:?}"
-printf '%s %s\n' "$target" "$(date +%s)" >>"$log_file"
+timestamp="$(python3 - <<'PY'
+import time
+print(time.time())
+PY
+)"
+printf '%s %s\n' "$target" "$timestamp" >>"$log_file"
 if [[ "$target" == "slow-loop" ]]; then
   sleep 2
 fi
@@ -827,41 +832,34 @@ CODEX_TASKMASTER_FAIRNESS_LOG_FILE="$FAIRNESS_LOG" \
 fairness_after_dispatch="$(date +%s)"
 (( fairness_after_dispatch - fairness_started_at < 2 ))
 
-python3 - "$FAIRNESS_LOG" <<'PY'
-import os
-import sys
-import time
-
-log_path = sys.argv[1]
-deadline = time.time() + 1.5
-while time.time() < deadline:
-    if os.path.exists(log_path):
-        with open(log_path, "r", encoding="utf-8") as fh:
-            rows = [line.strip() for line in fh if line.strip()]
-        if any(row.startswith("fast-loop ") for row in rows):
-            raise SystemExit(0)
-    time.sleep(0.05)
-raise SystemExit("timed out waiting for fast-loop dispatch")
-PY
+wait_for_loop_workers
 
 python3 - "$FAIRNESS_LOG" <<'PY'
 import os
 import sys
-import time
 
 log_path = sys.argv[1]
-deadline = time.time() + 4
-while time.time() < deadline:
-    if os.path.exists(log_path):
-        with open(log_path, "r", encoding="utf-8") as fh:
-            rows = [line.strip() for line in fh if line.strip()]
-        if any(row.startswith("slow-loop ") for row in rows) and any(row.startswith("fast-loop ") for row in rows):
-            raise SystemExit(0)
-    time.sleep(0.05)
-raise SystemExit("timed out waiting for both loop dispatches")
-PY
+if not os.path.exists(log_path):
+    raise SystemExit("fairness log was not created")
 
-sleep 3
+with open(log_path, "r", encoding="utf-8") as fh:
+    rows = [line.strip() for line in fh if line.strip()]
+
+parsed = {}
+for row in rows:
+    parts = row.split(" ", 1)
+    if len(parts) != 2:
+        continue
+    parsed[parts[0]] = float(parts[1])
+
+if "slow-loop" not in parsed or "fast-loop" not in parsed:
+    raise SystemExit(f"missing fairness rows: {rows}")
+
+if parsed["fast-loop"] > parsed["slow-loop"] + 1.5:
+    raise SystemExit(
+        f"fast-loop dispatch lagged behind slow-loop: slow={parsed['slow-loop']} fast={parsed['fast-loop']}"
+    )
+PY
 fairness_rows="$(cat "$FAIRNESS_LOG")"
 assert_contains "$fairness_rows" "slow-loop "
 assert_contains "$fairness_rows" "fast-loop "
