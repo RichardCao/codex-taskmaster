@@ -45,10 +45,10 @@
 10. `done` loop/state 数据文件执行边界收紧
    目标：减少 `source` 直接执行数据文件的风险，至少先把读取边界校验收紧，再评估后续 JSON 化迁移。
 
-11. `in_progress` `CodexTaskmasterApp.swift` 继续瘦身
+11. `done` `CodexTaskmasterApp.swift` 继续瘦身
    目标：继续把展示编排、状态回写和 helper 调用细节从 UI 控制器下沉到 core/service。
 
-12. `pending` merge / refresh / fallback 规则继续收口
+12. `in_progress` merge / refresh / fallback 规则继续收口
    目标：把刷新后保留旧字段、快照合并和回退语义进一步从 UI 中移出，避免控制器继续膨胀。
 
 13. `pending` 默认与严格检查链路文档同步

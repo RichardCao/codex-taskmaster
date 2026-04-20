@@ -4958,25 +4958,20 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         sessionStatusRefreshTimer = nil
     }
 
-    private func updateActiveLoopsWarningDisplay() {
-        let warningText = loopWarnings.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        activeLoopsWarningLabel.stringValue = warningText
-        activeLoopsWarningLabel.toolTip = warningText.isEmpty ? nil : warningText
-        activeLoopsWarningLabel.isHidden = warningText.isEmpty
-    }
-
     private func applyLoopSnapshotResult(loops: [LoopSnapshot], warnings: [String], failureMessage: String? = nil) {
-        loopSnapshots = mergeLoopSnapshots(previous: loopSnapshots, incoming: loops)
-        loopWarnings = warnings
+        let presentation = loopSnapshotPresentation(
+            previous: loopSnapshots,
+            incoming: loops,
+            warnings: warnings,
+            failureMessage: failureMessage
+        )
+        loopSnapshots = presentation.mergedSnapshots
+        loopWarnings = presentation.warnings
         applyLoopSorting()
-
-        if let failureMessage, !failureMessage.isEmpty {
-            activeLoopsMetaLabel.stringValue = failureMessage
-        } else {
-            activeLoopsMetaLabel.stringValue = loops.isEmpty ? "循环: 0" : "循环: \(loops.count)"
-        }
-
-        updateActiveLoopsWarningDisplay()
+        activeLoopsMetaLabel.stringValue = presentation.metaText
+        activeLoopsWarningLabel.stringValue = presentation.warningText
+        activeLoopsWarningLabel.toolTip = presentation.warningText.isEmpty ? nil : presentation.warningText
+        activeLoopsWarningLabel.isHidden = presentation.warningText.isEmpty
         activeLoopsTableView.reloadData()
         autoSizeActiveLoopsColumnsIfNeeded()
         restoreLoopSelection(preferredIdentifier: nil)

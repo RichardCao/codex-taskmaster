@@ -1492,6 +1492,38 @@ func mergeLoopSnapshots(previous: [LoopSnapshot], incoming: [LoopSnapshot]) -> [
     }
 }
 
+struct LoopSnapshotPresentation {
+    let mergedSnapshots: [LoopSnapshot]
+    let warnings: [String]
+    let warningText: String
+    let metaText: String
+}
+
+func loopSnapshotPresentation(
+    previous: [LoopSnapshot],
+    incoming: [LoopSnapshot],
+    warnings: [String],
+    failureMessage: String? = nil
+) -> LoopSnapshotPresentation {
+    let warningText = warnings
+        .joined(separator: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let metaText: String
+    if let failureMessage,
+       !failureMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        metaText = failureMessage
+    } else {
+        metaText = incoming.isEmpty ? "循环: 0" : "循环: \(incoming.count)"
+    }
+
+    return LoopSnapshotPresentation(
+        mergedSnapshots: mergeLoopSnapshots(previous: previous, incoming: incoming),
+        warnings: warnings,
+        warningText: warningText,
+        metaText: metaText
+    )
+}
+
 func optimisticLoopSnapshot(
     target: String,
     interval: String?,
