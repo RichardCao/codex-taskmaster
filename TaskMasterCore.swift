@@ -541,6 +541,49 @@ func sessionScanCompletionPlan(
     )
 }
 
+enum SessionScanBatchOutcome {
+    case success
+    case failure
+}
+
+struct SessionScanBatchPlan {
+    let outcome: SessionScanBatchOutcome
+    let scannedCount: Int
+    let mergedSnapshots: [SessionSnapshot]
+    let failureDetail: String
+    let progressStatusText: String?
+}
+
+func sessionScanBatchPlan(
+    existingSnapshots: [SessionSnapshot],
+    batchResult: Result<[SessionSnapshot], SessionScanService.Failure>,
+    offset: Int,
+    batchSize: Int,
+    totalCount: Int
+) -> SessionScanBatchPlan {
+    switch batchResult {
+    case let .failure(error):
+        return SessionScanBatchPlan(
+            outcome: .failure,
+            scannedCount: min(totalCount, offset),
+            mergedSnapshots: existingSnapshots,
+            failureDetail: error.detail,
+            progressStatusText: nil
+        )
+    case let .success(batchSnapshots):
+        let scannedCount = min(totalCount, offset + batchSize)
+        return SessionScanBatchPlan(
+            outcome: .success,
+            scannedCount: scannedCount,
+            mergedSnapshots: mergeSessionSnapshots(existing: existingSnapshots, newSnapshots: batchSnapshots),
+            failureDetail: "",
+            progressStatusText: scannedCount < totalCount
+                ? sessionScanProgressStatusText(scannedCount: scannedCount, totalCount: totalCount)
+                : nil
+        )
+    }
+}
+
 final class LoopCommandService {
     private let helperService: HelperCommandService
 

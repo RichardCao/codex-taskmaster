@@ -5578,26 +5578,29 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                     return
                 }
 
-                guard case let .success(batchSnapshots) = batchResult else {
+                let batchPlan = sessionScanBatchPlan(
+                    existingSnapshots: pendingSnapshots,
+                    batchResult: batchResult,
+                    offset: offset,
+                    batchSize: batchSize,
+                    totalCount: totalCount
+                )
+
+                guard batchPlan.outcome == .success else {
                     encounteredFailure = true
-                    switch batchResult {
-                    case let .failure(error):
-                        failureDetail = error.detail
-                    case .success:
-                        failureDetail = ""
-                    }
+                    failureDetail = batchPlan.failureDetail
                     break
                 }
 
-                scannedCount = min(totalCount, offset + batchSize)
-                pendingSnapshots = mergeSessionSnapshots(existing: pendingSnapshots, newSnapshots: batchSnapshots)
+                scannedCount = batchPlan.scannedCount
+                pendingSnapshots = batchPlan.mergedSnapshots
 
                 DispatchQueue.main.async {
                     guard self.isCurrentSessionScan(generation) else { return }
                     self.allSessionSnapshots = pendingSnapshots
                     self.renderSessionSnapshots(scannedCount: scannedCount, totalCount: totalCount, isComplete: scannedCount >= totalCount)
-                    if scannedCount < totalCount {
-                        self.setStatus(sessionScanProgressStatusText(scannedCount: scannedCount, totalCount: totalCount), key: "scan")
+                    if let progressStatusText = batchPlan.progressStatusText {
+                        self.setStatus(progressStatusText, key: "scan")
                     }
                 }
 
