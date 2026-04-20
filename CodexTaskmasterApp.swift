@@ -5128,33 +5128,28 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         }
     }
 
-    private func isAmbiguousTargetError(_ detail: String) -> Bool {
-        detail.contains("found multiple matching sessions for target") ||
-        detail.contains("found multiple matching thread titles for target") ||
-        detail.contains("found multiple matching Terminal ttys for target")
-    }
-
     private func handleUniqueTargetValidationResult(_ result: HelperCommandResult, target: String, actionName: String) -> Bool {
-        lastTargetValidationFailureReason = nil
-        lastTargetValidationFailureDetail = ""
-        guard result.status == 0 else {
-            let detail = result.primaryDetail ?? ""
-            if isAmbiguousTargetError(detail) {
-                lastTargetValidationFailureReason = "ambiguous_target"
-                lastTargetValidationFailureDetail = detail
-                showAmbiguousTargetAlert(target: target, detail: detail, actionName: actionName, throttled: false)
-                appendOutput("已阻止\(actionName)：目标 \(target) 匹配到多个 Session。")
-                setStatus("目标不唯一", key: "general", color: .systemRed)
-                return false
-            }
-            lastTargetValidationFailureReason = "start_failed"
-            lastTargetValidationFailureDetail = detail
-            appendOutput("stderr: \(detail)")
-            setStatus("\(actionName)前校验失败", key: "general", color: .systemRed)
-            NSSound.beep()
-            return false
+        let plan = uniqueTargetValidationPlan(result: result, target: target, actionName: actionName)
+        lastTargetValidationFailureReason = plan.failureReason
+        lastTargetValidationFailureDetail = plan.failureDetail
+        guard !plan.isValid else {
+            return true
         }
-        return true
+        if plan.shouldShowAmbiguousAlert {
+            showAmbiguousTargetAlert(target: target, detail: plan.failureDetail, actionName: actionName, throttled: false)
+        }
+        if let blockedLogText = plan.blockedLogText {
+            appendOutput(blockedLogText)
+        } else if !plan.failureDetail.isEmpty {
+            appendOutput("stderr: \(plan.failureDetail)")
+        }
+        if let statusText = plan.statusText {
+            setStatus(statusText, key: "general", color: .systemRed)
+        }
+        if plan.shouldBeep {
+            NSSound.beep()
+        }
+        return false
     }
 
     private func validateUniqueTargetAsync(target: String, actionName: String, completion: @escaping (Bool) -> Void) {

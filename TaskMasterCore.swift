@@ -2055,6 +2055,57 @@ struct SendPreflightDecision {
     let shouldClearResidualInput: Bool
 }
 
+struct UniqueTargetValidationPlan {
+    let isValid: Bool
+    let failureReason: String?
+    let failureDetail: String
+    let shouldShowAmbiguousAlert: Bool
+    let shouldBeep: Bool
+    let blockedLogText: String?
+    let statusText: String?
+}
+
+func uniqueTargetValidationPlan(
+    result: HelperCommandResult,
+    target: String,
+    actionName: String
+) -> UniqueTargetValidationPlan {
+    guard result.status != 0 else {
+        return UniqueTargetValidationPlan(
+            isValid: true,
+            failureReason: nil,
+            failureDetail: "",
+            shouldShowAmbiguousAlert: false,
+            shouldBeep: false,
+            blockedLogText: nil,
+            statusText: nil
+        )
+    }
+
+    let detail = result.primaryDetail ?? ""
+    if isAmbiguousTargetDetail(detail) {
+        return UniqueTargetValidationPlan(
+            isValid: false,
+            failureReason: "ambiguous_target",
+            failureDetail: detail,
+            shouldShowAmbiguousAlert: true,
+            shouldBeep: false,
+            blockedLogText: "已阻止\(actionName)：目标 \(target) 匹配到多个 Session。",
+            statusText: "目标不唯一"
+        )
+    }
+
+    return UniqueTargetValidationPlan(
+        isValid: false,
+        failureReason: "start_failed",
+        failureDetail: detail,
+        shouldShowAmbiguousAlert: false,
+        shouldBeep: true,
+        blockedLogText: nil,
+        statusText: "\(actionName)前校验失败"
+    )
+}
+
 func evaluateSendPreflight(forceSend: Bool, tty: String, probeStatus: String, terminalState: String, detail: String) -> SendPreflightDecision {
     let normalizedTTY = tty.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !normalizedTTY.isEmpty else {
