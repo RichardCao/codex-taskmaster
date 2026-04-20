@@ -2337,14 +2337,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         saveCurrentLoopAsStoppedAsync(target: target, interval: interval, reason: reason)
     }
 
-    private func helperDisplayArguments(base: [String], forceSend: Bool) -> [String] {
-        var arguments = base
-        if forceSend {
-            arguments.append("-f")
-        }
-        return arguments
-    }
-
     private func currentLoopMessageOptions() -> (message: String, forceSend: Bool) {
         (currentMessage(), isForceSendEnabled())
     }
@@ -5093,10 +5085,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         return false
     }
 
-    private func helperPermissionIssueDetail(_ detail: String) -> String? {
-        taskMasterHelperPermissionIssueDetail(detail)
-    }
-
     @discardableResult
     private func saveStoppedLoopEntry(target: String, interval: String, message: String, forceSend: Bool, reason: String) -> Bool {
         if loopSnapshots.contains(where: { $0.target == target && !$0.isStopped }) {
@@ -5233,25 +5221,6 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             buttonTitles: buttonTitles,
             destructiveFirstButton: destructiveFirstButton
         )
-    }
-
-    private func optimisticMarkLoopRunning(target: String, interval: String?, message: String?, forceSend: Bool?) {
-        let updatedSnapshot = optimisticLoopSnapshot(
-            target: target,
-            interval: interval,
-            message: message,
-            forceSend: forceSend,
-            existingSnapshots: loopSnapshots
-        )
-        loopSnapshots = applyingOptimisticLoopSnapshot(updatedSnapshot, to: loopSnapshots)
-
-        applyLoopSorting()
-        activeLoopsMetaLabel.stringValue = loopSnapshots.isEmpty ? "循环: 0" : "循环: \(loopSnapshots.count)"
-        activeLoopsTableView.reloadData()
-        autoSizeActiveLoopsColumnsIfNeeded()
-        restoreLoopSelection(preferredIdentifier: updatedSnapshot.loopID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "target:\(target)" : loopSelectionIdentifier(updatedSnapshot))
-        refreshTableWrapping(activeLoopsTableView)
-        updateLoopActionButtons()
     }
 
     private func scheduleLoopSnapshotRefresh(after delay: TimeInterval = 0) {
@@ -5400,7 +5369,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
         setButtonsEnabled(false)
         setStatus("开始循环执行中…", key: "action")
 
-        let displayArguments = helperDisplayArguments(
+        let displayArguments = taskMasterHelperDisplayArguments(
             base: ["start", "-t", target, "-i", interval, "-m", message],
             forceSend: forceSend
         )
@@ -5729,7 +5698,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
             self.setButtonsEnabled(true)
         } onValid: {
             let options = self.currentLoopMessageOptions()
-            let displayArguments = self.helperDisplayArguments(
+            let displayArguments = taskMasterHelperDisplayArguments(
                 base: ["send", "-t", target, "-m", options.message],
                 forceSend: options.forceSend
             )
@@ -5798,7 +5767,7 @@ final class MainViewController: NSViewController, NSTableViewDataSource, NSTable
                 )
                 return
             }
-            let displayArguments = self.helperDisplayArguments(
+            let displayArguments = taskMasterHelperDisplayArguments(
                 base: ["start", "-t", target, "-i", interval, "-m", options.message],
                 forceSend: options.forceSend
             )

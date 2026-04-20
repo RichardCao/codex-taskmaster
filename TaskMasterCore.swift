@@ -1256,6 +1256,14 @@ func taskMasterHelperArgumentHasFlag(_ flag: String, in arguments: [String]) -> 
     arguments.contains(flag)
 }
 
+func taskMasterHelperDisplayArguments(base: [String], forceSend: Bool) -> [String] {
+    var arguments = base
+    if forceSend {
+        arguments.append("-f")
+    }
+    return arguments
+}
+
 func sessionTypeLabel(_ session: SessionSnapshot) -> String {
     let source = session.source.trimmingCharacters(in: .whitespacesAndNewlines)
     if source == "cli" {
