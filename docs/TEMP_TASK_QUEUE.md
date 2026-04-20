@@ -57,10 +57,10 @@
 14. `done` loop worker 与 stop/delete 竞态修复
    目标：避免用户已停止或删除 loop 后，在途 worker 仍把状态写回并“复活” loop。
 
-15. `in_progress` failed start orphan loop 清理
+15. `done` failed start orphan loop 清理
    目标：避免 `start` 失败后同时留下 stopped history 和一条假活跃 orphan loop。
 
-16. `pending` `loop-resume -k LOOP_ID` 修复
+16. `in_progress` `loop-resume -k LOOP_ID` 修复
    目标：恢复时优先使用 loop 文件内的 target，而不是错误解析空 target。
 
 17. `pending` app 退出是否默认 stop all 语义收口

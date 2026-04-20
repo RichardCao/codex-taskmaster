@@ -3523,7 +3523,6 @@ start_loop() {
 
   key="$(hash_target "$target")"
   paths_for_target "$key"
-  write_loop_definition "$key" "$target" "$interval" "$message" "$force_send"
 
   if ! start_detail="$(resolve_live_thread_id "$target" 2>&1)"; then
     failure_reason="$(classify_loop_reason "$start_detail")"

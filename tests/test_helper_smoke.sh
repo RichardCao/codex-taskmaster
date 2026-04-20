@@ -942,6 +942,51 @@ assert_contains "$start_failed_loop_status" "stopped_reason: tty_unavailable"
 assert_contains "$start_failed_loop_status" "interval_seconds: 45"
 assert_contains "$start_failed_loop_status" "message: start-failure"
 
+start_failure_target="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+start_failure_hash="$(printf '%s' "$start_failure_target" | shasum -a 256 | awk '{print $1}')"
+rm -f "${STATE_DIR}/loops/${start_failure_hash}.loop" "${STATE_DIR}/runtime/user-loop-state/${start_failure_hash}.state" "${STATE_DIR}/runtime/loop-logs/${start_failure_hash}.log"
+set +e
+failed_start_output="$(
+  CODEX_TASKMASTER_TTY_PS_FIXTURE="$TTY_EMPTY_FIXTURE" \
+  CODEX_TASKMASTER_TTY_PROCESS_FIXTURE="$TTY_EMPTY_FIXTURE" \
+  CODEX_TASKMASTER_TTY_CWD_FIXTURE="$TTY_EMPTY_FIXTURE" \
+  "$HELPER" start -t "$start_failure_target" -i 33 -m failed-live-start 2>&1
+)"
+failed_start_status=$?
+set -e
+[[ "$failed_start_status" -ne 0 ]]
+assert_contains "$failed_start_output" "could not find a running"
+[[ ! -f "${STATE_DIR}/loops/${start_failure_hash}.loop" ]] || {
+  printf 'assertion failed: failed start left hash-target loop file behind: %s\n' "${STATE_DIR}/loops/${start_failure_hash}.loop" >&2
+  exit 1
+}
+failed_start_loop_count="$(
+  python3 - "${STATE_DIR}/loops" "$start_failure_target" <<'PY'
+import pathlib
+import sys
+
+loop_dir = pathlib.Path(sys.argv[1])
+target = sys.argv[2]
+count = 0
+for path in loop_dir.glob("*.loop"):
+    values = {}
+    for raw_line in path.read_text().splitlines():
+        if "=" not in raw_line:
+            continue
+        key, value = raw_line.split("=", 1)
+        values[key] = value
+    if values.get("TARGET") == target:
+        count += 1
+print(count)
+PY
+)"
+assert_equals "$failed_start_loop_count" "1"
+failed_start_loop_status="$("$HELPER" status -t "$start_failure_target")"
+assert_contains "$failed_start_loop_status" "stopped: yes"
+assert_contains "$failed_start_loop_status" "stopped_reason: tty_unavailable"
+assert_contains "$failed_start_loop_status" "interval_seconds: 33"
+assert_contains "$failed_start_loop_status" "message: failed-live-start"
+
 "$HELPER" loop-save-stopped -t duplicate -i 50 -m duplicate-message -r stopped_by_user >/dev/null
 set +e
 duplicate_resume_output="$(
@@ -956,6 +1001,7 @@ assert_contains "$duplicate_resume_output" "found multiple matching Terminal tty
 delete_loop_output="$("$HELPER" loop-delete -t alpha)"
 assert_contains "$delete_loop_output" "deleted loop for target=alpha"
 "$HELPER" loop-delete -k "$start_failed_loop_id" >/dev/null
+"$HELPER" loop-delete -t "$start_failure_target" >/dev/null
 "$HELPER" loop-delete -t duplicate >/dev/null
 "$HELPER" loop-delete -t "$mutex_a" >/dev/null 2>&1 || true
 "$HELPER" loop-delete -t "$mutex_b" >/dev/null 2>&1 || true
